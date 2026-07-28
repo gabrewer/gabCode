@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GabCode.Windows/GabCode.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GabCode.Windows.Tests/GabCode.Windows.Tests.csproj" />
+  </Folder>
+</Solution>
