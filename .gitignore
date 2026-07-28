@@ -1,1 +1,9 @@
 .pi/tmp/
+
+# .NET and Visual Studio generated output
+bin/
+obj/
+.vs/
+TestResults/
+*.suo
+*.user
