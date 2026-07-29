@@ -7,3 +7,9 @@ obj/
 TestResults/
 *.suo
 *.user
+
+# macOS and Xcode generated state
+.DS_Store
+DerivedData/
+xcuserdata/
+*.xcuserstate
