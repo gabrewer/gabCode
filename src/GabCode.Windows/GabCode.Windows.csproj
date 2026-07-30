@@ -11,6 +11,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="GabCode.Windows.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="Microsoft.Terminal.Wpf">
       <HintPath>$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Wpf.dll</HintPath>
       <Private>true</Private>
