@@ -1,0 +1,38 @@
+{
+  "upstream": "https://github.com/microsoft/terminal",
+  "tag": "v1.24.11911.0",
+  "commit": "5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc",
+  "license": "MIT",
+  "configuration": "Release",
+  "platform": "x64",
+  "windowsSdk": "10.0.22621.0",
+  "platformToolset": "v143",
+  "provenanceFiles": [
+    {
+      "file": "LICENSE",
+      "path": "LICENSE",
+      "bytes": 1116,
+      "sha256": "5D177F23ECFEB0EA8E050B6A5A16355E1AE9A0B286436CA8F83ED08B3795BE6B"
+    },
+    {
+      "file": "NOTICE.md",
+      "path": "NOTICE.md",
+      "bytes": 23176,
+      "sha256": "E7FBAADEE6AB20C28B87730A510EE5F5815D8FB4BD88D1D54D282DC2A74C0726"
+    }
+  ],
+  "assets": [
+    {
+      "file": "Microsoft.Terminal.Wpf.dll",
+      "path": "win-x64/Microsoft.Terminal.Wpf.dll",
+      "bytes": 23552,
+      "sha256": "5B74201D3D8EEBB0D2FC3ABC35A1AB08EACFCA4203FBCFD4D1F5727F43EB386B"
+    },
+    {
+      "file": "Microsoft.Terminal.Control.dll",
+      "path": "win-x64/Microsoft.Terminal.Control.dll",
+      "bytes": 1653760,
+      "sha256": "1F56A0A3B903BEAB561E7BFBC22CA66221668D801215A969B1A76094ACC30CB5"
+    }
+  ]
+}
