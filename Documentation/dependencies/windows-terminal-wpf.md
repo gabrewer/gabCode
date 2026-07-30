@@ -1,8 +1,10 @@
 # Windows Terminal WPF dependency gate
 
-## Verdict: **BLOCKED — do not integrate as-is**
+## Verdict: **GO — approved for Windows x64 integration with accepted limitations**
 
-The exact Microsoft Windows Terminal WPF control source can be acquired and built on the target Windows machine, and its host renders and retains a live terminal HWND. It **does not yet qualify** for gabCode's terminal-foundation PRD because the pinned WPF surface has no demonstrated keyboard-only route out of terminal focus, exposes neither search nor hyperlink actions through its public WPF/C ABI, and does not close its assigned terminal connection when the control is replaced or destroyed. These are required primary workflow and lifecycle capabilities, not optional polish.
+The exact Microsoft Windows Terminal WPF control source can be acquired and built on the target Windows machine, and its host renders and retains a live terminal HWND. The dependency is approved for gabCode's Windows terminal foundation.
+
+The product explicitly accepts that the pinned WPF surface has no demonstrated keyboard-only route out of terminal focus, exposes neither search nor hyperlink actions through its public WPF/C ABI, and does not close an assigned terminal connection when the control is replaced or destroyed. These observations remain documented integration facts, but they do not block adoption and do not require an upstream patch or future product work unless a later human decision reintroduces those requirements.
 
 No gabCode product code, tests, upstream source, generated package, or binary was changed for this gate. macOS is **NOT CHECKED**; this is a Windows-only evaluation.
 
@@ -16,7 +18,7 @@ No gabCode product code, tests, upstream source, generated package, or binary wa
 | Release | [Windows Terminal v1.24.11911.0](https://github.com/microsoft/terminal/releases/tag/v1.24.11911.0), published 2026-07-16; non-draft, non-prerelease |
 | Primary license | MIT (`LICENSE`) |
 | Notice obligation | Ship the upstream `NOTICE.md` with any redistribution and review its third-party notices; it contains MIT, BSD-style, Apache-style, public-domain, CC-BY-SA test-spec, and other notices. |
-| Upgrade boundary | Any update is a new pinned tag/commit and must repeat this acquisition, clean build, output/dependency inventory, licensing, runtime, accessibility, and focus qualification. No floating branch, unofficial NuGet package, source retarget, or pinned-source patch is approved. |
+| Upgrade boundary | Any update is a new pinned tag/commit and must repeat acquisition, clean build, output/dependency inventory, licensing, core runtime/input, and live-view movement checks. Accepted focus, search, hyperlink, and dedicated accessibility limitations remain non-blocking unless a later human decision changes the product requirements. No floating branch, unofficial NuGet package, source retarget, or pinned-source patch is approved. |
 
 The WPF wrapper build has `Microsoft.Terminal.Wpf` product version `0.1+5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc`; it is an unsigned local development output, not a signed Microsoft redistribution artifact.
 
@@ -30,7 +32,7 @@ The WPF wrapper build has `Microsoft.Terminal.Wpf` product version `0.1+5a830b2b
 - MSVC `v143` `14.44.35207`, including both:
   - `Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64`
   - `Microsoft.VisualStudio.ComponentGroup.UWP.VC.v143`
-- .NET SDK capable of restoring the upstream SDK-style WPF projects; the generated host requires an installed `Microsoft.NETCore.App` and `Microsoft.WindowsDesktop.App` 8.x runtime (8.0.28 and 8.0.29 were present during validation).
+- .NET SDK `10.0.400-preview.0.26322.102` selected for the clean upstream SDK-style restores; the generated host requires an installed `Microsoft.NETCore.App` and `Microsoft.WindowsDesktop.App` 8.x runtime (8.0.28 and 8.0.29 were present during validation).
 
 Verify the Visual Studio prerequisites before building:
 
@@ -83,13 +85,9 @@ The following files came from the validated host output at `src\cascadia\WpfTerm
 
 The upstream `WpfTerminalControl.csproj` pack target expects native `Microsoft.Terminal.Control.dll` outputs for `Win32`, `x64`, and `ARM64`. An x64-only build cannot produce that package: `dotnet pack` correctly fails because the Win32 and ARM64 output paths are absent.
 
-No final artifact strategy is selected. If the capability blockers are resolved, a separate approved decision must select and validate one of these approaches:
+For the initial Windows x64 integration, gabCode will use an explicit x64 runtime-asset layout built from the pinned source rather than the upstream multi-architecture pack target. The integration sprint must establish how those versioned assets are produced and consumed before adding the application reference.
 
-1. build and validate all three upstream native architectures, then use the upstream package layout;
-2. have gabCode own an x64-only build/publish asset pipeline containing the wrapper, x64 native control, and required notices; or
-3. adopt another explicitly approved dependency.
-
-Any selected strategy must preserve the pinned source/build provenance, include `LICENSE` and `NOTICE.md`, inventory shipped assets, meet the .NET desktop-runtime policy, and be validated before packaging/signing work. Do not rely on an unofficial repackaged control.
+The chosen implementation must preserve pinned source/build provenance, include `LICENSE` and `NOTICE.md`, inventory shipped assets, meet the .NET desktop-runtime policy, and remain reproducible before packaging/signing work. Do not rely on an unofficial repackaged control. Building Win32 and ARM64 outputs or using the upstream multi-architecture package remains optional future work, not an integration prerequisite.
 
 ## WPF and future ConPTY boundary
 
@@ -109,7 +107,7 @@ A future **gabCode-owned Windows-only** ConPTY adapter may implement `ITerminalC
 | Capability | Result | Evidence / limitation |
 | --- | --- | --- |
 | Launch and native-host cleanup | PASS | The upstream .NET 8 WPF host launched, closed with exit code 0, and had zero remaining `WpfTerminalTestNetCore` processes. Its echo connection starts no child process, so this result is intentionally limited to the sample process and native HWND/resources. |
-| `ITerminalConnection` / child-process cleanup | **NOT CHECKED / BLOCKING** | The sample uses an echo-only connection whose `Close()` is a no-op. The wrapper invokes neither the old connection's `Close()` on replacement nor the active connection's `Close()` from `DestroyWindowCore`; no real ConPTY or descendant process was exercised. |
+| `ITerminalConnection` / child-process cleanup | **ACCEPTED OWNERSHIP BOUNDARY** | The sample uses an echo-only connection whose `Close()` is a no-op. The wrapper invokes neither the old connection's `Close()` on replacement nor the active connection's `Close()` from `DestroyWindowCore`. This is accepted: gabCode owns and closes the ConPTY adapter and processes that gabCode creates. |
 | ANSI and Unicode rendering | PASS | Injected `ANSI_RED` and `Unicode probe: Ω 漢字`; both appeared through `TextPattern`. Captured `wtf-001-ansi-unicode-probe.png`. |
 | Resize and text retention | PASS | Terminal rect grew `767×411` → `967×611` then shrank to `587×341`; the Unicode marker remained after both resizes. |
 | Scrollback | PASS (bounded) | First and last of 60 injected lines remained in `TextPattern`. Pinned `HwndTerminal.cpp` creates the terminal with 9,001 scrollback lines; `Terminal::Create` allocates viewport height plus that finite history. The WPF surface exposes no setting to change this bound. |
@@ -117,21 +115,25 @@ A future **gabCode-owned Windows-only** ConPTY adapter may implement `ITerminalC
 | UI Automation provider | PASS | Native `WPFTermControl` exposed as focusable `Text Area` (`ControlType.Text`) with `TextPattern` and terminal text. This is UIA-client evidence, not Narrator validation. |
 | Live view movement | PASS | A temporary untracked WPF harness moved one `TerminalControl` between two `ContentControl`s. The same managed object and native HWND (`3347802`) remained; `Start()` was called once and the retained marker remained visible. |
 | Keyboard entry | PASS | The terminal native HWND had keyboard focus at host launch and accepted injected characters. |
-| Keyboard focus escape | **FAIL / BLOCKING** | From the focused terminal in the movement harness, `Tab` did not focus the sibling `Escape target` button (`FocusAfterTab: null`, `EscapeTargetFocusedAfterTab: false`). The wrapper forwards `WM_KEYDOWN` and `WM_SYSKEYDOWN` to the terminal; no WPF public escape mechanism was found. |
-| Search | **UNSUPPORTED by pinned WPF public surface** | The upstream WinUI terminal source contains search, but `Microsoft.Terminal.Wpf` exposes no search member and the native C exports expose no search operation. No WPF search workflow can be claimed. |
-| Hyperlinks | **UNSUPPORTED by pinned WPF public surface** | The upstream WinUI control contains hyperlink handling, but the pinned WPF wrapper/C exports expose no hyperlink event, retrieval, or activation API. No WPF hyperlink workflow can be claimed. |
-| Narrator | NOT CHECKED | UIA tree is present, but Narrator was not running; a UIA client is not equivalent to screen-reader completion. |
-| IME | NOT CHECKED | The source contains TSF-specific handling, but no IME target-machine scenario was run. |
-| High contrast, text scaling, reduced motion | NOT CHECKED | Validation machine reported high contrast off and client/menu animation on; no setting-transition or scaled-render scenario was run. |
+| Keyboard focus escape | **ACCEPTED LIMITATION** | From the focused terminal in the movement harness, `Tab` did not focus the sibling `Escape target` button (`FocusAfterTab: null`, `EscapeTargetFocusedAfterTab: false`). The wrapper forwards `WM_KEYDOWN` and `WM_SYSKEYDOWN` to the terminal; no WPF public escape mechanism was found. Keyboard-only focus escape is not required for the initial product. |
+| Search | **UNSUPPORTED / ACCEPTED LIMITATION** | The upstream WinUI terminal source contains search, but `Microsoft.Terminal.Wpf` exposes no search member and the native C exports expose no search operation. gabCode will not provide terminal search unless a future product decision adds it. |
+| Hyperlinks | **UNSUPPORTED / ACCEPTED LIMITATION** | The upstream WinUI control contains hyperlink handling, but the pinned WPF wrapper/C exports expose no hyperlink event, retrieval, or activation API. gabCode will not provide terminal hyperlink activation unless a future product decision adds it. |
+| Narrator | **NOT CHECKED / ACCEPTED LIMITATION** | UIA tree is present, but Narrator was not running; a UIA client is not equivalent to screen-reader completion. Dedicated Narrator qualification of terminal content is not required. |
+| IME | **NOT CHECKED / ACCEPTED LIMITATION** | The source contains TSF-specific handling, but no IME target-machine scenario was run. Dedicated IME qualification is not required. |
+| High contrast, text scaling, reduced motion | **NOT CHECKED / ACCEPTED LIMITATION** | Validation machine reported high contrast off and client/menu animation on; no setting-transition or scaled-render scenario was run. Dedicated qualification of the upstream terminal surface is not required. |
 
 The screenshot and probe JSON are local untracked evidence under `.pi/tmp/`; they are not shipped artifacts.
 
-## Required human decision before integration
+## Approval and integration boundary
 
-Choose one path explicitly; until then, no gabCode terminal implementation may use this control:
+The human product owner approved this dependency after reviewing the gate evidence. Integration may proceed with these accepted limitations:
 
-1. **Preserve the current PRD:** treat this result as a no-go for the pinned WPF control and approve investigation/selection of a dependency that demonstrably supports keyboard exit, search, and hyperlink behavior.
-2. **Revise the PRD and authorize a follow-up spike:** specify an acceptable, accessible keyboard-exit design and the intended search/hyperlink behavior, then prove a gabCode-owned bridge can meet it without patching or retargeting the pinned source. That follow-up must re-run target-Windows keyboard, UIA/Narrator, and lifecycle evidence before integration.
-3. **Explicitly relax those requirements:** amend the PRD with the user-facing deviation and acceptance impact. This is not recommended because keyboard-only terminal exit is a primary accessibility requirement.
+- no required keyboard-only focus escape from terminal content;
+- no terminal search;
+- no terminal hyperlink activation;
+- no dedicated Narrator, IME, high-contrast, text-scaling, or reduced-motion qualification of the upstream terminal content surface;
+- no expectation that the upstream wrapper automatically closes gabCode's connection or child processes.
 
-The validated build, license, UIA exposure, selection/clipboard, resize, and same-HWND movement evidence are encouraging, but they do not override the failed keyboard-focus and unavailable public search/hyperlink gates.
+GabCode still owns ordinary lifecycle for resources that gabCode creates: the ConPTY adapter, shell processes, output readers, cancellation, and descendant cleanup. This responsibility does not require modifying the upstream control. Integration must use the exact pin and approved x64 asset strategy, preserve license/notice material, retain the same live terminal view during layout movement, and avoid unofficial packages or silent upstream patches.
+
+**Final dependency verdict: GO — approved for Windows x64 integration with accepted limitations.**

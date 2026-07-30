@@ -30,7 +30,7 @@ Visual Studio is optional for this command-line workflow.
 
 ### Windows Terminal WPF dependency
 
-The pinned Windows Terminal WPF control is evaluated separately from the current app bootstrap. Its current dependency gate is **BLOCKED**: the upstream x64 Release build is reproducible with the v143 desktop and UWP C++ tools plus Windows SDK 10.0.22621.0, but keyboard focus escape and public WPF search/hyperlink support are not qualified. Do not add an unofficial terminal-control package or integrate the control until the [dependency record](Documentation/dependencies/windows-terminal-wpf.md) records a human decision.
+The pinned Windows Terminal WPF control is evaluated separately from the current app bootstrap. Its dependency gate is **GO for Windows x64 integration with accepted limitations**. The upstream x64 Release build is reproducible with the v143 desktop and UWP C++ tools plus Windows SDK 10.0.22621.0. See the [dependency record](Documentation/dependencies/windows-terminal-wpf.md) for the exact source pin, build prerequisites, accepted limitations, and integration boundary; do not substitute an unofficial package.
 
 ## macOS development
 
