@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Status | Initial baseline |
-| Version | 0.1 |
-| Date | 2026-07-24 |
+| Version | 0.2 |
+| Date | 2026-07-30 |
 
 This document defines gabCode's initial product boundary and direction. It should evolve when foundational product decisions change. Substantial new capabilities should receive focused PRDs under `Documentation/design` rather than turning this document into an exhaustive specification.
 
@@ -196,7 +196,9 @@ Intended direction:
 - Resolve the user's effective Windows Terminal default profile when practical.
 - Override the profile's starting directory with the selected worktree.
 
-The terminal dependency should be built and versioned by gabCode rather than relying on an unofficial third-party package.
+The terminal dependency should be built and versioned by gabCode rather than relying on an unofficial third-party package. Windows Terminal WPF tag `v1.24.11911.0` is approved for Windows x64 integration under `Documentation/dependencies/windows-terminal-wpf.md`.
+
+For the initial Windows product, keyboard-only focus escape from terminal content, terminal search, hyperlink activation, and dedicated Narrator, IME, high-contrast, text-scaling, or reduced-motion qualification of the upstream terminal surface are not requirements. GabCode still owns the ConPTY adapter and every shell/process resource that gabCode creates; automatic connection shutdown by the upstream wrapper is not expected.
 
 ### macOS Terminal Implementation
 
@@ -221,7 +223,7 @@ Intended direction:
 - Preserving terminal processes while reparenting their views.
 - Running many worktree terminal pairs without unbounded memory use.
 - Resolving Windows Terminal profiles, including dynamic profiles and unusual shells.
-- Unicode, ANSI/VT, IME, clipboard, search, hyperlink, resize, and accessibility behavior.
+- Unicode, ANSI/VT, clipboard, resize, and native terminal hosting behavior. The approved Windows control's focus-escape, search, hyperlink, and dedicated terminal-accessibility limitations are accepted rather than release risks.
 - Reliable process-tree shutdown on Windows and macOS.
 - NativeAOT trimming and serialization constraints in the shared core.
 - Windows signing and macOS signing/notarization.
@@ -238,9 +240,9 @@ Deliver production-foundation prototypes on both platforms:
 - Several worktrees with terminal pairs alive simultaneously.
 - Pi moving between the main and bottom areas without process restart.
 - Default Windows Terminal profile and macOS login-shell startup.
-- Unicode, ANSI color, selection, clipboard, hyperlinks, search, resize, and bounded scrollback validation.
+- Unicode, ANSI color, selection, clipboard, resize, and bounded scrollback validation.
 - Mandatory exit warning and graceful process-tree shutdown.
-- Documented accessibility findings.
+- Recorded native-host and UI Automation evidence, with the approved Windows terminal-content limitations treated as non-blocking.
 
 ### Milestone 2: Projects and Worktree Navigation
 
@@ -277,4 +279,4 @@ Deliver:
 
 ## Open Questions
 
-- Do the intended native terminal components—Microsoft's Windows Terminal WPF control and SwiftTerm—meet gabCode's requirements for compatibility, process preservation, memory use, accessibility, and maintainability? Milestone 1 will answer this through implementation and validation.
+- Windows Terminal WPF `v1.24.11911.0` is approved for Windows x64 integration with the accepted limitations in `Documentation/dependencies/windows-terminal-wpf.md`. SwiftTerm's macOS suitability remains to be decided through the separate macOS dependency gate.
