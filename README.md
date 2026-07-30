@@ -28,6 +28,10 @@ dotnet run --project src/GabCode.Windows/GabCode.Windows.csproj
 
 Visual Studio is optional for this command-line workflow.
 
+### Windows Terminal WPF dependency
+
+The pinned Windows Terminal WPF control is evaluated separately from the current app bootstrap. Its current dependency gate is **BLOCKED**: the upstream x64 Release build is reproducible with the v143 desktop and UWP C++ tools plus Windows SDK 10.0.22621.0, but keyboard focus escape and public WPF search/hyperlink support are not qualified. Do not add an unofficial terminal-control package or integrate the control until the [dependency record](Documentation/dependencies/windows-terminal-wpf.md) records a human decision.
+
 ## macOS development
 
 The initial macOS client uses SwiftUI and Swift. Its baseline is an Apple Silicon Mac running macOS 26.0 or later with Xcode 26.6, the macOS 26.5 SDK, and Swift 6.3.3.
