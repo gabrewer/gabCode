@@ -21,6 +21,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\GabCode.Windows\GabCode.Windows.csproj" />
+    <Reference Include="Microsoft.Terminal.Wpf">
+      <HintPath>..\..\third_party\microsoft-terminal\v1.24.11911.0\win-x64\Microsoft.Terminal.Wpf.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>
