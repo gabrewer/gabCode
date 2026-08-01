@@ -87,8 +87,8 @@ public partial class MainWindow : Window
 
     private void CreateTerminalWorkspace()
     {
-        piTerminal = new TerminalSessionView(TerminalSessionKind.Pi, workingDirectory, profileResolver.Resolve);
-        commandsTerminal = new TerminalSessionView(TerminalSessionKind.Commands, workingDirectory, profileResolver.Resolve);
+        piTerminal = new TerminalSessionView(TerminalSessionKind.First, workingDirectory, profileResolver.Resolve);
+        commandsTerminal = new TerminalSessionView(TerminalSessionKind.Second, workingDirectory, profileResolver.Resolve);
         terminalLayout = new RetainedTerminalLayout(MainTerminalRegion, BottomTerminalRegion, piTerminal, commandsTerminal);
         ShowPiInMain();
     }

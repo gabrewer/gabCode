@@ -25,7 +25,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
             AutoResize = true,
             Focusable = true,
         };
-        AutomationProperties.SetName(Control, $"{kind} terminal content");
+        AutomationProperties.SetName(Control, $"{kind.GetDisplayName()} content");
         connection = new ConptyTerminalConnection(new TerminalProcessOptions(
             profile.ExecutablePath,
             profile.Arguments,
