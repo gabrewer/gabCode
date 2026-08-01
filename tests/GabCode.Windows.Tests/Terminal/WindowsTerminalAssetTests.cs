@@ -9,6 +9,7 @@ using System.Windows.Threading;
 
 namespace GabCode.Windows.Tests.Terminal;
 
+[Collection(WpfTestCollection.Name)]
 public sealed class WindowsTerminalAssetTests
 {
     private const string Upstream = "https://github.com/microsoft/terminal";

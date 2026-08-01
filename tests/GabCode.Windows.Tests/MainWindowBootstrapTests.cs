@@ -7,6 +7,7 @@ using GabCode.Windows;
 
 namespace GabCode.Windows.Tests;
 
+[Collection(GabCode.Windows.Tests.Terminal.WpfTestCollection.Name)]
 public sealed class MainWindowBootstrapTests
 {
     [Fact]
