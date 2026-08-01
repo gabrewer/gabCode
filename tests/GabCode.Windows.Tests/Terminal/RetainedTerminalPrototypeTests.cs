@@ -36,6 +36,25 @@ public sealed class RetainedTerminalPrototypeTests
             await WaitForStateAsync(commands, TerminalSessionState.Running);
             var piControl = Assert.IsAssignableFrom<FrameworkElement>(pi.TerminalControlInstance);
             var commandsControl = Assert.IsAssignableFrom<FrameworkElement>(commands.TerminalControlInstance);
+            var piState = Assert.IsType<TextBlock>(pi.FindName("SessionStateText"));
+            var commandsState = Assert.IsType<TextBlock>(commands.FindName("SessionStateText"));
+            var accessibleNames = new[]
+            {
+                AutomationProperties.GetName(pi),
+                AutomationProperties.GetName(commands),
+                AutomationProperties.GetName(piControl),
+                AutomationProperties.GetName(commandsControl),
+                AutomationProperties.GetName(piState),
+                AutomationProperties.GetName(commandsState),
+            };
+            Assert.All(accessibleNames, name =>
+            {
+                Assert.DoesNotContain("Pi", name, StringComparison.Ordinal);
+                Assert.DoesNotContain("Commands", name, StringComparison.Ordinal);
+            });
+            Assert.NotEqual(AutomationProperties.GetName(pi), AutomationProperties.GetName(commands));
+            Assert.NotEqual(AutomationProperties.GetName(piControl), AutomationProperties.GetName(commandsControl));
+            Assert.NotEqual(AutomationProperties.GetName(piState), AutomationProperties.GetName(commandsState));
             var piPid = Assert.IsType<int>(pi.ProcessId);
             var commandsPid = Assert.IsType<int>(commands.ProcessId);
             Assert.NotEqual(piPid, commandsPid);
@@ -112,7 +131,7 @@ public sealed class RetainedTerminalPrototypeTests
     {
         await RunOnStaAsync(async () =>
         {
-            var view = new TerminalSessionView(TerminalSessionKind.Pi, CreateTemporaryDirectory(), CreateCmdResolution);
+            var view = new TerminalSessionView(TerminalSessionKind.First, CreateTemporaryDirectory(), CreateCmdResolution);
             var window = new Window { Content = view };
             window.Show();
             await WaitForStateAsync(view, TerminalSessionState.Running);
@@ -142,7 +161,7 @@ public sealed class RetainedTerminalPrototypeTests
     {
         await RunOnStaAsync(async () =>
         {
-            var view = new TerminalSessionView(TerminalSessionKind.Pi, CreateTemporaryDirectory(), CreateCmdResolution);
+            var view = new TerminalSessionView(TerminalSessionKind.First, CreateTemporaryDirectory(), CreateCmdResolution);
             var window = new Window { Content = view };
             window.Show();
             await WaitForStateAsync(view, TerminalSessionState.Running);
@@ -183,12 +202,12 @@ public sealed class RetainedTerminalPrototypeTests
             var directory = CreateTemporaryDirectory();
             var attempts = 0;
             var pi = new TerminalSessionView(
-                TerminalSessionKind.Pi,
+                TerminalSessionKind.First,
                 directory,
                 () => Interlocked.Increment(ref attempts) == 1
                     ? new TerminalProfileResolution("Broken test shell", "missing-gabcode-shell.exe", string.Empty, new Dictionary<string, string?>(), false, "Broken test shell")
                     : CreateCmdResolution());
-            var commands = new TerminalSessionView(TerminalSessionKind.Commands, directory, CreateCmdResolution);
+            var commands = new TerminalSessionView(TerminalSessionKind.Second, directory, CreateCmdResolution);
             var window = new Window
             {
                 Content = new Grid

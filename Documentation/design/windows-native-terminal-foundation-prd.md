@@ -15,12 +15,9 @@ This is the Windows half of the native terminal foundation. It is independent of
 
 ## User Outcome
 
-A developer can open the Windows gabCode prototype, choose or receive a worktree directory for the terminal host, and use two independent terminals:
+A developer can open the Windows gabCode prototype, choose or receive a worktree directory for the terminal host, and use two independent, generic terminals. gabCode assigns neither terminal a Pi, build, test, Git, or other role; the developer may run any local command in either terminal.
 
-- **Pi** — an ordinary shell where the developer may run `pi` or `pi --resume`.
-- **Commands** — an ordinary shell where the developer runs builds, tests, Git, and other commands.
-
-The developer can switch which terminal occupies the main region and can move the Pi terminal between the main region and a bottom-panel host without restarting its shell or losing its visible session. gabCode labels the terminal regions, but never interprets terminal output or controls Pi’s session lifecycle.
+The developer can swap which retained terminal occupies the main and lower regions without restarting either shell or losing visible session state. gabCode never interprets terminal output or controls Pi’s session lifecycle.
 
 ## Product Boundary
 
@@ -29,8 +26,8 @@ The developer can switch which terminal occupies the main region and can move th
 - A WPF-native terminal foundation under `src/GabCode.Windows/`.
 - Two independently launched local terminal sessions rooted in one selected worktree directory.
 - A minimal native layout that demonstrates a main terminal region and a bottom terminal region.
-- Moving the existing Pi terminal view between those regions without restarting the process.
-- Retaining terminal sessions while switching between Pi and Commands views in this prototype.
+- Moving either existing terminal view between those regions without restarting the process.
+- Retaining both generic terminal sessions while swapping their regions in this prototype.
 - Windows Terminal profile discovery where practical, with a clear local fallback chain.
 - Windows Terminal WPF control acquisition, reproducible build, licensing, and redistribution evidence for the exact pinned source revision.
 - ConPTY-backed local process creation, input/output, resize, and cleanup behavior.
@@ -47,7 +44,7 @@ The developer can switch which terminal occupies the main region and can move th
 - Creating, removing, selecting, or navigating worktrees in gabCode. The foundation may use a controlled test worktree directory supplied by the host or test harness.
 - Reading, recording, parsing, summarizing, or otherwise interpreting terminal output.
 - Starting Pi automatically, sending Pi prompts, detecting Pi sessions, recording sessions, or invoking `pi --resume`.
-- Terminal tabs beyond the required Pi and Commands surfaces, terminal splitting, remote terminals, SSH, terminal collaboration, or persistence after application exit.
+- Terminal tabs beyond the required two generic surfaces, terminal splitting, remote terminals, SSH, terminal collaboration, or persistence after application exit.
 - Source editing, Git mutation, VS Code integration, PR/issue mutations, signing, distribution, or installer work.
 - A shared Windows/macOS terminal abstraction. Each platform owns its native terminal implementation.
 
@@ -69,29 +66,28 @@ The completed dependency gate is recorded in `Documentation/dependencies/windows
 
 The existing `gabCode` WPF application window remains the application shell. This increment introduces a terminal-foundation surface with:
 
-- A clearly named main terminal region.
-- A clearly named bottom terminal region.
-- Visible Pi and Commands selectors that identify which independent session is displayed in each region.
-- A user-visible terminal lifecycle state: starting, ready, failed, or closing.
+- Compact single-row chrome containing the app name, controlled working-directory path, and a generic **Swap terminals** action.
+- Main and lower terminal regions whose retained sessions exchange locations through that action.
+- Terminal-local profile and lifecycle state without assigning either terminal a purpose.
 - A non-terminal empty or failure surface that explains what failed and offers a safe retry when session creation has not succeeded.
 
 This is a foundation UI, not the final worktree navigator. It may use a controlled worktree path appropriate for target-machine verification until project/worktree navigation exists.
 
-### Pi and Commands behavior
+### Generic terminal behavior
 
 - Each terminal is an independent child process and independent terminal session.
 - Both receive the same selected working directory at creation.
 - Both receive the selected/default shell profile independently.
 - Commands entered in one terminal do not appear in or affect the other terminal.
 - The app does not reserve ordinary shell input for Pi-specific behavior.
-- The labels **Pi** and **Commands** describe intended use only; either terminal can run any local shell command.
+- Visible and accessibility labels use neutral terminal ordinals or region names only; they never prescribe what the user should run.
 
 ### Layout retention
 
-- The Pi terminal process has identity independent of the WPF region currently displaying it.
-- Moving Pi between the main region and bottom panel reparents or otherwise retains the same hosted terminal view/session; it must not create a replacement shell.
+- Each terminal process has identity independent of the WPF region currently displaying it.
+- Swapping the main and lower regions reparents or otherwise retains both hosted terminal views/sessions; it must not create a replacement shell.
 - Moving or selecting a terminal preserves its scrollback, cursor state, and active child process when the selected terminal control supports those states.
-- The Commands terminal remains available while Pi is shown in the main region, and vice versa.
+- Both sessions remain alive and available regardless of which one occupies the main region.
 - If retaining/reparenting a control is technically impossible without process restart, the sprint must stop and document the blocker rather than silently substitute a restart-based interaction.
 
 ### Shell and profile resolution
@@ -110,7 +106,7 @@ The terminal surface must state which fallback was used when profile resolution 
 ### Exit and cleanup
 
 - When the user requests application exit while one or more terminal processes are active, gabCode always presents a native confirmation dialog.
-- The dialog identifies how many active terminal processes will be stopped and explains that running Pi or shell work will be interrupted.
+- The dialog identifies how many active terminal processes will be stopped and explains that running shell work will be interrupted.
 - **Cancel** leaves all sessions running and restores focus predictably.
 - **Close and Stop Terminals** first requests graceful termination, waits for a bounded period, then terminates remaining terminal descendant process trees.
 - Cleanup covers the terminal shell, ConPTY resources, output readers, event handlers, cancellation registrations, and hosted WPF views.
@@ -118,7 +114,7 @@ The terminal surface must state which fallback was used when profile resolution 
 
 ## Accessibility and Keyboard Boundary
 
-The gabCode-owned WPF chrome uses ordinary native names, roles, focus order, and dialog behavior. Pi/Commands selectors, lifecycle status, errors, retry actions, and exit confirmation must remain understandable without relying only on color or position.
+The gabCode-owned WPF chrome uses ordinary native names, roles, focus order, and dialog behavior. The generic swap action, neutral terminal ordinals/regions, terminal-local lifecycle status, errors, retry actions, and exit confirmation must remain understandable without relying only on color or position.
 
 The Windows Terminal WPF content surface is accepted as provided by the pinned dependency:
 
@@ -156,7 +152,7 @@ No terminal output, commands, environment secrets, or Pi conversation data may b
 
 ### Two-session terminal behavior
 
-- [ ] The target Windows application can create independent Pi and Commands shell sessions rooted in a selected directory containing spaces and Unicode characters.
+- [ ] The target Windows application can create two independent generic shell sessions rooted in a selected directory containing spaces and Unicode characters.
 - [ ] The sessions have distinct process identities and do not share command input or output.
 - [ ] The user can run a visible shell command in each session and observe independent results.
 - [ ] The configured Windows Terminal default profile is used when it can be resolved; a broken/unavailable profile follows and visibly reports the documented fallback behavior.
@@ -165,8 +161,8 @@ No terminal output, commands, environment secrets, or Pi conversation data may b
 
 ### Retention and lifecycle
 
-- [ ] Moving Pi between the main and bottom regions does not change its process identity or restart its shell.
-- [ ] The Commands session remains alive while Pi is moved or selected.
+- [ ] Swapping either terminal between the main and lower regions does not change its process identity or restart its shell.
+- [ ] Both sessions remain alive while their retained views exchange regions.
 - [ ] Sessions retain bounded scrollback only in memory and do not survive application exit.
 - [ ] The application always prompts before closing active terminal sessions.
 - [ ] Cancelling the prompt leaves all processes alive and restores focus predictably.
@@ -177,7 +173,7 @@ No terminal output, commands, environment secrets, or Pi conversation data may b
 
 - [ ] Automated tests cover pure/session lifecycle logic and controlled process behavior where testable.
 - [ ] Target-Windows runtime evidence covers two sessions, working directory, process retention across layout movement, resize, natural exit, exit cancellation, confirmed cleanup, and failure recovery.
-- [ ] GabCode-owned selectors, lifecycle status, errors, retry actions, and exit confirmation expose standard WPF names and roles.
+- [ ] The generic swap action, neutral terminal ordinal/region names, lifecycle status, errors, retry actions, and exit confirmation expose standard WPF names and roles without Pi/Commands labels.
 - [ ] The existing terminal UI Automation text provider remains present. No additional terminal-content accessibility-mode qualification is required.
 
 ## Validation Expectations
@@ -204,7 +200,7 @@ macOS validation is **NOT CHECKED** for this Windows-specific increment.
 
 - Use WPF and Windows Terminal’s WPF control rather than a browser-hosted terminal or a custom C# terminal renderer.
 - Pin Windows Terminal to `v1.24.11911.0` and target Windows SDK `10.0.22621.0` for this foundation.
-- Treat Pi and Commands as ordinary independent shells; labels do not grant gabCode authority over their contents.
+- Treat both terminals as ordinary independent generic shells; gabCode does not assign either one a Pi, Commands, or other purpose.
 - Require process retention during terminal-view movement; restarting a terminal is not an acceptable substitute.
 - Require explicit user confirmation before stopping active terminal processes.
 - Approve Windows Terminal WPF tag `v1.24.11911.0` for Windows x64 integration with the limitations recorded in `Documentation/dependencies/windows-terminal-wpf.md`.

@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Status | Initial baseline |
-| Version | 0.2 |
-| Date | 2026-07-30 |
+| Version | 0.3 |
+| Date | 2026-08-01 |
 
 This document defines gabCode's initial product boundary and direction. It should evolve when foundational product decisions change. Substantial new capabilities should receive focused PRDs under `Documentation/design` rather than turning this document into an exhaustive specification.
 
@@ -73,10 +73,7 @@ A worktree disappears from gabCode when it is no longer returned by Git. gabCode
 
 ### 3. Two Native Terminals per Worktree — Must-have
 
-Each opened worktree has two independent terminals:
-
-- **Pi** — an ordinary shell intended for running the Pi CLI.
-- **Commands** — an ordinary shell for builds, tests, Git, and other commands.
+Each opened worktree has two independent, generic terminals. gabCode does not assign either terminal a Pi, build, test, Git, or other role; the user may run any local command in either terminal.
 
 Both terminals:
 
@@ -132,7 +129,7 @@ The selected worktree provides read-only navigation for:
 - Uncommitted changes.
 - Commits and diffs.
 
-Opening a document replaces Pi in the main area and moves the same running Pi terminal into the bottom panel. Closing the document can promote Pi back to the main area.
+Opening a document replaces the terminal currently occupying the main area and retains that same running terminal in the bottom-panel workflow without assigning it a special role. Closing the document can promote the retained terminal back to the main area.
 
 ### 7. Open in VS Code — Must-have
 
@@ -238,7 +235,7 @@ Deliver production-foundation prototypes on both platforms:
 - macOS terminal using SwiftTerm and Unix PTY.
 - Two terminals rooted in a selected worktree.
 - Several worktrees with terminal pairs alive simultaneously.
-- Pi moving between the main and bottom areas without process restart.
+- The same generic terminal moving between the main and bottom areas without process restart.
 - Default Windows Terminal profile and macOS login-shell startup.
 - Unicode, ANSI color, selection, clipboard, resize, and bounded scrollback validation.
 - Mandatory exit warning and graceful process-tree shutdown.
@@ -272,7 +269,7 @@ Deliver:
 
 - File- and line-level **Open in VS Code** actions.
 - Worktree workspace discovery.
-- Final document/Pi/bottom-panel layout behavior.
+- Final document/terminal/bottom-panel layout behavior.
 - Toolchain diagnostics.
 - Performance and process-lifecycle hardening.
 - Signed Windows package and notarized macOS package.

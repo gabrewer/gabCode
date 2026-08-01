@@ -333,6 +333,114 @@ public sealed class ConptyTerminalConnectionTests
     }
 
     [Fact]
+    public async Task Connection_bounds_pending_UI_output_dispatch_while_the_owner_dispatcher_is_blocked()
+    {
+        var ready = new TaskCompletionSource<(ConptyTerminalConnection Connection, Dispatcher Dispatcher)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ownerExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ownerThread = new Thread(() =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            ready.TrySetResult((CreateCommandConnection(CreateTemporaryDirectory()), dispatcher));
+            Dispatcher.Run();
+            ownerExited.TrySetResult();
+        });
+        ownerThread.SetApartmentState(ApartmentState.STA);
+        ownerThread.Start();
+
+        var (connection, dispatcher) = await ready.Task.WaitAsync(Timeout);
+        using var dispatcherBlock = new ManualResetEventSlim();
+        var dispatcherBlocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            await connection.StartAsync();
+            _ = dispatcher.InvokeAsync(
+                () =>
+                {
+                    dispatcherBlocked.TrySetResult();
+                    dispatcherBlock.Wait();
+                },
+                DispatcherPriority.Send);
+            await dispatcherBlocked.Task.WaitAsync(Timeout);
+            await connection.WriteInputAsync("for /L %i in (1,1,1000000) do @echo WTR002_HIGH_OUTPUT_%i\r");
+            await WaitUntilAsync(() => connection.MaximumPendingUiOutputDispatches != 0);
+
+            Assert.Equal(1, connection.MaximumPendingUiOutputDispatches);
+            await connection.CloseAsync().WaitAsync(Timeout);
+            Assert.Equal(TerminalSessionState.Closed, connection.State);
+        }
+        finally
+        {
+            dispatcherBlock.Set();
+            await connection.DisposeAsync();
+            dispatcher.BeginInvokeShutdown(DispatcherPriority.Send);
+            await ownerExited.Task.WaitAsync(Timeout);
+            Assert.True(ownerThread.Join(Timeout), "The terminal owner dispatcher thread did not stop.");
+        }
+    }
+
+    [Fact]
+    public async Task Connection_preserves_high_volume_output_order_through_the_UI_dispatcher()
+    {
+        var ready = new TaskCompletionSource<(ConptyTerminalConnection Connection, Dispatcher Dispatcher, StringBuilder Output, Task OutputComplete)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ownerExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ownerThread = new Thread(() =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var output = new StringBuilder();
+            var outputComplete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var connection = new ConptyTerminalConnection(new TerminalProcessOptions(
+                executablePath: Environment.GetEnvironmentVariable("ComSpec") ?? throw new InvalidOperationException("ComSpec is required."),
+                arguments: "/d /q /c (for /L %i in (1,1,5000) do @echo WTR002_ORDER_%i) & echo WTR002_ORDER_DONE",
+                workingDirectory: CreateTemporaryDirectory(),
+                gracefulShutdownTimeout: TimeSpan.FromSeconds(2)));
+            connection.TerminalOutput += (_, chunk) =>
+            {
+                lock (output)
+                {
+                    _ = output.Append(chunk.Data);
+                    if (output.ToString().Contains("WTR002_ORDER_DONE", StringComparison.Ordinal))
+                    {
+                        outputComplete.TrySetResult();
+                    }
+                }
+            };
+            ready.TrySetResult((connection, dispatcher, output, outputComplete.Task));
+            Dispatcher.Run();
+            ownerExited.TrySetResult();
+        });
+        ownerThread.SetApartmentState(ApartmentState.STA);
+        ownerThread.Start();
+
+        var (connection, dispatcher, output, outputComplete) = await ready.Task.WaitAsync(Timeout);
+        try
+        {
+            await connection.StartAsync();
+            Assert.Equal(0, await connection.WaitForExitAsync().WaitAsync(Timeout));
+            await outputComplete.WaitAsync(Timeout);
+            await connection.CloseAsync().WaitAsync(Timeout);
+
+            string captured;
+            lock (output)
+            {
+                captured = output.ToString();
+            }
+
+            var first = captured.IndexOf("WTR002_ORDER_1", StringComparison.Ordinal);
+            var last = captured.IndexOf("WTR002_ORDER_5000", StringComparison.Ordinal);
+            var done = captured.IndexOf("WTR002_ORDER_DONE", StringComparison.Ordinal);
+            Assert.True(first >= 0 && last > first && done > last, "High-volume terminal output was missing or reordered.");
+            Assert.Equal(1, connection.MaximumPendingUiOutputDispatches);
+        }
+        finally
+        {
+            await connection.DisposeAsync();
+            dispatcher.BeginInvokeShutdown(DispatcherPriority.Send);
+            await ownerExited.Task.WaitAsync(Timeout);
+            Assert.True(ownerThread.Join(Timeout), "The terminal owner dispatcher thread did not stop.");
+        }
+    }
+
+    [Fact]
     public async Task Connection_marks_failed_and_releases_the_process_when_input_transport_breaks()
     {
         await using var connection = CreateCommandConnection(CreateTemporaryDirectory());
@@ -461,6 +569,20 @@ public sealed class ConptyTerminalConnectionTests
         await connection.CloseAsync();
         await child.WaitForExitAsync().WaitAsync(Timeout);
         Assert.True(child.HasExited, $"Job-owned descendant {childId} survived connection cleanup.");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        var deadline = DateTime.UtcNow + Timeout;
+        while (!predicate())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException("The expected terminal state was not reached.");
+            }
+
+            await Task.Delay(10);
+        }
     }
 
     private static ConptyTerminalConnection CreateCommandConnection(string workingDirectory) => new(new TerminalProcessOptions(

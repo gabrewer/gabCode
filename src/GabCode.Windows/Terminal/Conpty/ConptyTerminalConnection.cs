@@ -24,6 +24,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
         AllowSynchronousContinuations = false,
     });
     private readonly TaskCompletionSource<int> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource outputDispatchCancellation = new();
     private TerminalSessionState state = TerminalSessionState.Created;
     private NativeSession? session;
     private Task? startTask;
@@ -33,6 +34,8 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
     private Task? waitTask;
     private Exception? failure;
     private int? processId;
+    private int pendingUiOutputDispatches;
+    private int maximumPendingUiOutputDispatches;
 
     public ConptyTerminalConnection(TerminalProcessOptions options)
     {
@@ -76,6 +79,8 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
             }
         }
     }
+
+    internal int MaximumPendingUiOutputDispatches => Volatile.Read(ref maximumPendingUiOutputDispatches);
 
     public void Start()
     {
@@ -285,15 +290,18 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
                 var characterCount = decoder.GetChars(bytes, 0, count, characters, 0, flush: false);
                 if (characterCount != 0)
                 {
-                    PublishOutput(new string(characters, 0, characterCount));
+                    await PublishOutputAsync(new string(characters, 0, characterCount)).ConfigureAwait(false);
                 }
             }
 
             var finalCount = decoder.GetChars([], 0, 0, characters, 0, flush: true);
             if (finalCount != 0)
             {
-                PublishOutput(new string(characters, 0, finalCount));
+                await PublishOutputAsync(new string(characters, 0, finalCount)).ConfigureAwait(false);
             }
+        }
+        catch (OperationCanceledException) when (outputDispatchCancellation.IsCancellationRequested)
+        {
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or NotSupportedException)
         {
@@ -398,6 +406,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
             }
         }
 
+        outputDispatchCancellation.Cancel();
         nativeSession.Dispose();
         if (inputTask is not null)
         {
@@ -508,11 +517,58 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
         nativeSession.Resize(checked((short)columns), checked((short)rows));
     }
 
-    private void PublishOutput(string data)
+    private async Task PublishOutputAsync(string data)
     {
-        DispatchNotification(
-            () => TerminalOutput?.Invoke(this, new TerminalOutputEventArgs(data)),
-            DispatcherPriority.Send);
+        if (ownerDispatcher is null || ownerDispatcher.CheckAccess())
+        {
+            TerminalOutput?.Invoke(this, new TerminalOutputEventArgs(data));
+            return;
+        }
+
+        if (ownerDispatcher.HasShutdownStarted || ownerDispatcher.HasShutdownFinished ||
+            outputDispatchCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var pending = Interlocked.Increment(ref pendingUiOutputDispatches);
+        UpdateMaximumPendingUiOutputDispatches(pending);
+        try
+        {
+            var operation = ownerDispatcher.InvokeAsync(
+                () => TerminalOutput?.Invoke(this, new TerminalOutputEventArgs(data)),
+                DispatcherPriority.Send,
+                outputDispatchCancellation.Token);
+            await operation.Task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (
+            outputDispatchCancellation.IsCancellationRequested ||
+            ownerDispatcher.HasShutdownStarted ||
+            ownerDispatcher.HasShutdownFinished)
+        {
+        }
+        catch (InvalidOperationException) when (ownerDispatcher.HasShutdownStarted || ownerDispatcher.HasShutdownFinished)
+        {
+        }
+        finally
+        {
+            _ = Interlocked.Decrement(ref pendingUiOutputDispatches);
+        }
+    }
+
+    private void UpdateMaximumPendingUiOutputDispatches(int pending)
+    {
+        var observed = Volatile.Read(ref maximumPendingUiOutputDispatches);
+        while (pending > observed)
+        {
+            var previous = Interlocked.CompareExchange(ref maximumPendingUiOutputDispatches, pending, observed);
+            if (previous == observed)
+            {
+                return;
+            }
+
+            observed = previous;
+        }
     }
 
     private void SetState(TerminalSessionState nextState)
