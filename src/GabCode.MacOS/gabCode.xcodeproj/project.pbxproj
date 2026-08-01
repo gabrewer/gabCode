@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		6F4D395D301B785100608C1D /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 6F4D395C301B785100608C1D /* SwiftTerm */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		6F4D39143019AA9500608C1D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6F4D395D301B785100608C1D /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +83,7 @@
 				6F4D39083019AA9500608C1D /* gabCode */,
 				6F4D39163019AA9500608C1D /* gabCodeTests */,
 				6F4D39203019AA9600608C1D /* gabCodeUITests */,
+				6F4D395B301B785100608C1D /* Frameworks */,
 				6F4D39073019AA9500608C1D /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +96,13 @@
 				6F4D391D3019AA9600608C1D /* gabCodeUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		6F4D395B301B785100608C1D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -112,6 +125,7 @@
 			);
 			name = gabCode;
 			packageProductDependencies = (
+				6F4D395C301B785100608C1D /* SwiftTerm */,
 			);
 			productName = gabCode;
 			productReference = 6F4D39063019AA9500608C1D /* gabCode.app */;
@@ -195,6 +209,9 @@
 			);
 			mainGroup = 6F4D38FD3019AA9500608C1D;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				6F4D3952301B77A100608C1D /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6F4D39073019AA9500608C1D /* Products */;
 			projectDirPath = "";
@@ -395,7 +412,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -426,7 +443,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -565,6 +582,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		6F4D3952301B77A100608C1D /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.15.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6F4D395C301B785100608C1D /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6F4D3952301B77A100608C1D /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6F4D38FE3019AA9500608C1D /* Project object */;
 }
