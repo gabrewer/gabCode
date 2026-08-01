@@ -63,10 +63,12 @@ final class TerminalWorkspacePresentationTests: XCTestCase {
             presentation.state(for: .terminal2),
             .ready(shellSelection: .configured("/bin/sh"))
         )
+        XCTAssertEqual(presentation.activeTerminalCount, 2)
 
         try terminal1.send("exit\n")
         try await waitForPresentationState(presentation, terminal: .terminal1, .exited)
         XCTAssertEqual(presentation.state(for: .terminal2), .ready(shellSelection: .configured("/bin/sh")))
+        XCTAssertEqual(presentation.activeTerminalCount, 1)
     }
 
     private func makeTemporaryDirectory() throws -> URL {

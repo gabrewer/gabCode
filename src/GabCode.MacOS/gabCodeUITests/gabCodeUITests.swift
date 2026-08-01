@@ -14,12 +14,17 @@ final class gabCodeUITests: XCTestCase {
             return
         }
 
-        app.terminate()
+        if app.sheets.buttons["Close and Stop Terminals"].exists == false {
+            app.typeKey("q", modifierFlags: .command)
+        }
+        if app.sheets.buttons["Close and Stop Terminals"].waitForExistence(timeout: 2) {
+            app.sheets.buttons["Close and Stop Terminals"].click()
+        }
         let stopped = expectation(
             for: NSPredicate(format: "state == %d", XCUIApplication.State.notRunning.rawValue),
             evaluatedWith: app
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 5), .completed, "gabCode did not terminate within five seconds.")
+        XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 8), .completed, "gabCode did not terminate within bounded cleanup time.")
     }
 
     @MainActor
@@ -33,6 +38,13 @@ final class gabCodeUITests: XCTestCase {
             "Expected the native controlled-directory explanation."
         )
         XCTAssertFalse(app.groups["terminal-workspace"].exists, "Missing input must not create terminal hosts.")
+
+        app.typeKey("q", modifierFlags: .command)
+        let stopped = expectation(
+            for: NSPredicate(format: "state == %d", XCUIApplication.State.notRunning.rawValue),
+            evaluatedWith: app
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 5), .completed, "No-session Command-Q must remain standard.")
     }
 
     @MainActor
@@ -80,6 +92,32 @@ final class gabCodeUITests: XCTestCase {
         let terminal2Marker = directory.appendingPathComponent("terminal 2 focused.txt")
         app.typeText("printf terminal2 > 'terminal 2 focused.txt'\n")
         waitForFile(terminal2Marker, message: "Command-2 did not route ordinary shell input to Terminal 2.")
+    }
+
+    @MainActor
+    func testActiveCloseAndQuitRequireConfirmationAndCancelPreservesTerminals() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        app.launchArguments += ["--terminal-directory", directory.path]
+        app.launch()
+        XCTAssertTrue(app.groups["terminal-workspace"].waitForExistence(timeout: 5))
+
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(app.staticTexts["Stop 2 active terminals?"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.sheets.buttons["Cancel"].exists)
+        XCTAssertTrue(app.sheets.buttons["Close and Stop Terminals"].exists)
+        app.typeKey("q", modifierFlags: .command)
+        XCTAssertTrue(app.sheets.buttons["Cancel"].exists, "Duplicate quit must preserve the original confirmation.")
+        app.sheets.buttons["Cancel"].click()
+        XCTAssertTrue(app.groups["terminal-workspace"].exists, "Cancel must preserve the workspace.")
+
+        app.typeKey("q", modifierFlags: .command)
+        XCTAssertTrue(app.staticTexts["Stop 2 active terminals?"].waitForExistence(timeout: 5))
+        app.sheets.buttons["Cancel"].click()
+        let marker = directory.appendingPathComponent("cancel preserved terminal.txt")
+        app.typeKey("1", modifierFlags: .command)
+        app.typeText("printf alive > 'cancel preserved terminal.txt'\n")
+        waitForFile(marker, message: "Cancel must preserve Terminal 1 and its focus route.")
     }
 
     private func waitForFile(_ file: URL, message: String) {

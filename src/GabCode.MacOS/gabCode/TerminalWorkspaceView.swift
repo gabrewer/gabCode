@@ -37,6 +37,7 @@ struct TerminalWorkspaceView: View {
         .frame(minWidth: 760, minHeight: 640)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("terminal-workspace")
+        .background(WindowCloseInterceptor())
         .task {
             await presentation.start()
             await Task.yield()
@@ -44,12 +45,11 @@ struct TerminalWorkspaceView: View {
         }
         .onAppear {
             TerminalCommandRouter.shared.connect(presentation)
+            TerminalShutdownCoordinator.shared.connect(presentation)
         }
         .onDisappear {
             TerminalCommandRouter.shared.disconnect(presentation)
-            Task {
-                await presentation.workspace.stop(gracePeriod: .milliseconds(500))
-            }
+            TerminalShutdownCoordinator.shared.disconnect(presentation)
         }
     }
 
@@ -278,6 +278,9 @@ private struct RetainedTerminalHost: NSViewRepresentable {
     }
 
     private func attach(to host: NSView) {
+        guard session.state == .ready || session.state == .exited || session.state == .closing else {
+            return
+        }
         let terminalView = session.terminalView
         terminalView.setAccessibilityElement(true)
         terminalView.setAccessibilityRole(.textArea)
