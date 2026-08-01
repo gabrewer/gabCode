@@ -416,6 +416,25 @@ public sealed class ConptyTerminalConnectionTests
     }
 
     [Fact]
+    public async Task Connection_repeatedly_closes_a_naturally_exited_session_without_output_pump_faults()
+    {
+        for (var attempt = 0; attempt < 25; attempt++)
+        {
+            await using var connection = new ConptyTerminalConnection(new TerminalProcessOptions(
+                executablePath: Environment.GetEnvironmentVariable("ComSpec") ?? throw new InvalidOperationException("ComSpec is required."),
+                arguments: "/d /q /c exit 0",
+                workingDirectory: CreateTemporaryDirectory(),
+                gracefulShutdownTimeout: TimeSpan.FromSeconds(2)));
+
+            await connection.StartAsync();
+            Assert.Equal(0, await connection.WaitForExitAsync().WaitAsync(Timeout));
+            await connection.CloseAsync().WaitAsync(Timeout);
+            Assert.Equal(TerminalSessionState.Closed, connection.State);
+            Assert.Null(connection.Failure);
+        }
+    }
+
+    [Fact]
     public async Task Connection_close_terminates_a_job_owned_descendant()
     {
         var workingDirectory = CreateTemporaryDirectory();

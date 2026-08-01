@@ -295,7 +295,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
                 PublishOutput(new string(characters, 0, finalCount));
             }
         }
-        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or NotSupportedException)
         {
             HandleUnexpectedTransportFailure(exception);
         }
