@@ -10,8 +10,12 @@ import SwiftUI
 @main
 struct gabCodeApp: App {
     var body: some Scene {
-        WindowGroup("gabCode") {
+        Window("gabCode", id: "main") {
             ContentView()
+        }
+        .defaultSize(width: 760, height: 640)
+        .commands {
+            TerminalWorkspaceCommands()
         }
     }
 }

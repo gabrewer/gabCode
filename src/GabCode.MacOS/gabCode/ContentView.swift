@@ -1,34 +1,26 @@
-//
-//  ContentView.swift
-//  gabCode
-//
-//  Created by Gregory Brewer on 7/28/26.
-//
-
 import SwiftUI
 
 struct ContentView: View {
     @ViewBuilder
     var body: some View {
-#if DEBUG
-        if let workingDirectory = TerminalFeasibilityLaunch.workingDirectory() {
-            TerminalFeasibilityView(workingDirectory: workingDirectory)
+        if let workingDirectory = TerminalWorkspaceLaunch.workingDirectory() {
+            TerminalWorkspaceView(workingDirectory: workingDirectory)
         } else {
-            foundationContent
+            TerminalDirectoryRequiredView()
         }
-#else
-        foundationContent
-#endif
     }
+}
 
-    private var foundationContent: some View {
-        VStack(spacing: 12) {
-            Text("gabCode")
-                .font(.largeTitle)
-                .fontWeight(.semibold)
-            Text("macOS foundation ready.")
+private struct TerminalDirectoryRequiredView: View {
+    var body: some View {
+        ContentUnavailableView {
+            Label("Terminal directory required", systemImage: "folder.badge.questionmark")
+        } description: {
+            Text("Launch gabCode with --terminal-directory followed by an accessible absolute directory path. No shell was started.")
         }
-        .padding()
+        .frame(minWidth: 760, minHeight: 640)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("terminal-directory-required")
     }
 }
 
