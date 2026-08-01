@@ -11,6 +11,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     private readonly ConptyTerminalConnection connection;
     private Task? startTask;
     private Task? closeTask;
+    private TerminalKeyboardInputForwarder? keyboardInputForwarder;
     private bool controlConnected;
 
     internal TerminalHostedSession(
@@ -67,7 +68,11 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
 
     internal string GetSelectedText() => Control.GetSelectedText();
 
-    internal void Focus() => _ = Control.Focus();
+    internal void Focus()
+    {
+        _ = Control.Focus();
+        keyboardInputForwarder?.CaptureTerminalWindow();
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -78,6 +83,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     {
         await WaitUntilLoadedAsync(Control);
         Control.SetTheme(TerminalThemeFactory.CreateDefault(), "Cascadia Mono", 12);
+        keyboardInputForwarder = new TerminalKeyboardInputForwarder(Control);
         Control.Connection = connection;
         controlConnected = true;
         await connection.StartAsync();
@@ -85,6 +91,8 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
 
     private async Task CloseCoreAsync()
     {
+        keyboardInputForwarder?.Dispose();
+        keyboardInputForwarder = null;
         if (controlConnected)
         {
             Control.Connection = null!;
