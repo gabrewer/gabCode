@@ -34,6 +34,17 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "6F4D39123019AA9500608C1D"
+               BuildableName = "gabCodeTests.xctest"
+               BlueprintName = "gabCodeTests"
+               ReferencedContainer = "container:gabCode.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "6F4D391C3019AA9600608C1D"
                BuildableName = "gabCodeUITests.xctest"
                BlueprintName = "gabCodeUITests"

@@ -8,7 +8,20 @@
 import SwiftUI
 
 struct ContentView: View {
+    @ViewBuilder
     var body: some View {
+#if DEBUG
+        if let workingDirectory = TerminalFeasibilityLaunch.workingDirectory() {
+            TerminalFeasibilityView(workingDirectory: workingDirectory)
+        } else {
+            foundationContent
+        }
+#else
+        foundationContent
+#endif
+    }
+
+    private var foundationContent: some View {
         VStack(spacing: 12) {
             Text("gabCode")
                 .font(.largeTitle)
