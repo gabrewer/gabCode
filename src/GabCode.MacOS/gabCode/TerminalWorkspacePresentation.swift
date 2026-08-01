@@ -7,6 +7,7 @@ enum TerminalWorkspacePresentationState: Equatable {
     case starting
     case ready(shellSelection: TerminalShellSelection)
     case failed
+    case cleanupFailed
     case exited
     case closing
     case closed
@@ -18,6 +19,7 @@ final class TerminalWorkspacePresentation: ObservableObject {
     let workingDirectory: URL
 
     @Published private(set) var mainTerminal: TerminalWorkspaceTerminal = .terminal1
+    @Published private(set) var isMutationLocked = false
     private var cancellables: Set<AnyCancellable> = []
     private var didStart = false
 
@@ -56,7 +58,14 @@ final class TerminalWorkspacePresentation: ObservableObject {
         try? await workspace.start()
     }
 
+    func setMutationLocked(_ isLocked: Bool) {
+        isMutationLocked = isLocked
+    }
+
     func swapTerminals() {
+        guard !isMutationLocked else {
+            return
+        }
         mainTerminal = bottomTerminal
         DispatchQueue.main.async { [weak self] in
             self?.focusMainTerminal()
@@ -64,6 +73,9 @@ final class TerminalWorkspacePresentation: ObservableObject {
     }
 
     func focus(_ terminal: TerminalWorkspaceTerminal) {
+        guard !isMutationLocked else {
+            return
+        }
         _ = session(for: terminal).focusTerminalView()
     }
 
@@ -72,6 +84,9 @@ final class TerminalWorkspacePresentation: ObservableObject {
     }
 
     func retry(_ terminal: TerminalWorkspaceTerminal) async {
+        guard !isMutationLocked else {
+            return
+        }
         try? await workspace.retry(terminal)
     }
 
@@ -88,7 +103,7 @@ final class TerminalWorkspacePresentation: ObservableObject {
             }
             return .ready(shellSelection: shellSelection)
         case .failed:
-            return .failed
+            return session.requiresCleanup ? .cleanupFailed : .failed
         case .exited:
             return .exited
         case .closing:
