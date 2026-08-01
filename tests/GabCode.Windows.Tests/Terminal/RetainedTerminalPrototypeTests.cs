@@ -6,6 +6,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using GabCode.Windows;
 using GabCode.Windows.Terminal.Conpty;
@@ -19,6 +20,20 @@ namespace GabCode.Windows.Tests.Terminal;
 public sealed class RetainedTerminalPrototypeTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
+
+    [Fact]
+    public async Task Terminal_surface_keeps_directional_and_both_tab_directions_within_the_native_terminal()
+    {
+        await RunOnStaAsync(() =>
+        {
+            var view = new TerminalSessionView(TerminalSessionKind.First, CreateTemporaryDirectory(), CreateCmdResolution);
+            var terminalSurface = Assert.IsType<ContentControl>(view.FindName("TerminalSurfaceHost"));
+
+            Assert.Equal(KeyboardNavigationMode.Contained, KeyboardNavigation.GetDirectionalNavigation(terminalSurface));
+            Assert.Equal(KeyboardNavigationMode.Cycle, KeyboardNavigation.GetTabNavigation(terminalSurface));
+            return Task.CompletedTask;
+        });
+    }
 
     [Fact]
     public async Task Prototype_runs_two_independent_shells_and_preserves_their_views_and_processes_across_region_swaps()

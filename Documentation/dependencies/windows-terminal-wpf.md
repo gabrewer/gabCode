@@ -89,6 +89,21 @@ For the initial Windows x64 integration, gabCode will use an explicit x64 runtim
 
 The chosen implementation must preserve pinned source/build provenance, include `LICENSE` and `NOTICE.md`, inventory shipped assets, meet the .NET desktop-runtime policy, and remain reproducible before packaging/signing work. Do not rely on an unofficial repackaged control. Building Win32 and ARM64 outputs or using the upstream multi-architecture package remains optional future work, not an integration prerequisite.
 
+## WPF keyboard-navigation hosting requirement
+
+The WPF wrapper is technically hostable but is not a productized embedding surface. In a simple upstream sample with no focusable WPF siblings, ordinary terminal input appears to work. In a realistic WPF layout containing a `GridSplitter` or other focusable sibling, WPF otherwise treats Up/Down and Tab/Shift+Tab as keyboard navigation and moves focus out of the native terminal HWND before the terminal engine can translate the key.
+
+Keep WPF navigation inside the **smallest wrapper that contains terminal content only**. In gabCode that wrapper is `TerminalSurfaceHost` in `TerminalSessionView.xaml`:
+
+```xml
+KeyboardNavigation.DirectionalNavigation="Contained"
+KeyboardNavigation.TabNavigation="Cycle"
+```
+
+`DirectionalNavigation="Contained"` preserves arrow-key ownership. `TabNavigation="Cycle"` is required rather than `Contained`: `Contained` preserves ordinary Tab but still allows reverse traversal from Shift+Tab to escape the native terminal in a host with focusable siblings. `Cycle` preserves both Tab directions while leaving Ctrl+Tab available for higher-level application navigation.
+
+This is a WPF host configuration requirement, not a gabCode key-to-VT translation layer. The pinned terminal engine continues to receive and translate raw terminal input, including its mode-aware sequences. Do not add a top-level `HwndSource` keyboard forwarder, subclass the terminal child HWND, disable the splitter's mouse/keyboard behavior as a workaround, or patch the pinned Microsoft Terminal assets for this issue. The behavior was independently reproduced with the exact upstream control in a minimal WPF host, then resolved with these WPF properties; it also matches the navigation-containment pattern used by the community `EasyWindowsTerminalControl` wrapper.
+
 ## WPF and future ConPTY boundary
 
 The pinned managed public surface is deliberately small:

@@ -35,7 +35,9 @@
         </Border>
 
         <Grid Grid.Row="1">
-            <ContentControl x:Name="TerminalSurfaceHost" />
+            <ContentControl x:Name="TerminalSurfaceHost"
+                            KeyboardNavigation.DirectionalNavigation="Contained"
+                            KeyboardNavigation.TabNavigation="Cycle" />
             <Border x:Name="FailureSurface"
                     Padding="24"
                     Background="#181818"
