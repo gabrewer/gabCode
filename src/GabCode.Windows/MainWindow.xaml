@@ -17,50 +17,37 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Padding="18,13"
+        <Border Padding="12,6"
                 Background="#242424"
                 BorderBrush="#3A3A3A"
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock FontSize="24"
-                               FontWeight="SemiBold"
-                               Foreground="White"
-                               Text="gabCode" />
-                    <TextBlock x:Name="WorktreePathText"
-                               Margin="0,4,0,0"
-                               Foreground="#C8C8C8"
-                               TextTrimming="CharacterEllipsis"
-                               AutomationProperties.Name="Controlled terminal working directory" />
-                </StackPanel>
-                <StackPanel Grid.Column="1"
-                            VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal"
-                                HorizontalAlignment="Right">
-                        <Button x:Name="PiMainSelector"
-                                Padding="14,7"
-                                Margin="0,0,8,0"
-                                Click="PiMainSelector_Click"
-                                Content="Pi in main"
-                                AutomationProperties.Name="Show Pi in the main terminal region" />
-                        <Button x:Name="CommandsMainSelector"
-                                Padding="14,7"
-                                Click="CommandsMainSelector_Click"
-                                Content="Commands in main"
-                                AutomationProperties.Name="Show Commands in the main terminal region" />
-                    </StackPanel>
-                    <TextBlock x:Name="TerminalLifecycleStatus"
-                               Margin="0,7,0,0"
-                               HorizontalAlignment="Right"
-                               Foreground="White"
-                               Text="Terminal lifecycle: not started"
-                               AutomationProperties.Name="Terminal lifecycle: not started"
-                               AutomationProperties.LiveSetting="Polite" />
-                </StackPanel>
+                <TextBlock VerticalAlignment="Center"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           Foreground="White"
+                           Text="gabCode" />
+                <TextBlock x:Name="WorktreePathText"
+                           Grid.Column="1"
+                           Margin="12,0"
+                           VerticalAlignment="Center"
+                           Foreground="#C8C8C8"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip="Controlled terminal working directory"
+                           AutomationProperties.Name="Controlled terminal working directory" />
+                <Button x:Name="SwapTerminalsButton"
+                        Grid.Column="2"
+                        Padding="10,4"
+                        VerticalAlignment="Center"
+                        Click="SwapTerminalsButton_Click"
+                        Content="Swap terminals"
+                        ToolTip="Move the lower terminal to the main region"
+                        AutomationProperties.Name="Swap the main and lower terminal regions" />
             </Grid>
         </Border>
 
@@ -75,17 +62,8 @@
                     BorderBrush="#4A4A4A"
                     BorderThickness="1"
                     CornerRadius="3">
-                <DockPanel>
-                    <Border DockPanel.Dock="Top" Padding="10,7" Background="#303030">
-                        <TextBlock x:Name="MainRegionLabel"
-                                   FontWeight="SemiBold"
-                                   Foreground="White"
-                                   Text="Main terminal — Pi"
-                                   AutomationProperties.Name="Main terminal region label" />
-                    </Border>
-                    <ContentControl x:Name="MainTerminalRegion"
-                                    AutomationProperties.Name="Main terminal region" />
-                </DockPanel>
+                <ContentControl x:Name="MainTerminalRegion"
+                                AutomationProperties.Name="Main terminal region" />
             </Border>
 
             <GridSplitter Grid.Row="1"
@@ -101,17 +79,8 @@
                     BorderBrush="#4A4A4A"
                     BorderThickness="1"
                     CornerRadius="3">
-                <DockPanel>
-                    <Border DockPanel.Dock="Top" Padding="10,7" Background="#303030">
-                        <TextBlock x:Name="BottomRegionLabel"
-                                   FontWeight="SemiBold"
-                                   Foreground="White"
-                                   Text="Bottom terminal — Commands"
-                                   AutomationProperties.Name="Bottom terminal region label" />
-                    </Border>
-                    <ContentControl x:Name="BottomTerminalRegion"
-                                    AutomationProperties.Name="Bottom terminal region" />
-                </DockPanel>
+                <ContentControl x:Name="BottomTerminalRegion"
+                                AutomationProperties.Name="Bottom terminal region" />
             </Border>
         </Grid>
 

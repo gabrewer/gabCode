@@ -12,7 +12,7 @@ namespace GabCode.Windows.Tests.Terminal;
 public sealed class TerminalPrototypeChromeTests
 {
     [Fact]
-    public async Task MainWindow_exposes_named_terminal_regions_selectors_and_lifecycle_status()
+    public async Task MainWindow_exposes_compact_terminal_regions_and_swap_control()
     {
         Exception? failure = null;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -26,17 +26,11 @@ public sealed class TerminalPrototypeChromeTests
             {
                 window = new MainWindow(workingDirectory);
 
-                Assert.IsType<Button>(window.FindName("PiMainSelector"));
-                Assert.IsType<Button>(window.FindName("CommandsMainSelector"));
+                var swapButton = Assert.IsType<Button>(window.FindName("SwapTerminalsButton"));
                 Assert.IsType<ContentControl>(window.FindName("MainTerminalRegion"));
                 Assert.IsType<ContentControl>(window.FindName("BottomTerminalRegion"));
-                var status = Assert.IsType<TextBlock>(window.FindName("TerminalLifecycleStatus"));
-                Assert.Contains("Terminal lifecycle", AutomationProperties.GetName(status), StringComparison.Ordinal);
-                Assert.Equal(AutomationLiveSetting.Polite, AutomationProperties.GetLiveSetting(status));
-                var piSelector = Assert.IsType<Button>(window.FindName("PiMainSelector"));
-                var commandsSelector = Assert.IsType<Button>(window.FindName("CommandsMainSelector"));
-                Assert.Equal("Show Pi in the main terminal region", AutomationProperties.GetName(piSelector));
-                Assert.Equal("Show Commands in the main terminal region", AutomationProperties.GetName(commandsSelector));
+                Assert.Null(window.FindName("TerminalLifecycleStatus"));
+                Assert.Equal("Swap the main and lower terminal regions", AutomationProperties.GetName(swapButton));
             }
             catch (Exception exception)
             {

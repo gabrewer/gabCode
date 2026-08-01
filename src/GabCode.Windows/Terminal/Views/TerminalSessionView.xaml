@@ -18,17 +18,10 @@
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="SessionNameText"
-                           Margin="0,0,12,0"
-                           VerticalAlignment="Center"
-                           FontWeight="SemiBold"
-                           Foreground="White" />
                 <TextBlock x:Name="ProfileStatusText"
-                           Grid.Column="1"
                            VerticalAlignment="Center"
                            Foreground="#C8C8C8"
                            TextTrimming="CharacterEllipsis" />
@@ -54,7 +47,8 @@
                                HorizontalAlignment="Center"
                                FontSize="20"
                                FontWeight="SemiBold"
-                               Foreground="White" />
+                               Foreground="White"
+                               Text="Terminal could not start" />
                     <TextBlock x:Name="FailureMessageText"
                                Margin="0,10,0,0"
                                HorizontalAlignment="Center"
