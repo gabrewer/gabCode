@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Darwin
 import Foundation
 import SwiftTerm
@@ -23,6 +24,19 @@ enum TerminalSessionError: Error, Equatable {
     case inaccessibleWorkingDirectory(URL)
     case unavailableShell
     case launchFailed
+    case launchCancelled
+}
+
+enum TerminalShellSelection: Equatable {
+    case configured(String)
+    case fallback(String)
+
+    var path: String {
+        switch self {
+        case let .configured(path), let .fallback(path):
+            path
+        }
+    }
 }
 
 enum TerminalShutdownResult: Equatable {
@@ -33,7 +47,7 @@ enum TerminalShutdownResult: Equatable {
 }
 
 @MainActor
-final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
+final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalViewDelegate {
     private static let defaultScrollbackLines = 2_000
     private static let forcedShutdownTimeout = Duration.seconds(2)
 
@@ -41,11 +55,15 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private let environment: [String: String]
     private var hostedTerminalView: LocalProcessTerminalView?
     private var hostedProcessTerminationRequested = false
+    private var startupInProgress = false
+    private var startupStopRequested = false
+    private var startupWaiters: [CheckedContinuation<Void, Never>] = []
 
-    private(set) var state: TerminalSessionState = .idle
+    @Published private(set) var state: TerminalSessionState = .idle
     private(set) var processIdentifier: pid_t?
     private(set) var processGroupIdentifier: pid_t?
     private(set) var pseudoTerminalDescriptor: Int32?
+    @Published private(set) var shellSelection: TerminalShellSelection?
     private var processSessionIdentifier: pid_t?
 
     var terminalView: NSView {
@@ -80,7 +98,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             throw TerminalSessionError.inaccessibleWorkingDirectory(workingDirectory)
         }
 
-        guard let shell = resolvedShell() else {
+        guard let shellSelection = resolvedShell() else {
             state = .failed
             throw TerminalSessionError.unavailableShell
         }
@@ -90,9 +108,15 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             throw TerminalSessionError.launchFailed
         }
 
+        startupInProgress = true
+        startupStopRequested = false
+        hostedProcessTerminationRequested = false
+        defer { finishStartup() }
+
         state = .starting
+        self.shellSelection = shellSelection
         hostedTerminalView.startProcess(
-            executable: shell,
+            executable: shellSelection.path,
             args: ["-l"],
             environment: childEnvironment(),
             currentDirectory: workingDirectory.path
@@ -105,16 +129,16 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let pid = process.shellPid
         let descriptor = process.childfd
         guard process.running, pid > 0, descriptor >= 0 else {
-            hostedTerminalView.terminate()
-            state = .failed
+            await abortLaunch(processIdentifier: pid)
+            state = startupStopRequested ? .closing : .failed
             throw TerminalSessionError.launchFailed
         }
 
         // forkpty can return to the parent before the child completes login_tty/setsid.
         // Never accept the host's Unix session as terminal-owned cleanup scope.
         guard let (processGroup, processSession) = await waitForDedicatedProcessIdentity(pid) else {
-            hostedTerminalView.terminate()
-            state = .failed
+            await abortLaunch(processIdentifier: pid)
+            state = startupStopRequested ? .closing : .failed
             throw TerminalSessionError.launchFailed
         }
 
@@ -122,6 +146,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         processGroupIdentifier = processGroup
         processSessionIdentifier = processSession
         pseudoTerminalDescriptor = descriptor
+        guard !startupStopRequested else {
+            state = .closing
+            throw TerminalSessionError.launchCancelled
+        }
         state = .ready
     }
 
@@ -164,6 +192,12 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     func stop(gracePeriod: Duration) async -> TerminalShutdownResult {
+        if startupInProgress {
+            startupStopRequested = true
+            state = .closing
+            await waitForStartupCompletion()
+        }
+
         guard
             let processGroupIdentifier,
             let processSessionIdentifier
@@ -228,6 +262,67 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
     }
 
+    private func waitForStartupCompletion() async {
+        guard startupInProgress else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            if startupInProgress {
+                startupWaiters.append(continuation)
+            } else {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func finishStartup() {
+        startupInProgress = false
+        let waiters = startupWaiters
+        startupWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    private func abortLaunch(processIdentifier: pid_t) async {
+        requestHostedProcessTermination()
+        guard processIdentifier > 0 else {
+            return
+        }
+
+        if await waitForExactProcessExit(processIdentifier, timeout: .milliseconds(250)) {
+            return
+        }
+
+        _ = kill(processIdentifier, SIGKILL)
+        _ = await waitForExactProcessExit(
+            processIdentifier,
+            timeout: Self.forcedShutdownTimeout
+        )
+    }
+
+    private func waitForExactProcessExit(
+        _ processIdentifier: pid_t,
+        timeout: Duration
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+
+        while true {
+            var status: Int32 = 0
+            let result = waitpid(processIdentifier, &status, WNOHANG)
+            if result == processIdentifier || (result == -1 && errno == ECHILD) {
+                return true
+            }
+            if kill(processIdentifier, 0) == -1 && errno == ESRCH {
+                return true
+            }
+            guard clock.now < deadline else {
+                return false
+            }
+            try? await clock.sleep(for: .milliseconds(10))
+        }
+    }
+
     private func waitForDedicatedProcessIdentity(
         _ processIdentifier: pid_t
     ) async -> (processGroup: pid_t, processSession: pid_t)? {
@@ -256,11 +351,14 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             && access(directory.path, R_OK | X_OK) == 0
     }
 
-    private func resolvedShell() -> String? {
-        let candidates = [environment["SHELL"], "/bin/zsh", "/bin/bash", "/bin/sh"]
-        return candidates
-            .compactMap { $0 }
+    private func resolvedShell() -> TerminalShellSelection? {
+        if let configuredShell = environment["SHELL"], isExecutableRegularFile(configuredShell) {
+            return .configured(configuredShell)
+        }
+
+        return ["/bin/zsh", "/bin/bash", "/bin/sh"]
             .first(where: isExecutableRegularFile)
+            .map(TerminalShellSelection.fallback)
     }
 
     private func isExecutableRegularFile(_ path: String) -> Bool {
