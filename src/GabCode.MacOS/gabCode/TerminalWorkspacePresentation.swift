@@ -26,17 +26,7 @@ final class TerminalWorkspacePresentation: ObservableObject {
     }
 
     var activeTerminalCount: Int {
-        let states: [TerminalSessionState] = [workspace.terminal1.state, workspace.terminal2.state]
-        return states.filter(isActive).count
-    }
-
-    private func isActive(_ state: TerminalSessionState) -> Bool {
-        switch state {
-        case .starting, .ready, .closing:
-            true
-        case .idle, .failed, .exited, .closed:
-            false
-        }
+        [workspace.terminal1, workspace.terminal2].filter(\.requiresCleanup).count
     }
 
     init(workspace: TerminalWorkspace, workingDirectory: URL) {

@@ -71,6 +71,56 @@ final class TerminalWorkspacePresentationTests: XCTestCase {
         XCTAssertEqual(presentation.activeTerminalCount, 1)
     }
 
+    func testExitedRootsWithLiveDescendantsRemainActiveUntilOwnedCleanupCompletes() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let workspace = TerminalWorkspace(workingDirectory: directory, environment: ["SHELL": "/bin/sh"])
+        let presentation = TerminalWorkspacePresentation(workspace: workspace, workingDirectory: directory)
+        var descendants: [pid_t] = []
+        defer {
+            descendants.forEach { _ = kill($0, SIGKILL) }
+            Task { await workspace.stop(gracePeriod: .milliseconds(250)) }
+        }
+
+        await presentation.start()
+        for (terminal, fileName) in [
+            (workspace.terminal1, "terminal 1 surviving descendant.pid"),
+            (workspace.terminal2, "terminal 2 surviving descendant.pid"),
+        ] {
+            let identifierFile = directory.appendingPathComponent(fileName)
+            try terminal.send(
+                "(trap '' HUP TERM; while :; do sleep 60; done) & printf '%s' $! > '\(fileName)'; exit\n"
+            )
+            try await waitForFile(identifierFile)
+            descendants.append(
+                try XCTUnwrap(
+                    pid_t(String(contentsOf: identifierFile, encoding: .utf8)
+                        .trimmingCharacters(in: .whitespacesAndNewlines))
+                )
+            )
+        }
+
+        try await waitForPresentationState(presentation, terminal: .terminal1, .exited)
+        try await waitForPresentationState(presentation, terminal: .terminal2, .exited)
+        descendants.forEach {
+            XCTAssertEqual(kill($0, 0), 0, "Expected the controlled descendant to survive its root shell exit.")
+        }
+        XCTAssertEqual(
+            presentation.activeTerminalCount,
+            2,
+            "Exited roots with live owned descendants must still block close/quit cleanup."
+        )
+
+        let results = await workspace.stopResults(gracePeriod: .milliseconds(250))
+        XCTAssertFalse(results.contains(.failed))
+        for descendant in descendants {
+            try await waitForProcessExit(descendant)
+        }
+        XCTAssertEqual(workspace.terminal1.state, .closed)
+        XCTAssertEqual(workspace.terminal2.state, .closed)
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("gabCode retained workspace ünicode", isDirectory: true)
@@ -90,5 +140,24 @@ final class TerminalWorkspacePresentationTests: XCTestCase {
             try await clock.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(presentation.state(for: terminal), expectedState)
+    }
+
+    private func waitForFile(_ file: URL) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        while !FileManager.default.fileExists(atPath: file.path) && clock.now < deadline {
+            try await clock.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "Expected controlled shell command to create \(file.lastPathComponent).")
+    }
+
+    private func waitForProcessExit(_ processIdentifier: pid_t) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        while kill(processIdentifier, 0) == 0 && clock.now < deadline {
+            try await clock.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(kill(processIdentifier, 0), -1, "Expected controlled descendant \(processIdentifier) to be gone after owned cleanup.")
+        XCTAssertEqual(errno, ESRCH)
     }
 }
