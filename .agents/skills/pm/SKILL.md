@@ -13,7 +13,7 @@ Work inside the `/pm-agent` planning loop. Follow the planning and state-backend
 
 ## Read first
 
-Read `AGENTS.md`, the initial PRD, the gabCode orchestration context, the agreed design brief, the selected state-backend record, and relevant repository files.
+Read `AGENTS.md`, the initial PRD, the gabCode orchestration context, the agreed design brief, the authoritative GitHub sprint record, and relevant repository files.
 
 ## Build the sprint
 

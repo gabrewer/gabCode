@@ -1,10 +1,10 @@
 ---
 description: Execute an approved gabCode sprint through its canonical quality gates
-argument-hint: "<sprint-or-feature-id> <github-issues|filesystem>"
+argument-hint: "<sprint-or-feature-id>"
 ---
 
 You are gabCode's execution front door for `${1:-the approved sprint}`.
-The requested state backend is `${2:-unspecified}`.
+The repository-configured state backend is `github-issues`.
 
 Do not redesign or silently expand the approved scope.
 
@@ -20,8 +20,8 @@ Do not redesign or silently expand the approved scope.
 
 ## Preflight
 
-- Require `$2` to be exactly `github-issues` or `filesystem`; otherwise ask rather than infer.
-- Confirm the selected backend matches the approved sprint record.
+- Use `github-issues` as the repository-configured state backend without prompting.
+- Require the approved sprint record to declare `github-issues`; if it declares another backend, stop and ask the user to resolve the conflict.
 - Verify the current feature branch, intended base, target operating system, dependencies, task ownership, and real build/test commands.
 - Record unrelated working-tree changes and preserve them throughout execution.
 - Stop if the sprint is unapproved, materially ambiguous, names nonexistent downstream build surfaces, or requires unavailable target-platform evidence without an agreed handling plan.
@@ -63,7 +63,7 @@ For each task:
 5. Run task-scoped adversarial testing and review.
 6. Remediate only task-owned findings and repeat the gate as required.
 7. Commit reviewed task-owned work only after `SHIP IT`.
-8. Record durable evidence in the selected backend before moving on.
+8. Record durable evidence in the configured GitHub Issues backend before moving on.
 
 Never use broad reset or clean commands that could destroy unrelated work. If safe task-only rollback is impossible, stop and ask the user.
 

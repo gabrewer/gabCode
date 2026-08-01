@@ -26,10 +26,10 @@ AGENTS.md                   # Repo-wide Pi context/instructions
   settings.json             # Optional Pi resource/model/tool settings
   tmp/                      # Temporary GitHub issue bodies/comments; never committed
 verify/                     # Verification scripts (one subdirectory per feature)
-task-issues.json            # Task ID → GitHub issue number mapping (GitHub mode only)
+task-issues.json            # Task ID → GitHub issue number mapping
 ```
 
-In filesystem state-backend mode, durable orchestration state lives in the paths defined by `TEAM-ORCHESTRATION.md`, such as `docs/sprints/`, `docs/reviews/`, and `docs/reports/`.
+This repository pins orchestration state to GitHub Issues. Filesystem state-backend paths described by `TEAM-ORCHESTRATION.md` are retained only as inactive portability guidance and must not be used unless the repository policy is explicitly changed.
 
 ---
 
@@ -128,7 +128,7 @@ description: Builds backend code for one assigned task in this repository. Use w
 
 # Backend Builder
 
-Read `AGENTS.md`, `instructions/TEAM-ORCHESTRATION.md`, the sprint issue/file, and the files named in the task before editing. Follow the repository's existing backend architecture and verification commands. Never modify tests unless this task explicitly assigns test work.
+Read `AGENTS.md`, `instructions/TEAM-ORCHESTRATION.md`, the GitHub sprint issue, and the files named in the task before editing. Follow the repository's existing backend architecture and verification commands. Never modify tests unless this task explicitly assigns test work.
 ```
 
 Keep the first version conservative. Prefer narrow, repository-specific instructions over broad generic agent personas.
@@ -137,10 +137,10 @@ Keep the first version conservative. Prefer narrow, repository-specific instruct
 
 Install both:
 
-- `.pi/prompts/pm-agent.md` — converts a PRD/spec into an audited sprint issue/file.
+- `.pi/prompts/pm-agent.md` — converts a PRD/spec into an audited GitHub sprint issue.
 - `.pi/prompts/team-lead.md` — executes an approved sprint through worker skills and quality gates.
 
-Both prompts must name exact files to read first, the selected state backend, temp-file paths, quality-gate headings, verification commands, and the rule that acceptance verification is prepared for a human rather than self-approved.
+Both prompts must name exact files to read first, the repository-configured `github-issues` state backend, temp-file paths, quality-gate headings, verification commands, and the rule that acceptance verification is prepared for a human rather than self-approved.
 
 Before creating prompts and skills, present a concise resource map showing each prompt, the worker skills it coordinates, and the proposed provider/model/thinking assignment. This is a design review, not a requirement to forbid additional prompts.
 
@@ -176,7 +176,7 @@ Fix missing frontmatter, invalid skill names, or path mistakes before planning r
 
 Pi prompt templates live in `.pi/prompts/*.md` and become slash commands in interactive mode. Use them for human-facing workflows such as brainstorming, planning, team-lead execution, review, or release checklists.
 
-High-quality project workflows should use **thin, project-specific front-door prompts** rather than generic agent invocations. A good `/pm-agent` prompt reads the design/spec, audits source, creates the authoritative sprint issue/file, and defines the task quality bar. A good `/team-lead` prompt runs the build loop itself, loading worker skills by path at each phase and enforcing the canonical gates from `TEAM-ORCHESTRATION.md` before completion.
+High-quality project workflows should use **thin, project-specific front-door prompts** rather than generic agent invocations. A good `/pm-agent` prompt reads the design/spec, audits source, creates the authoritative GitHub sprint issue, and defines the task quality bar. A good `/team-lead` prompt runs the build loop itself, loading worker skills by path at each phase and enforcing the canonical gates from `TEAM-ORCHESTRATION.md` before completion.
 
 Use worker skills for internal phases by default. Add another prompt when it gives the user a distinct workflow or operator utility, and state how it relates to the two primary front doors.
 
@@ -184,11 +184,11 @@ Example:
 
 ```markdown
 ---
-description: Plan a sprint using the user-selected state backend
-argument-hint: "<feature-or-prd> <github-issues|filesystem>"
+description: Plan a sprint using the repository-configured GitHub Issues backend
+argument-hint: "<feature-or-prd>"
 ---
 
-Plan a sprint for $1 using state backend $2. Follow instructions/TEAM-ORCHESTRATION.md.
+Plan a sprint for $1 using the fixed `github-issues` state backend. Follow instructions/TEAM-ORCHESTRATION.md.
 ```
 
 Templates support `$1`, `$2`, `$@`, and related positional argument forms.
@@ -198,7 +198,7 @@ Templates support `$1`, `$2`, `$@`, and related positional argument forms.
 Use the Lessi.App sequence-parity workflow as the target quality bar for generated Pi prompt templates:
 
 - **Read-before-write list**: name exact standards, spec files, source areas, tests, and existing issue comments to read before planning or execution.
-- **Single source of truth**: state whether GitHub Issues or filesystem is authoritative. In GitHub mode, prefer one umbrella/control sprint issue with comments/checklists when the human wants to avoid issue sprawl.
+- **Single source of truth**: state that the repository-configured `github-issues` backend is authoritative. Prefer one umbrella/control sprint issue with comments/checklists when the human wants to avoid issue sprawl.
 - **Full-stack default**: require a Contract Impact Check before tasking. Frontend-only is allowed only when explicitly marked `UI polish only`, `docs only`, or `frontend prototype only`.
 - **No state tunneling**: forbid production behavior that hides structured domain state in free-text fields such as `notes`, `description`, `metadataJson`, or local/session storage when a typed API contract is required.
 - **Write-side validation**: if typed IDs link persisted resources, require create/update paths to reject malformed, nonexistent, deleted, cross-user/tenant, and invalid child-item references before persistence.
@@ -217,8 +217,8 @@ Use the Lessi.App sequence-parity workflow as the target quality bar for generat
 For this orchestration style, install at least:
 
 ```text
-.pi/prompts/pm-agent.md      # spec/design → audited sprint issue/file
-.pi/prompts/team-lead.md     # sprint issue/file → build loop + gates + final summary + acceptance checklist
+.pi/prompts/pm-agent.md      # spec/design → audited GitHub sprint issue
+.pi/prompts/team-lead.md     # GitHub sprint issue → build loop + gates + final summary + acceptance checklist
 .pi/prompts/pr-checkpoint.md  # branch/base → commits/files + review-boundary recommendation
 ```
 
@@ -264,21 +264,22 @@ pi -p --tools read,bash,grep,find,ls "Review this task without editing files"
 
 Run orchestration through the Pi front-door prompts:
 
-- `/pm-agent <feature-or-prd> <github-issues|filesystem>` plans the work and prepares the authoritative sprint record.
-- `/team-lead <sprint-or-feature-id> <github-issues|filesystem>` executes an approved plan through the worker skills and canonical quality gates.
+- `/pm-agent <feature-or-prd>` plans the work and prepares the authoritative GitHub sprint record.
+- `/team-lead <sprint-or-feature-id>` executes an approved GitHub-backed plan through the worker skills and canonical quality gates.
 
-The Team Lead reads each required `SKILL.md` before adopting that worker role. It returns to the coordinator role between phases and updates the selected state backend. If a project later adds an extension for isolated delegation, that extension must preserve the same worker contracts, tool restrictions, and evidence rules.
+The Team Lead reads each required `SKILL.md` before adopting that worker role. It returns to the coordinator role between phases and updates the configured GitHub Issues backend. If a project later adds an extension for isolated delegation, that extension must preserve the same worker contracts, tool restrictions, and evidence rules.
 
 ---
 
 ## State Backend Rules
 
-Follow `TEAM-ORCHESTRATION.md`: the **user specifies** either GitHub Issues mode or filesystem mode as the state backend. Do not choose autonomously.
+Follow `TEAM-ORCHESTRATION.md`: this repository's state backend is fixed to **GitHub Issues mode** (`github-issues`). Do not prompt for or choose a different backend.
 
-- **GitHub Issues mode:** post progress and reports as issue comments. Use `.pi/tmp/` for `gh --body-file` drafts and do not commit those drafts.
-- **Filesystem mode:** write progress and reports to `docs/sprints/`, `docs/reviews/`, and `docs/reports/` using the same markdown headings.
+- Post progress and reports as issue comments.
+- Use `.pi/tmp/` for `gh --body-file` drafts and do not commit those drafts.
+- Do not write filesystem orchestration state to `docs/sprints/`, `docs/reviews/`, or `docs/reports/` unless a human explicitly changes the repository policy.
 
-Pi prompts and skills should preserve the selected backend through every phase. If a worker contract lacks the backend, stop and ask the Team Lead to provide it rather than guessing.
+Pi prompts and skills must preserve `github-issues` through every phase. If a worker contract or approved sprint record declares another backend, stop and ask the Team Lead to resolve the conflict.
 
 ---
 
@@ -291,7 +292,7 @@ Useful extension ideas for this workflow:
 - block writes to `.env`, `node_modules`, `bin`, `obj`, and generated output directories;
 - intercept dangerous bash commands and require confirmation;
 - register helper commands such as `/team-status` or `/post-agent-update`;
-- add custom tools for reading/writing the selected state backend consistently;
+- add custom tools for reading/writing the configured GitHub Issues backend consistently;
 - route important prompts/skills to stronger models with a shared `.pi/skill-models.json` configuration.
 
 A proven Pi setup uses `.pi/extensions/skill-model-router.ts` plus `.pi/skill-models.json` so `/team-lead`, `/pm-agent`, destroyer, reviewer, tester, and specialized builders get deliberate model/thinking settings.

@@ -21,7 +21,7 @@ Read:
 - the requested feature/design source;
 - relevant existing UI and tests when they exist.
 
-Use the state backend and output location supplied by `/pm-agent`. Never choose one yourself.
+Use the configured GitHub Issues backend and output location supplied by `/pm-agent`. Never choose a different backend yourself.
 
 For user-visible workflows, load `.agents/skills/gabcode-native-accessibility/SKILL.md`, then reactivate `product-designer` when model routing is available before completing the design.
 
