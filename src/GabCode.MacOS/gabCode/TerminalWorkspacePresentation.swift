@@ -25,6 +25,20 @@ final class TerminalWorkspacePresentation: ObservableObject {
         mainTerminal == .terminal1 ? .terminal2 : .terminal1
     }
 
+    var activeTerminalCount: Int {
+        let states: [TerminalSessionState] = [workspace.terminal1.state, workspace.terminal2.state]
+        return states.filter(isActive).count
+    }
+
+    private func isActive(_ state: TerminalSessionState) -> Bool {
+        switch state {
+        case .starting, .ready, .closing:
+            true
+        case .idle, .failed, .exited, .closed:
+            false
+        }
+    }
+
     init(workspace: TerminalWorkspace, workingDirectory: URL) {
         self.workspace = workspace
         self.workingDirectory = workingDirectory

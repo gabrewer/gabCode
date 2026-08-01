@@ -47,8 +47,14 @@ final class TerminalWorkspace {
     }
 
     func stop(gracePeriod: Duration) async {
-        _ = await terminal1.stop(gracePeriod: gracePeriod)
-        _ = await terminal2.stop(gracePeriod: gracePeriod)
+        _ = await stopResults(gracePeriod: gracePeriod)
+    }
+
+    func stopResults(gracePeriod: Duration) async -> [TerminalShutdownResult] {
+        [
+            await terminal1.stop(gracePeriod: gracePeriod),
+            await terminal2.stop(gracePeriod: gracePeriod),
+        ]
     }
 
     private func start(_ session: TerminalSession) async {

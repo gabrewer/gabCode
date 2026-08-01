@@ -9,6 +9,8 @@ import SwiftUI
 
 @main
 struct gabCodeApp: App {
+    @NSApplicationDelegateAdaptor(GabCodeAppDelegate.self) private var appDelegate
+
     var body: some Scene {
         Window("gabCode", id: "main") {
             ContentView()
