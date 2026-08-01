@@ -36,7 +36,9 @@ Read the approved sprint record and the task-named files before changing code.
 
 ## State, Git, and acceptance
 
-- The user must select `github-issues` or `filesystem` before planning artifacts are created.
+- This repository's orchestration state backend is always `github-issues`.
+- Planning and execution must use `github-issues` without prompting for a backend.
+- Do not use filesystem-backed orchestration state unless a human explicitly changes this repository policy.
 - Keep `.pi/tmp/` drafts and tool runtime state untracked.
 - Never close GitHub issues or apply final completion labels; prepare evidence for human disposition.
 - Never push directly to `main` or `master`. Use a feature branch and follow repository rebase-only synchronization rules.
