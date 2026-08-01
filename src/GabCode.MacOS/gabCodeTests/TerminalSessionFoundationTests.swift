@@ -180,6 +180,36 @@ final class TerminalSessionFoundationTests: XCTestCase {
         try await waitForProcessExit(childIdentifier)
     }
 
+    func testFailedCleanupRetainsOwnershipAndNeverReportsAlreadyStopped() async throws {
+        let workspace = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let session = TerminalSession(
+            workingDirectory: workspace,
+            environment: ["SHELL": "/bin/sh"],
+            processGroupSignaler: { _, _ in }
+        )
+        defer {
+            if let processGroup = session.processGroupIdentifier {
+                _ = kill(-processGroup, SIGKILL)
+            }
+            Task { await session.stop(gracePeriod: .milliseconds(10)) }
+        }
+
+        try await session.start()
+        try session.send("trap '' HUP TERM; while :; do sleep 60; done\n")
+        let firstResult = await session.stop(gracePeriod: .milliseconds(10))
+        XCTAssertEqual(firstResult, .failed)
+        XCTAssertEqual(session.state, .failed)
+        XCTAssertTrue(session.requiresCleanup)
+        XCTAssertNotNil(session.processIdentifier)
+        XCTAssertNotNil(session.processGroupIdentifier)
+        XCTAssertNotNil(session.pseudoTerminalDescriptor)
+
+        let secondResult = await session.stop(gracePeriod: .milliseconds(10))
+        XCTAssertEqual(secondResult, .failed)
+        XCTAssertTrue(session.requiresCleanup)
+    }
+
     func testExitedRootNeverSignalsItsStaleProcessGroup() async throws {
         let workspace = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: workspace) }

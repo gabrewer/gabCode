@@ -71,6 +71,7 @@ struct TerminalWorkspaceView: View {
                 presentation.swapTerminals()
             }
             .keyboardShortcut("t", modifiers: [.command, .shift])
+            .disabled(presentation.isMutationLocked)
             .accessibilityIdentifier("swap-terminals")
         }
         .padding(.horizontal, 10)
@@ -117,11 +118,12 @@ private struct TerminalRegionView: View {
                     .accessibilityLabel("\(terminalTitle) status")
                     .accessibilityValue(statusText)
 
-                if session.state == .failed {
+                if session.state == .failed && !session.requiresCleanup {
                     Button("Retry") {
                         Task { await presentation.retry(terminal) }
                     }
                     .controlSize(.small)
+                    .disabled(presentation.isMutationLocked)
                     .accessibilityLabel("Retry \(terminalTitle)")
                 }
             }
@@ -139,7 +141,11 @@ private struct TerminalRegionView: View {
                 case .idle, .starting:
                     terminalPlaceholder("Starting local login shell…")
                 case .failed:
-                    terminalPlaceholder("This terminal failed to start. Retry only this terminal.")
+                    if session.requiresCleanup {
+                        terminalPlaceholder("Terminal cleanup could not be verified. Close or quit again to retry safely.")
+                    } else {
+                        terminalPlaceholder("This terminal failed to start. Retry only this terminal.")
+                    }
                 case .closed:
                     terminalPlaceholder("This terminal is closed.")
                 }
@@ -183,6 +189,7 @@ private struct TerminalRegionView: View {
             case let .fallback(path): "Ready · fallback \(URL(fileURLWithPath: path).lastPathComponent)"
             }
         case .failed: "Failed"
+        case .cleanupFailed: "Cleanup failed"
         case .exited: "Exited"
         case .closing: "Closing"
         case .closed: "Closed"

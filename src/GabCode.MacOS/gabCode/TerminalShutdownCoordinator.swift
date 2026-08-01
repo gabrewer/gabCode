@@ -63,9 +63,10 @@ final class TerminalShutdownCoordinator: ObservableObject {
     }
 
     private func requestConfirmation(for window: NSWindow, completion: @escaping (Bool) -> Void) {
-        guard !isStopping, pendingWindow == nil else {
+        guard !isStopping, pendingWindow == nil, let presentation else {
             return
         }
+        presentation.setMutationLocked(true)
         pendingWindow = window
         let responder = window.firstResponder
         let alert = NSAlert()
@@ -74,31 +75,34 @@ final class TerminalShutdownCoordinator: ObservableObject {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Close and Stop Terminals")
-        alert.beginSheetModal(for: window) { [weak self, weak window] response in
-            guard let self else {
+        alert.beginSheetModal(for: window) { [weak self, weak window, weak presentation] response in
+            guard let self, let presentation else {
+                presentation?.setMutationLocked(false)
                 completion(false)
                 return
             }
             self.pendingWindow = nil
             guard response == NSApplication.ModalResponse(rawValue: 1001) else {
+                presentation.setMutationLocked(false)
                 if let window, let responder {
                     window.makeFirstResponder(responder)
                 }
                 completion(false)
                 return
             }
+            guard self.presentation === presentation else {
+                presentation.setMutationLocked(false)
+                completion(false)
+                return
+            }
             self.isStopping = true
             Task {
-                guard let presentation = self.presentation else {
-                    self.isStopping = false
-                    completion(false)
-                    return
-                }
                 let results = await presentation.workspace.stopResults(gracePeriod: .milliseconds(500))
                 self.isStopping = false
                 if results.allSatisfy({ $0 != .failed }) {
                     completion(true)
                 } else {
+                    presentation.setMutationLocked(false)
                     let failure = NSAlert()
                     failure.messageText = "Terminal cleanup did not complete"
                     failure.informativeText = "gabCode remains open because one or more owned terminal sessions could not be verified as stopped."

@@ -106,10 +106,22 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Stop 2 active terminals?"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.sheets.buttons["Cancel"].exists)
         XCTAssertTrue(app.sheets.buttons["Close and Stop Terminals"].exists)
+        let mainTerminalLabel = app.staticTexts["main-terminal-label"]
+        XCTAssertEqual(mainTerminalLabel.value as? String, "Main: Terminal 1")
+        XCTAssertFalse(app.buttons["swap-terminals"].isEnabled, "Cleanup confirmation must lock placement mutation.")
+        app.typeKey("t", modifierFlags: [.command, .shift])
+        XCTAssertEqual(mainTerminalLabel.value as? String, "Main: Terminal 1", "A cleanup lock must reject Command-Shift-T.")
         app.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(app.sheets.buttons["Cancel"].exists, "Duplicate quit must preserve the original confirmation.")
         app.sheets.buttons["Cancel"].click()
         XCTAssertTrue(app.groups["terminal-workspace"].exists, "Cancel must preserve the workspace.")
+        XCTAssertTrue(app.buttons["swap-terminals"].isEnabled, "Cancel must release the placement mutation lock.")
+        app.typeKey("t", modifierFlags: [.command, .shift])
+        let swappedAfterCancel = expectation(
+            for: NSPredicate(format: "value == %@", "Main: Terminal 2"),
+            evaluatedWith: mainTerminalLabel
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [swappedAfterCancel], timeout: 5), .completed)
 
         app.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(app.staticTexts["Stop 2 active terminals?"].waitForExistence(timeout: 5))

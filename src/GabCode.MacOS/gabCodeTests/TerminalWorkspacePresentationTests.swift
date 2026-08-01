@@ -71,6 +71,61 @@ final class TerminalWorkspacePresentationTests: XCTestCase {
         XCTAssertEqual(presentation.activeTerminalCount, 1)
     }
 
+    func testPresentationShowsCleanupFailureAndRetainsActiveOwnership() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = TerminalSession(
+            workingDirectory: directory,
+            environment: ["SHELL": "/bin/sh"],
+            processGroupSignaler: { _, _ in }
+        )
+        let workspace = TerminalWorkspace(terminal1: session, terminal2: TerminalSession(workingDirectory: directory, environment: ["SHELL": "/bin/sh"]))
+        let presentation = TerminalWorkspacePresentation(workspace: workspace, workingDirectory: directory)
+        defer {
+            if let processGroup = session.processGroupIdentifier {
+                _ = kill(-processGroup, SIGKILL)
+            }
+            Task { await workspace.stop(gracePeriod: .milliseconds(10)) }
+        }
+
+        try await session.start()
+        try session.send("trap '' HUP TERM; while :; do sleep 60; done\n")
+        let shutdown = await session.stop(gracePeriod: .milliseconds(10))
+        XCTAssertEqual(shutdown, .failed)
+
+        XCTAssertEqual(presentation.state(for: .terminal1), .cleanupFailed)
+        XCTAssertEqual(presentation.activeTerminalCount, 1)
+    }
+
+    func testMutationLockDisablesTerminalCommandsWithoutReplacingSessions() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = TerminalWorkspace(workingDirectory: directory, environment: ["SHELL": "/bin/sh"])
+        let presentation = TerminalWorkspacePresentation(workspace: workspace, workingDirectory: directory)
+        let router = TerminalCommandRouter.shared
+        defer {
+            router.disconnect(presentation)
+            Task { await workspace.stop(gracePeriod: .milliseconds(250)) }
+        }
+
+        await presentation.start()
+        let terminal1PID = try XCTUnwrap(workspace.terminal1.processIdentifier)
+        router.connect(presentation)
+        presentation.setMutationLocked(true)
+
+        XCTAssertTrue(presentation.isMutationLocked)
+        XCTAssertFalse(router.isAvailable)
+        router.swapTerminals()
+        XCTAssertEqual(presentation.mainTerminal, .terminal1)
+        XCTAssertEqual(workspace.terminal1.processIdentifier, terminal1PID)
+
+        presentation.setMutationLocked(false)
+        XCTAssertTrue(router.isAvailable)
+        router.swapTerminals()
+        XCTAssertEqual(presentation.mainTerminal, .terminal2)
+        XCTAssertEqual(workspace.terminal1.processIdentifier, terminal1PID)
+    }
+
     func testExitedRootsWithLiveDescendantsRemainActiveUntilOwnedCleanupCompletes() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

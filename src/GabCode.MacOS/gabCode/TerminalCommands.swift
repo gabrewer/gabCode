@@ -7,18 +7,26 @@ final class TerminalCommandRouter: ObservableObject {
 
     @Published private(set) var isAvailable = false
     private weak var presentation: TerminalWorkspacePresentation?
+    private var mutationLockCancellable: AnyCancellable?
 
     private init() {}
 
     func connect(_ presentation: TerminalWorkspacePresentation) {
         self.presentation = presentation
-        isAvailable = true
+        mutationLockCancellable = presentation.$isMutationLocked
+            .map { !$0 }
+            .removeDuplicates()
+            .sink { [weak self] isAvailable in
+                self?.isAvailable = isAvailable
+            }
     }
 
     func disconnect(_ presentation: TerminalWorkspacePresentation) {
         guard self.presentation === presentation else {
             return
         }
+        mutationLockCancellable?.cancel()
+        mutationLockCancellable = nil
         self.presentation = nil
         isAvailable = false
     }
