@@ -53,6 +53,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
 
     private let workingDirectory: URL
     private let environment: [String: String]
+    private let processGroupSignaler: (pid_t, Int32) -> Void
     private var hostedTerminalView: LocalProcessTerminalView?
     private var hostedProcessTerminationRequested = false
     private var startupInProgress = false
@@ -73,9 +74,38 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         return hostedTerminalView
     }
 
-    init(workingDirectory: URL, environment: [String: String] = ProcessInfo.processInfo.environment) {
+    var requiresCleanup: Bool {
+        if startupInProgress {
+            return true
+        }
+
+        switch state {
+        case .starting, .ready, .closing:
+            return true
+        case .failed:
+            // A failed cleanup intentionally retains its owned scope until a later stop proves
+            // that no process remains. Startup failures have no session identifier and stay inert.
+            return processSessionIdentifier != nil
+        case .exited:
+            guard let processSessionIdentifier else {
+                return false
+            }
+            return processSessionExists(processSessionIdentifier)
+        case .idle, .closed:
+            return false
+        }
+    }
+
+    init(
+        workingDirectory: URL,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        processGroupSignaler: @escaping (pid_t, Int32) -> Void = { processGroup, signal in
+            _ = kill(-processGroup, signal)
+        }
+    ) {
         self.workingDirectory = workingDirectory
         self.environment = environment
+        self.processGroupSignaler = processGroupSignaler
         let terminalView = LocalProcessTerminalView(
             frame: CGRect(x: 0, y: 0, width: 800, height: 500)
         )
@@ -91,6 +121,9 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     func start() async throws {
         guard state == .idle || state == .failed else {
             return
+        }
+        guard processSessionIdentifier == nil else {
+            throw TerminalSessionError.launchFailed
         }
 
         guard isUsableDirectory(workingDirectory) else {
@@ -216,10 +249,13 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         // Give the shell a bounded opportunity to reap terminated background jobs before
         // signaling its own group. Reparented jobs remain discoverable by Unix session ID.
         try? await ContinuousClock().sleep(for: .milliseconds(25))
-        signalProcessGroup(processGroupIdentifier, signal: SIGTERM)
+        signalProcessGroupIfOwned(
+            processGroupIdentifier,
+            in: processSessionIdentifier,
+            signal: SIGTERM
+        )
         if await waitForProcessSessionExit(
             processSessionIdentifier,
-            rootProcessGroup: processGroupIdentifier,
             timeout: gracePeriod,
             repeating: SIGTERM
         ) {
@@ -228,15 +264,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
             return .graceful
         }
 
-        signalProcessSession(
-            processSessionIdentifier,
-            rootProcessGroup: processGroupIdentifier,
-            signal: SIGKILL
-        )
+        signalProcessSession(processSessionIdentifier, signal: SIGKILL)
         requestHostedProcessTermination()
         if await waitForProcessSessionExit(
             processSessionIdentifier,
-            rootProcessGroup: processGroupIdentifier,
             timeout: Self.forcedShutdownTimeout,
             repeating: SIGKILL
         ) {
@@ -245,7 +276,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
             return .forced
         }
 
-        releaseHostedProcess()
+        // Keep the host and validated process identity so another close/quit cannot be
+        // reported as clean and a later bounded stop can retry verification.
         state = .failed
         return .failed
     }
@@ -377,7 +409,18 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     }
 
     private func signalProcessGroup(_ processGroup: pid_t, signal: Int32) {
-        _ = kill(-processGroup, signal)
+        processGroupSignaler(processGroup, signal)
+    }
+
+    private func signalProcessGroupIfOwned(
+        _ processGroup: pid_t,
+        in processSession: pid_t,
+        signal: Int32
+    ) {
+        guard processGroups(in: processSession).contains(processGroup) else {
+            return
+        }
+        signalProcessGroup(processGroup, signal: signal)
     }
 
     private func signalDescendantProcessGroups(
@@ -386,26 +429,18 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         signal: Int32
     ) {
         for processGroup in processGroups(in: processSession) where processGroup != rootProcessGroup {
-            signalProcessGroup(processGroup, signal: signal)
+            signalProcessGroupIfOwned(processGroup, in: processSession, signal: signal)
         }
     }
 
-    private func signalProcessSession(
-        _ processSession: pid_t,
-        rootProcessGroup: pid_t,
-        signal: Int32
-    ) {
-        signalDescendantProcessGroups(
-            in: processSession,
-            excluding: rootProcessGroup,
-            signal: signal
-        )
-        signalProcessGroup(rootProcessGroup, signal: signal)
+    private func signalProcessSession(_ processSession: pid_t, signal: Int32) {
+        for processGroup in processGroups(in: processSession) {
+            signalProcessGroupIfOwned(processGroup, in: processSession, signal: signal)
+        }
     }
 
     private func waitForProcessSessionExit(
         _ processSession: pid_t,
-        rootProcessGroup: pid_t,
         timeout: Duration,
         repeating signal: Int32
     ) async -> Bool {
@@ -421,11 +456,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
             guard clock.now < deadline else {
                 return false
             }
-            signalProcessSession(
-                processSession,
-                rootProcessGroup: rootProcessGroup,
-                signal: signal
-            )
+            signalProcessSession(processSession, signal: signal)
             try? await clock.sleep(for: .milliseconds(10))
         }
     }

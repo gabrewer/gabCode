@@ -180,6 +180,44 @@ final class TerminalSessionFoundationTests: XCTestCase {
         try await waitForProcessExit(childIdentifier)
     }
 
+    func testExitedRootNeverSignalsItsStaleProcessGroup() async throws {
+        let workspace = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        var signaledGroups: [pid_t] = []
+        let session = TerminalSession(
+            workingDirectory: workspace,
+            environment: ["SHELL": "/bin/sh"],
+            processGroupSignaler: { processGroup, signal in
+                signaledGroups.append(processGroup)
+                _ = kill(-processGroup, signal)
+            }
+        )
+        defer { Task { await session.stop(gracePeriod: .milliseconds(250)) } }
+
+        try await session.start()
+        let rootProcessGroup = try XCTUnwrap(session.processGroupIdentifier)
+        let childIdentifierFile = workspace.appendingPathComponent("separate child process group pid.txt")
+        try session.send(
+            "(trap '' HUP TERM; while :; do sleep 60; done) & printf '%s' $! > 'separate child process group pid.txt'; exit\n"
+        )
+        try await waitForFile(childIdentifierFile)
+        let childIdentifier = try XCTUnwrap(
+            pid_t(String(contentsOf: childIdentifierFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines))
+        )
+        defer { _ = kill(childIdentifier, SIGKILL) }
+        try await waitForSessionState(session, .exited)
+        let childProcessGroup = getpgid(childIdentifier)
+        XCTAssertGreaterThan(childProcessGroup, 0)
+        XCTAssertNotEqual(childProcessGroup, rootProcessGroup, "The controlled background job must occupy a separate owned process group.")
+
+        _ = await session.stop(gracePeriod: .milliseconds(250))
+        XCTAssertFalse(
+            signaledGroups.contains(rootProcessGroup),
+            "An exited root's cached PGID must be revalidated and skipped when it no longer has a live member in the owned session."
+        )
+        try await waitForProcessExit(childIdentifier)
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("gabCode terminal workspace ünicode", isDirectory: true)
