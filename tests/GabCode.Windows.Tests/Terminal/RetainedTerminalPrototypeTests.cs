@@ -78,7 +78,7 @@ public sealed class RetainedTerminalPrototypeTests
     }
 
     [Fact]
-    public async Task Lifecycle_and_fallback_status_expose_their_current_values_to_UI_Automation()
+    public async Task Terminal_and_fallback_status_expose_their_current_values_to_UI_Automation()
     {
         await RunOnStaAsync(async () =>
         {
@@ -96,10 +96,8 @@ public sealed class RetainedTerminalPrototypeTests
             {
                 var profileStatus = Assert.IsType<TextBlock>(pi.FindName("ProfileStatusText"));
                 var sessionStatus = Assert.IsType<TextBlock>(pi.FindName("SessionStateText"));
-                var globalStatus = Assert.IsType<TextBlock>(window.FindName("TerminalLifecycleStatus"));
                 Assert.Contains("fallback", AutomationProperties.GetName(profileStatus), StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("Ready", AutomationProperties.GetName(sessionStatus), StringComparison.Ordinal);
-                Assert.Contains("Pi: Ready", AutomationProperties.GetName(globalStatus), StringComparison.Ordinal);
             }
             finally
             {

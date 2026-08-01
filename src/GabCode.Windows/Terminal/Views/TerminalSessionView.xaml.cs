@@ -30,11 +30,8 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
         this.workingDirectory = workingDirectory;
         this.resolveProfile = resolveProfile ?? throw new ArgumentNullException(nameof(resolveProfile));
         InitializeComponent();
-        var label = kind.ToString();
-        SessionNameText.Text = label;
-        AutomationProperties.SetName(this, $"{label} terminal");
-        AutomationProperties.SetName(RetryButton, $"Retry {label} terminal");
-        FailureTitleText.Text = $"{label} terminal could not start";
+        AutomationProperties.SetName(this, "Terminal");
+        AutomationProperties.SetName(RetryButton, "Retry terminal");
         SetProfileStatus("Shell profile not resolved");
         SetStateStatus("Not started");
         Loaded += TerminalSessionView_Loaded;
@@ -189,7 +186,7 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
     private void SetProfileStatus(string status)
     {
         ProfileStatusText.Text = status;
-        AutomationProperties.SetName(ProfileStatusText, $"{kind} shell profile status: {status}");
+        AutomationProperties.SetName(ProfileStatusText, $"Shell profile status: {status}");
     }
 
     private void SetStateStatus(string status)

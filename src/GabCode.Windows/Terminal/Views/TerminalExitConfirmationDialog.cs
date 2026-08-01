@@ -21,8 +21,8 @@ internal sealed class TerminalExitConfirmationDialog : Window
         var message = new TextBlock
         {
             Text = activeTerminalCount == 1
-                ? "1 active terminal process will be stopped. Running shell or Pi work will be interrupted."
-                : $"{activeTerminalCount} active terminal processes will be stopped. Running shell or Pi work will be interrupted.",
+                ? "1 active terminal process will be stopped. Running shell work will be interrupted."
+                : $"{activeTerminalCount} active terminal processes will be stopped. Running shell work will be interrupted.",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 15,
             Foreground = Brushes.Black,
