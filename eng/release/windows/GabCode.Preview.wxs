@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="gabCode developer preview"
+           Manufacturer="gabCode contributors"
+           Version="0.0.1"
+           ProductCode="{2ACA3D7F-B981-220D-674E-34D23BA5F09D}"
+           UpgradeCode="{14C3C588-78D0-B414-D61A-021C8DB736E5}"
+           Language="1033"
+           InstallerVersion="500"
+           Scope="perUser"
+           Compressed="yes">
+    <SummaryInformation Description="Unsigned gabCode developer preview for Windows x64"
+                        Manufacturer="gabCode contributors" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer gabCode developer preview is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPCOMMENTS" Value="Unsigned and unsupported developer preview" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="LocalProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="gabCode" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Files Include="!(bindpath.Publish)\**" Directory="INSTALLFOLDER">
+      <Exclude Files="!(bindpath.Publish)\**.pdb" />
+    </Files>
+
+    <Component Id="StartMenuShortcutComponent"
+               Directory="ProgramMenuFolder"
+               Guid="{22EC0BFB-2309-A70D-0EAA-AF3ED8DB2FBC}">
+      <Shortcut Id="StartMenuShortcut"
+                Name="gabCode"
+                Description="Open the gabCode developer preview"
+                Target="[INSTALLFOLDER]GabCode.Windows.exe"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\gabCode\Installer"
+                     Name="StartMenuShortcut"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+  </Package>
+</Wix>
