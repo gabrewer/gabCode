@@ -19,9 +19,10 @@ Read the approved sprint record and the task-named files before changing code.
 ## Product boundaries
 
 - gabCode is a native Windows and macOS desktop application, not a web application.
-- The Windows client owns WPF and Windows terminal hosting; the macOS client owns SwiftUI/AppKit and macOS terminal hosting.
-- The shared C# NativeAOT sidecar owns Git/GitHub integration, normalized state, watchers, preferences, and associations.
-- The client/core boundary is versioned JSON over standard input/output, not HTTP by default.
+- The Windows client is a complete C#/WPF application and owns Windows UI, terminal hosting, direct Git/`gh` integration, normalized state, watchers/reconciliation, preferences, and associations.
+- The macOS client is a complete Swift/SwiftUI/AppKit application and owns the equivalent macOS behavior with native platform facilities.
+- Windows and macOS share requirements, vocabulary, language-neutral fixtures, and expected outcomes—not production runtime code, a companion sidecar, or an internal client/core protocol.
+- Plan and validate Windows and macOS implementation as separate target-platform increments; one platform's evidence does not prove the other.
 - Git, the filesystem, and read-only `gh` queries remain authoritative. Do not turn local metadata into a competing source of truth.
 - gabCode observes source, PRDs, issues, commits, and diffs. It does not edit them or interpret/manage Pi sessions.
 

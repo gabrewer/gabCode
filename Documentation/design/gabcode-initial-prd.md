@@ -3,10 +3,12 @@
 | Field | Value |
 | --- | --- |
 | Status | Initial baseline |
-| Version | 0.3 |
-| Date | 2026-08-01 |
+| Version | 0.4 |
+| Date | 2026-08-02 |
 
 This document defines gabCode's initial product boundary and direction. It should evolve when foundational product decisions change. Substantial new capabilities should receive focused PRDs under `Documentation/design` rather than turning this document into an exhaustive specification.
+
+The approved independent-native-client decision is recorded in `Documentation/design/independent-native-clients-prd.md`. Windows and macOS share product requirements and conformance cases, but no production runtime code or companion service.
 
 ## Product Name & One-Liner
 
@@ -174,13 +176,12 @@ gabCode will not:
 
 ### Application Architecture
 
-- **Windows UI:** WPF with C#.
-- **macOS UI:** SwiftUI with AppKit where needed.
-- **Shared core:** C# NativeAOT sidecar process.
-- **UI/core communication:** Versioned, source-generated JSON messages over standard input and output.
-- **Local metadata:** A small per-user, per-project local store; no repository metadata files are required.
+- **Windows application:** A complete C#/WPF application that owns native UI, terminal hosting, direct tool integration, normalized state, watching/reconciliation, local data, diagnostics, cancellation, and cleanup.
+- **macOS application:** A complete Swift/SwiftUI/AppKit application that owns the equivalent behavior with native macOS APIs and conventions.
+- **Shared repository artifacts:** Product requirements, vocabulary, language-neutral conformance inputs, and expected normalized outcomes—not production runtime code.
+- **Local metadata:** Platform-owned per-user, per-project storage; no repository metadata files are required.
 
-The shared core owns project configuration, Git and GitHub command execution, normalized worktree state, file watching, and local associations. Each platform UI owns native windows, menus, keyboard behavior, and terminal views.
+There is no gabCode companion sidecar or internal client/core protocol. Neither native application embeds, launches, packages, or requires the other platform's runtime. Each platform implements and validates its behavior independently.
 
 ### Windows Terminal Implementation
 
@@ -208,11 +209,12 @@ Intended direction:
 
 ### Git, GitHub, and Filesystem Integration
 
-- Use the installed `git` executable so behavior matches the user's command line.
+- Each native application invokes the installed `git` executable directly so behavior matches the user's command line.
 - Use structured Git output, including `git worktree list --porcelain`.
-- Use the installed `gh` executable and its authenticated session for read-only GitHub data.
-- Use filesystem and Git-reference watchers for responsive updates, backed by periodic reconciliation.
-- Treat Git and the filesystem as authoritative; local metadata only adds user-selected associations and preferences.
+- Each native application invokes the installed `gh` executable directly and uses its authenticated session only for approved read-only GitHub data.
+- Each platform uses native filesystem and Git-reference watching for responsive updates, backed by bounded periodic reconciliation.
+- Treat watcher events as invalidation hints and Git and the filesystem as authoritative; local metadata only adds user-selected associations and preferences.
+- Resolve executables and pass arguments without unsafe shell-string interpolation; bound output, timeouts, cancellation, diagnostics, and cleanup on each platform.
 
 ### Key Technical Risks
 
@@ -222,10 +224,12 @@ Intended direction:
 - Resolving Windows Terminal profiles, including dynamic profiles and unusual shells.
 - Unicode, ANSI/VT, clipboard, resize, and native terminal hosting behavior. The approved Windows control's focus-escape, search, hyperlink, and dedicated terminal-accessibility limitations are accepted rather than release risks.
 - Reliable process-tree shutdown on Windows and macOS.
-- NativeAOT trimming and serialization constraints in the shared core.
+- Preventing factual Git/`gh` normalization and safety behavior from drifting between the independent C# and Swift implementations.
 - Windows signing and macOS signing/notarization.
 
 ## Milestones
+
+Each milestone is delivered through separate Windows and macOS implementation increments with target-operating-system evidence. Shared behavior vocabulary and language-neutral conformance cases should be established before duplicated Git/`gh` normalization grows independently; one platform's evidence never proves the other platform.
 
 ### Milestone 1: Native Terminal Implementation Sprint
 
