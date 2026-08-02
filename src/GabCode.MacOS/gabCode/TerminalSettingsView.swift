@@ -3,6 +3,7 @@ import SwiftUI
 struct TerminalSettingsView: View {
     @EnvironmentObject private var preferences: TerminalFontPreferenceStore
     @State private var pointSizeText = ""
+    @FocusState private var isPointSizeFocused: Bool
 
     var body: some View {
         Form {
@@ -17,9 +18,17 @@ struct TerminalSettingsView: View {
 
                 TextField("Point size", text: $pointSizeText)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit { savePointSize() }
+                    .focused($isPointSizeFocused)
+                    .onChange(of: pointSizeText) { _, text in
+                        savePointSizeIfValid(text)
+                    }
+                    .onSubmit { restoreEffectivePointSizeText() }
                     .accessibilityValue(pointSizeText)
                     .accessibilityIdentifier("terminal-font-size")
+
+                Text("Enter a value from 8 to 72 points.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 HStack {
                     Button("Restore System Default") {
@@ -53,6 +62,11 @@ struct TerminalSettingsView: View {
         .onChange(of: preferences.effectiveSelection.pointSize) { _, value in
             pointSizeText = formatted(value)
         }
+        .onChange(of: isPointSizeFocused) { _, isFocused in
+            if !isFocused {
+                restoreEffectivePointSizeText()
+            }
+        }
     }
 
     private var faceBinding: Binding<String?> {
@@ -75,26 +89,42 @@ struct TerminalSettingsView: View {
         }
     }
 
-    private func savePointSize() {
-        guard let value = Double(pointSizeText) else {
-            pointSizeText = formatted(preferences.effectiveSelection.pointSize)
+    private func savePointSizeIfValid(_ text: String) {
+        guard let selection = TerminalPointSizeInput.selection(
+            from: text,
+            face: preferences.effectiveSelection.face
+        ) else {
             return
         }
-        let validSelection: TerminalFontSelection?
-        switch preferences.effectiveSelection.face {
-        case .systemDefault:
-            validSelection = TerminalFontSelection.systemDefault(pointSize: CGFloat(value))
-        case let .named(name):
-            validSelection = TerminalFontSelection.named(postScriptName: name, pointSize: CGFloat(value))
-        }
-        guard let validSelection else {
-            pointSizeText = formatted(preferences.effectiveSelection.pointSize)
-            return
-        }
-        preferences.save(validSelection)
+        preferences.save(selection)
+    }
+
+    private func restoreEffectivePointSizeText() {
+        pointSizeText = formatted(preferences.effectiveSelection.pointSize)
     }
 
     private func formatted(_ value: CGFloat) -> String {
         value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+    }
+}
+
+enum TerminalPointSizeInput {
+    static func selection(
+        from text: String,
+        face: TerminalFontSelection.Face
+    ) -> TerminalFontSelection? {
+        guard let value = Double(text) else {
+            return nil
+        }
+
+        switch face {
+        case .systemDefault:
+            return TerminalFontSelection.systemDefault(pointSize: CGFloat(value))
+        case let .named(postScriptName):
+            return TerminalFontSelection.named(
+                postScriptName: postScriptName,
+                pointSize: CGFloat(value)
+            )
+        }
     }
 }

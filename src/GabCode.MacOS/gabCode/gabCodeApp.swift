@@ -10,7 +10,13 @@ import SwiftUI
 @main
 struct gabCodeApp: App {
     @NSApplicationDelegateAdaptor(GabCodeAppDelegate.self) private var appDelegate
-    @StateObject private var fontPreference = TerminalFontPreferenceStore()
+    @StateObject private var fontPreference: TerminalFontPreferenceStore
+
+    init() {
+        _fontPreference = StateObject(
+            wrappedValue: TerminalFontPreferenceStore(defaults: Self.fontPreferenceDefaults())
+        )
+    }
 
     var body: some Scene {
         Window("gabCode", id: "main") {
@@ -26,5 +32,20 @@ struct gabCodeApp: App {
             TerminalSettingsView()
                 .environmentObject(fontPreference)
         }
+    }
+
+    private static func fontPreferenceDefaults(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> UserDefaults {
+        #if DEBUG
+        if
+            let suiteName = environment["GABCODE_UI_TEST_PREFERENCE_SUITE"],
+            !suiteName.isEmpty,
+            let isolatedDefaults = UserDefaults(suiteName: suiteName)
+        {
+            return isolatedDefaults
+        }
+        #endif
+        return .standard
     }
 }
