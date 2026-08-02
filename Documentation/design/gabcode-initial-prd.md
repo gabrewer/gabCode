@@ -12,17 +12,17 @@ The approved independent-native-client decision is recorded in `Documentation/de
 
 ## Product Name & One-Liner
 
-**gabCode** is a native Windows and macOS desktop application for navigating Git worktrees and observing the work happening inside each one without replacing Pi, GitHub, Git, or VS Code.
+**gabCode** is a native Windows and macOS desktop application for navigating Git worktrees and observing the work happening inside each one without replacing the user's CLI coding harness, GitHub, Git, or VS Code.
 
 ## Problem & Audience
 
-A developer using Pi across multiple Git worktrees needs to move quickly between independent pieces of work. VS Code can open each worktree, but it does not provide one clear place to see all worktrees, their terminals, current changes, commits, requirements, and GitHub issues.
+A developer using CLI coding harnesses across multiple Git worktrees needs to move quickly between independent pieces of work. VS Code can open each worktree, but it does not provide one clear place to see all worktrees, their terminals, current changes, commits, requirements, and GitHub issues.
 
 gabCode is initially for a single developer who:
 
 - Works locally on Windows and macOS.
 - Uses one Git repository per project with several worktrees.
-- Runs Pi and command-line tools inside those worktrees.
+- Runs a CLI coding harness and other command-line tools inside those worktrees.
 - Uses PRDs under `Documentation/design` and GitHub issues to describe work.
 - Uses VS Code when source files need to be edited.
 
@@ -75,7 +75,7 @@ A worktree disappears from gabCode when it is no longer returned by Git. gabCode
 
 ### 3. Two Native Terminals per Worktree — Must-have
 
-Each opened worktree has two independent, generic terminals. gabCode does not assign either terminal a Pi, build, test, Git, or other role; the user may run any local command in either terminal.
+Each opened worktree has two independent, generic terminals. gabCode does not prescribe a CLI harness, build, test, Git, or any other role for either terminal; the user may run any local command in either terminal.
 
 Both terminals:
 
@@ -86,7 +86,7 @@ Both terminals:
 - Have bounded in-memory scrollback.
 - Do not persist output after gabCode exits.
 
-gabCode does not inspect terminal content, understand Pi commands, track Pi session identifiers, or run `pi --resume`. Both terminals are ordinary user-controlled shells.
+gabCode does not inspect terminal content, understand commands issued to a CLI harness, track harness session identifiers, or start or resume harness sessions. Both terminals are ordinary user-controlled shells.
 
 On Windows, terminals use the user's configured Windows Terminal default profile when it can be resolved. The fallback order is a gabCode-configured shell, `pwsh`, Windows PowerShell, then `cmd.exe`. On macOS, terminals use the user's configured login shell.
 
@@ -147,7 +147,7 @@ The action opens the current worktree's file, preferably at the relevant line an
 
 ### 8. Local Tool Diagnostics and Layout Persistence — Should-have
 
-- Detect `git`, `gh`, `pi`, and VS Code without installing or updating them.
+- Detect `git`, `gh`, VS Code, and user-configured CLI harness executables without installing or updating them.
 - Report executable paths, versions, and `gh` authentication state.
 - Disable only actions affected by a missing prerequisite.
 - Remember registered projects, path overrides, sidebar side and width, panel sizes, selected worktree, and user-selected associations.
@@ -158,8 +158,8 @@ The action opens the current worktree's file, preferably at the relevant line an
 gabCode will not:
 
 - Edit source files or PRDs.
-- Interpret Pi output, prompts, skills, or session history.
-- Start or resume Pi sessions automatically.
+- Interpret CLI coding-harness output, prompts, skills, or session history.
+- Start or resume CLI coding-harness sessions automatically.
 - Understand or enforce product-design, sprint, review, or release workflows.
 - Infer which PRD or GitHub issue belongs to a worktree.
 - Create, update, close, or comment on GitHub issues.
@@ -169,7 +169,7 @@ gabCode will not:
 - Archive worktrees after Git removes them.
 - Support multiple repositories inside one project in the initial version.
 - Provide hosted execution, team synchronization, or remote terminals.
-- Replace VS Code, GitHub, Git, Pi, or the user's shell.
+- Replace VS Code, GitHub, Git, the user's CLI coding harness, or the user's shell.
 - Install or update local developer tools.
 
 ## Technical Considerations
