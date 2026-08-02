@@ -2,9 +2,15 @@
 # Verifies one gabCode unsigned-preview DMG without modifying it or its contents.
 set -euo pipefail
 
-readonly expected_name='gabCode-0.0.1-preview.1-macos-arm64.dmg'
-readonly expected_marketing_version='0.0.1'
-readonly expected_build_number='1'
+[[ $# -eq 1 ]] || { printf 'ERROR: usage: %s <path-to-gabCode-x.y.z-preview.n-macos-arm64.dmg>\n' "$0" >&2; exit 1; }
+readonly dmg_path="$1"
+readonly expected_name="$(basename "$dmg_path")"
+if [[ ! "$expected_name" =~ ^gabCode-([0-9]+\.[0-9]+\.[0-9]+)-preview\.([1-9][0-9]*)-macos-arm64\.dmg$ ]]; then
+    printf 'ERROR: expected a versioned gabCode macOS preview DMG\n' >&2
+    exit 1
+fi
+readonly expected_marketing_version="${BASH_REMATCH[1]}"
+readonly expected_build_number="${BASH_REMATCH[2]}"
 readonly expected_bundle_identifier='com.gabrewer.gabcode'
 readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly repo_root="$(cd "$script_dir/../../.." && pwd -P)"
@@ -20,10 +26,7 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || fail "required command is unavailable: $1"
 }
 
-[[ $# -eq 1 ]] || fail "usage: $0 <path-to-${expected_name}>"
-readonly dmg_path="$1"
 [[ -f "$dmg_path" ]] || fail "DMG does not exist: $dmg_path"
-[[ "$(basename "$dmg_path")" == "$expected_name" ]] || fail "expected filename ${expected_name}"
 [[ -f "$expected_license" && ! -L "$expected_license" ]] || fail "reviewed gabCode license is missing"
 [[ -f "$expected_third_party_notices" && ! -L "$expected_third_party_notices" ]] || fail "reviewed SwiftTerm notice is missing"
 

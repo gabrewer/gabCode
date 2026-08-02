@@ -2,11 +2,21 @@
 # Builds the approved Apple Silicon ad-hoc gabCode developer-preview DMG.
 set -euo pipefail
 
-readonly release_version='0.0.1-preview.1'
-readonly marketing_version='0.0.1'
-readonly build_number='1'
+[[ $# -eq 2 ]] || { printf 'ERROR: usage: %s <x.y.z-preview.n> <output-directory>\n' "$0" >&2; exit 1; }
+readonly release_version="$1"
+readonly output_argument="$2"
+if [[ ! "$release_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)-preview\.([1-9][0-9]*)$ ]]; then
+    printf 'ERROR: version must be x.y.z-preview.n with a positive ordinal\n' >&2
+    exit 1
+fi
+readonly major="${BASH_REMATCH[1]}"
+readonly minor="${BASH_REMATCH[2]}"
+readonly patch="${BASH_REMATCH[3]}"
+readonly build_number="${BASH_REMATCH[4]}"
+(( 10#$major <= 255 && 10#$minor <= 255 && 10#$patch <= 65535 )) || { printf 'ERROR: version components are out of range\n' >&2; exit 1; }
+readonly marketing_version="$major.$minor.$patch"
 readonly artifact_name="gabCode-${release_version}-macos-arm64.dmg"
-readonly volume_name='gabCode 0.0.1 Preview 1'
+readonly volume_name="gabCode ${marketing_version} Preview ${build_number}"
 readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly repo_root="$(cd "$script_dir/../../.." && pwd -P)"
 readonly project_path="$repo_root/src/GabCode.MacOS/gabCode.xcodeproj"
@@ -21,9 +31,7 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || fail "required command is unavailable: $1"
 }
 
-[[ $# -eq 2 ]] || fail "usage: $0 ${release_version} <output-directory>"
-[[ "$1" == "$release_version" ]] || fail "this bootstrap surface only builds ${release_version}"
-[[ -n "$2" ]] || fail 'output directory must not be empty'
+[[ -n "$output_argument" ]] || fail 'output directory must not be empty'
 
 for command in xcodebuild xcrun codesign spctl hdiutil ditto plutil lipo file shasum; do
     require_command "$command"
@@ -34,8 +42,8 @@ done
 [[ -f "$repo_root/LICENSE" ]] || fail 'gabCode LICENSE is missing'
 [[ -f "$script_dir/THIRD-PARTY-NOTICES.txt" ]] || fail 'third-party notice is missing'
 
-mkdir -p "$2"
-readonly output_dir="$(cd "$2" && pwd -P)"
+mkdir -p "$output_argument"
+readonly output_dir="$(cd "$output_argument" && pwd -P)"
 [[ "$output_dir" != '/' && "$output_dir" != "$repo_root" ]] || fail 'refusing unsafe output directory'
 readonly artifact_path="$output_dir/$artifact_name"
 

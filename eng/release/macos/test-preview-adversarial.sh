@@ -2,7 +2,7 @@
 # Proves test-preview.sh rejects a structurally valid DMG with a stripped SwiftTerm notice.
 set -euo pipefail
 
-readonly expected_name='gabCode-0.0.1-preview.1-macos-arm64.dmg'
+readonly expected_name="$(basename "${1:-}")"
 readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly verifier="$script_dir/test-preview.sh"
 
@@ -11,10 +11,10 @@ fail() {
     exit 1
 }
 
-[[ $# -eq 1 ]] || fail "usage: $0 <path-to-${expected_name}>"
+[[ $# -eq 1 ]] || fail "usage: $0 <path-to-gabCode-x.y.z-preview.n-macos-arm64.dmg>"
 readonly source_dmg="$1"
 [[ -f "$source_dmg" ]] || fail "DMG does not exist: $source_dmg"
-[[ "$(basename "$source_dmg")" == "$expected_name" ]] || fail "expected filename ${expected_name}"
+[[ "$expected_name" =~ ^gabCode-[0-9]+\.[0-9]+\.[0-9]+-preview\.[1-9][0-9]*-macos-arm64\.dmg$ ]] || fail "expected a versioned macOS preview DMG"
 [[ -x "$verifier" ]] || fail "artifact verifier is not executable"
 
 for command in hdiutil ditto; do
