@@ -19,7 +19,7 @@ struct gabCodeApp: App {
     }
 
     var body: some Scene {
-        Window("gabCode", id: "main") {
+        WindowGroup("gabCode", id: "main") {
             ContentView()
                 .environmentObject(fontPreference)
         }
