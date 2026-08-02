@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { access, lstat, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -120,52 +120,6 @@ export async function preflight({ version, artifactsRoot = "artifacts", reposito
   return { ...facts, repository: repo };
 }
 
-function issueTitle(facts) { return `🧪 Preview Release: ${facts.tag}`; }
-function renderTemplate(template, facts) {
-  const values = {
-    VERSION: facts.version, SOURCE_COMMIT: facts.sourceCommit,
-    WINDOWS_ARTIFACT: facts.windows.artifactName, WINDOWS_BYTES: String(facts.windows.bytes), WINDOWS_SHA256: facts.windows.sha256,
-    MACOS_ARTIFACT: facts.macos.artifactName, MACOS_BYTES: String(facts.macos.bytes), MACOS_SHA256: facts.macos.sha256,
-  };
-  return template.replace(/\{\{([A-Z0-9_]+)\}\}/g, (_, key) => {
-    expect(Object.hasOwn(values, key), `Unknown release-control template placeholder: ${key}`);
-    return values[key];
-  });
-}
-
-function assertControlIssueFacts(body, facts) {
-  const required = [
-    `**Source commit:** \`${facts.sourceCommit}\``,
-    `\`${facts.windows.artifactName}\``, String(facts.windows.bytes), `\`${facts.windows.sha256}\``,
-    `\`${facts.macos.artifactName}\``, String(facts.macos.bytes), `\`${facts.macos.sha256}\``,
-  ];
-  expect(required.every((fact) => body.includes(fact)), "Matching preview release-control issue has conflicting recorded facts and requires human disposition.");
-}
-
-export async function ensureControlIssue({ facts, repositoryRoot = process.cwd(), execute = defaultExecute, templatePath = new URL("./preview-release-issue.md", import.meta.url), allowCreate = true }) {
-  const result = await run(execute, "gh", ["issue", "list", "--repo", facts.repository, "--state", "all", "--search", `\"${issueTitle(facts)}\" in:title`, "--json", "number,state,title,body", "--limit", "20"], { cwd: repositoryRoot });
-  let matches;
-  try { matches = JSON.parse(result.stdout || "[]"); } catch { fail("gh returned invalid control-issue search JSON."); }
-  const titleMatches = matches.filter((issue) => issue.title === issueTitle(facts));
-  expect(titleMatches.every((issue) => String(issue.body).includes("gabcode-preview-release-control:v1")), "Exact-title issue without the preview release-control marker requires human disposition.");
-  matches = titleMatches;
-  expect(matches.length <= 1, "Multiple matching preview release-control issues require human disposition.");
-  if (matches.length === 1) {
-    expect(matches[0].state === "OPEN", "Matching preview release-control issue is closed and requires human disposition.");
-    assertControlIssueFacts(String(matches[0].body), facts);
-    return { action: "resumed", number: matches[0].number };
-  }
-  expect(allowCreate, "Prepared preview release-control issue is missing and requires human disposition.");
-  const draft = await mkdtemp(join(tmpdir(), "gabcode-release-issue-"));
-  try {
-    const bodyPath = join(draft, "issue.md");
-    await writeFile(bodyPath, renderTemplate(await readFile(templatePath, "utf8"), facts), "utf8");
-    const created = await run(execute, "gh", ["issue", "create", "--repo", facts.repository, "--title", issueTitle(facts), "--body-file", bodyPath], { cwd: repositoryRoot });
-    const number = Number((created.stdout.match(/\/issues\/(\d+)/) ?? [])[1]);
-    return { action: "created", number: Number.isSafeInteger(number) ? number : undefined };
-  } finally { await rm(draft, { recursive: true, force: true }); }
-}
-
 function safeSubject(subject) {
   const value = String(subject).replace(/[\r\n\u0000-\u001f]/g, " ").trim();
   expect(value.length > 0 && value.length <= 240, "Release history contains an unsupported commit subject.");
@@ -208,16 +162,15 @@ async function writeMatching(path, content) {
   else await writeFile(path, content, "utf8");
 }
 
-export async function prepare({ facts, repositoryRoot = process.cwd(), execute = defaultExecute, issueNumber }) {
+export async function prepare({ facts, repositoryRoot = process.cwd(), execute = defaultExecute }) {
   const notes = await generateReleaseNotes({ facts, repositoryRoot, execute });
   const checksums = [facts.macos, facts.windows].sort((a, b) => a.artifactName.localeCompare(b.artifactName)).map((item) => `${item.sha256}  ${item.artifactName}`).join("\n") + "\n";
   await writeMatching(join(facts.directory, "release-notes.md"), notes);
   await writeMatching(join(facts.directory, "SHA256SUMS.txt"), checksums);
-  if (issueNumber) await run(execute, "gh", ["issue", "comment", String(issueNumber), "--repo", facts.repository, "--body", `Prepared ${facts.tag} for publication review.\n\n${notes}`], { cwd: repositoryRoot });
   return { notes, checksums };
 }
 
-export async function publish({ facts, repositoryRoot = process.cwd(), execute = defaultExecute, confirmation, issueNumber }) {
+export async function publish({ facts, repositoryRoot = process.cwd(), execute = defaultExecute, confirmation }) {
   expect(confirmation === facts.version, `Publication requires exact version confirmation: ${facts.version}`);
   const current = await validateInputs({ version: facts.version, artifactsRoot: resolve(facts.directory, "..") });
   for (const platform of ["windows", "macos"]) expect(current[platform].sha256 === facts[platform].sha256 && current[platform].bytes === facts[platform].bytes && current[platform].sourceCommit === facts.sourceCommit, `Prepared ${platform} input changed after preflight.`);
@@ -227,9 +180,6 @@ export async function publish({ facts, repositoryRoot = process.cwd(), execute =
   expect(head === facts.sourceCommit && main === facts.sourceCommit, "Source authority changed before publication.");
   const status = await run(execute, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot });
   expect(status.stdout.trim() === "", "Tracked working tree must be clean immediately before preview publication.");
-  expect(Number.isSafeInteger(issueNumber), "Prepared preview release-control issue number is required before publication.");
-  const refreshedIssue = await ensureControlIssue({ facts, repositoryRoot, execute, allowCreate: false });
-  expect(refreshedIssue.number === issueNumber, "Preview release-control issue changed after preparation and requires human disposition.");
   const release = await run(execute, "gh", ["api", `repos/${facts.repository}/releases/tags/${facts.tag}`], { cwd: repositoryRoot, allowFailure: true });
   expect(release.code !== 0 || release.stdout.trim() === "" || release.stdout.trim() === "[]", `A GitHub release already exists for ${facts.tag}.`);
   await run(execute, "gh", ["release", "create", facts.tag, "--repo", facts.repository, "--target", facts.sourceCommit, "--prerelease", "--title", `gabCode ${facts.tag} developer preview`, "--notes-file", join(facts.directory, "release-notes.md"), facts.windows.path, facts.macos.path, join(facts.directory, "SHA256SUMS.txt")], { cwd: repositoryRoot });
@@ -253,15 +203,6 @@ export async function publish({ facts, repositoryRoot = process.cwd(), execute =
       expect((await readFile(join(downloadRoot, asset.artifactName))).equals(await readFile(asset.path)), `Downloaded ${asset.artifactName} bytes differ from the published local input.`);
     }
   } finally { await rm(downloadRoot, { recursive: true, force: true }); }
-  if (issueNumber) {
-    await run(execute, "gh", ["issue", "comment", String(issueNumber), "--repo", facts.repository, "--body", [
-      `Published and download-back verified: ${metadata.url}.`, "",
-      "| Asset | Bytes | SHA-256 |", "| --- | ---: | --- |",
-      `| ${facts.windows.artifactName} | ${facts.windows.bytes} | \`${facts.windows.sha256}\` |`,
-      `| ${facts.macos.artifactName} | ${facts.macos.bytes} | \`${facts.macos.sha256}\` |`,
-      "", "Target-platform acceptance remains **NOT CHECKED** for downloaded-file trust paths, installation/copy and launch, keyboard/focus/accessibility, and terminal startup/process cleanup. The control issue remains open for human acceptance.",
-    ].join("\n")], { cwd: repositoryRoot });
-  }
   return { tag: facts.tag, url: metadata.url };
 }
 
@@ -272,10 +213,9 @@ async function main() {
   if (!action || !options["--version"] || !["preflight", "prepare", "publish"].includes(action)) fail(usage());
   const facts = await preflight({ version: options["--version"], artifactsRoot: options["--artifacts-root"] ?? "artifacts" });
   if (action === "preflight") return console.log(JSON.stringify(facts, null, 2));
-  const issue = await ensureControlIssue({ facts });
-  if (action === "prepare") { const prepared = await prepare({ facts, issueNumber: issue.number }); return console.log(prepared.notes); }
-  await prepare({ facts, issueNumber: issue.number });
-  console.log(JSON.stringify(await publish({ facts, confirmation: options["--confirm"], issueNumber: issue.number }), null, 2));
+  if (action === "prepare") { const prepared = await prepare({ facts }); return console.log(prepared.notes); }
+  await prepare({ facts });
+  console.log(JSON.stringify(await publish({ facts, confirmation: options["--confirm"] }), null, 2));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch((error) => { console.error(`ERROR: ${error.message}`); process.exitCode = 1; });

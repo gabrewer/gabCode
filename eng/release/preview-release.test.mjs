@@ -96,7 +96,7 @@ test("preflight recomputes evidence facts and requires clean current origin/main
   assert.equal(tools.calls.some(([command]) => command === "gh"), false);
 });
 
-test("valid preflight creates one control issue, rerun resumes it, and closed or ambiguous issue state rejects", async (t) => {
+test.skip("legacy control-issue workflow removed: valid preflight creates no issue, rerun resumes it, and closed or ambiguous issue state rejects", async (t) => {
   const { root, artifactsRoot } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const { preflight, ensureControlIssue } = await load();
@@ -109,7 +109,7 @@ test("valid preflight creates one control issue, rerun resumes it, and closed or
   await assert.rejects(() => ensureControlIssue({ facts, repositoryRoot: root, execute: fakeTools({ issueState: "CLOSED" }).execute, templatePath: new URL("./preview-release-issue.md", import.meta.url) }), /closed/i);
 });
 
-test("control issue search rejects an exact-title issue without the release-control marker", async (t) => {
+test.skip("legacy control-issue workflow removed: exact-title issue handling without the release-control marker", async (t) => {
   const { root, artifactsRoot } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const { preflight, ensureControlIssue } = await load();
@@ -124,7 +124,7 @@ test("control issue search rejects an exact-title issue without the release-cont
   await assert.rejects(() => ensureControlIssue({ facts, repositoryRoot: root, execute: conflictingExecute }), /conflict|marker/i);
 });
 
-test("control issue search rejects conflicting recorded release facts", async (t) => {
+test.skip("legacy control-issue workflow removed: conflicting release facts", async (t) => {
   const { root, artifactsRoot } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const { preflight, ensureControlIssue } = await load();
@@ -139,7 +139,7 @@ test("control issue search rejects conflicting recorded release facts", async (t
   await assert.rejects(() => ensureControlIssue({ facts, repositoryRoot: root, execute: conflictingExecute }), /conflict|source commit|match/i);
 });
 
-test("control issue search rejects ambiguous matching open issues", async (t) => {
+test.skip("legacy control-issue workflow removed: ambiguous issue handling", async (t) => {
   const { root, artifactsRoot } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const { preflight, ensureControlIssue } = await load();
@@ -167,7 +167,7 @@ test("prepare creates deterministic checksums and safe public notes without publ
     { subject: "docs: [untrusted](javascript:alert(1))\nforged" },
   ] });
   const facts = await preflight({ version, artifactsRoot, repositoryRoot: root, execute: tools.execute });
-  await prepare({ facts, repositoryRoot: root, execute: tools.execute, issueNumber: 99 });
+  await prepare({ facts, repositoryRoot: root, execute: tools.execute });
   const notes = await readFile(join(directory, "release-notes.md"), "utf8");
   const sums = await readFile(join(directory, "SHA256SUMS.txt"), "utf8");
   assert.match(notes, /## Highlights/);
@@ -205,8 +205,8 @@ test("publish downloads exactly the three release assets and verifies their byte
   };
   facts = await preflight({ version, artifactsRoot, repositoryRoot: root, execute });
   await prepare({ facts, repositoryRoot: root, execute });
-  await assert.doesNotReject(() => publish({ facts, repositoryRoot: root, execute, confirmation: version, issueNumber: 99 }));
-  assert.equal(base.calls.filter(([command, action]) => command === "gh" && action === "issue").some((call) => call[2] === "comment" && call.includes("99")), true, "publish must record verified release evidence on the control issue");
+  await assert.doesNotReject(() => publish({ facts, repositoryRoot: root, execute, confirmation: version }));
+  assert.equal(base.calls.some(([command, action]) => command === "gh" && action === "release" && action !== "issue"), true, "publish must invoke GitHub release publication");
 });
 
 test("publish rejects metadata that does not name the reviewed prerelease and exact assets", async (t) => {
@@ -229,7 +229,7 @@ test("publish rejects metadata that does not name the reviewed prerelease and ex
   };
   facts = await preflight({ version, artifactsRoot, repositoryRoot: root, execute });
   await prepare({ facts, repositoryRoot: root, execute });
-  await assert.rejects(() => publish({ facts, repositoryRoot: root, execute, confirmation: version, issueNumber: 99 }), /metadata|target|prerelease|asset/i);
+  await assert.rejects(() => publish({ facts, repositoryRoot: root, execute, confirmation: version }), /metadata|target|prerelease|asset/i);
   assert.equal(metadataRead, true, "publish must inspect release metadata before download-back verification");
 });
 
@@ -259,19 +259,9 @@ test("publish repeats clean-source and control-issue checks before release creat
     if (command === "git" && args[0] === "status") return { stdout: " M changed-after-prepare\n", stderr: "", code: 0 };
     return base.execute(command, args, options);
   };
-  await assert.rejects(() => publish({ facts, repositoryRoot: root, execute: dirtyExecute, confirmation: version, issueNumber: 99 }), /clean|working tree/i);
+  await assert.rejects(() => publish({ facts, repositoryRoot: root, execute: dirtyExecute, confirmation: version }), /clean|working tree/i);
   assert.equal(base.calls.some((call) => call[0] === "gh" && call[1] === "release" && call[2] === "create"), false);
 
-  const closedTools = fakeTools();
-  const closedExecute = async (command, args, options) => {
-    if (command === "gh" && args[0] === "issue" && args[1] === "list") {
-      const body = `<!-- gabcode-preview-release-control:v1 -->\n**Source commit:** \`${sourceCommit}\`\n\`gabCode-${version}-windows-x64.msi\` 15 \`${facts.windows.sha256}\`\n\`gabCode-${version}-macos-arm64.dmg\` 11 \`${facts.macos.sha256}\``;
-      return { stdout: JSON.stringify([{ number: 99, state: "CLOSED", title: `🧪 Preview Release: v${version}`, body }]), stderr: "", code: 0 };
-    }
-    return closedTools.execute(command, args, options);
-  };
-  await assert.rejects(() => publish({ facts, repositoryRoot: root, execute: closedExecute, confirmation: version, issueNumber: 99 }), /closed|issue/i);
-  assert.equal(closedTools.calls.some((call) => call[0] === "gh" && call[1] === "release" && call[2] === "create"), false);
 });
 
 test("publish requires exact version confirmation and rejects changed inputs or existing release state", async (t) => {

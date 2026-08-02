@@ -15,8 +15,8 @@ public sealed class PreviewReleaseContractTests
         Assert.Contains("/build-preview-msi <version>", workflow, StringComparison.Ordinal);
         Assert.Contains("/release-preview <version>", workflow, StringComparison.Ordinal);
         Assert.Contains("never builds installers", workflow, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("No control issue is created until", workflow, StringComparison.Ordinal);
-        Assert.Contains("github-issues", workflow, StringComparison.Ordinal);
+        Assert.Contains("creates no GitHub control issue", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("creates no GitHub control issue", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("smb://", workflow, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -118,7 +118,7 @@ public sealed class PreviewReleaseContractTests
         Assert.Contains("unexpected entry", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("mismatched commit/version/name/hash", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("regular, non-symlink inputs", workflow, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("multiple matches, a closed match, or conflicting recorded facts", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does not create a separate release issue", workflow, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

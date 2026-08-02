@@ -119,7 +119,7 @@ Run only after all four inputs are in place:
 
 The cross-platform helper uses Node built-ins plus installed `git` and authenticated `gh`. It does not invoke Xcode, .NET, WiX, either platform build prompt, or either preparation script.
 
-### Preflight before issue creation
+### Preflight before publication
 
 The helper verifies, in order:
 
@@ -130,19 +130,9 @@ The helper verifies, in order:
 5. the same source commit in both sidecars;
 6. clean tracked source with `HEAD` and current `origin/main` at that commit;
 7. Node, Git, `gh`, GitHub authentication, and repository identity;
-8. no existing tag/release and no ambiguous, conflicting, or closed control-issue state.
+8. no existing tag or GitHub release for the requested version.
 
-**No control issue is created until** every preflight check succeeds. A missing or invalid input reports the exact failing path/fact and performs no GitHub mutation.
-
-### Control issue lifecycle
-
-After valid preflight, the helper searches for the exact title `🧪 Preview Release: v<version>` and marker `gabcode-preview-release-control:v1`:
-
-- no matching issue: create one open issue from `eng/release/preview-release-issue.md`;
-- exactly one matching open issue with the same version/source/artifact facts: resume it;
-- multiple matches, a closed match, or conflicting recorded facts: stop for human disposition.
-
-The generated issue declares `github-issues`, records artifact facts and remaining target-platform checks, and must remain open. Routine issue creation here does not replace feature planning through `/pm-agent` or implementation through `/team-lead`.
+Every failed preflight is non-mutating. The publisher creates no GitHub control issue; the GitHub release and tag are the publication record.
 
 ### Preparation without public mutation
 
@@ -151,7 +141,7 @@ The helper deterministically creates:
 - `SHA256SUMS.txt`, containing sorted lowercase hashes for the MSI and DMG only;
 - `release-notes.md`, the public GitHub prerelease description. It deterministically identifies the preview version and target commit, summarizes reviewed commit subjects since the previous preview tag in **Highlights**, **Bug Fixes**, and **Other Changes**, links issue/PR references present in that history, and retains the unsigned/ad-hoc and `NOT CHECKED` disclosures. It never derives claims from local session input or evidence sidecars.
 
-It updates the open control issue with the prepared facts and displays the version, tag, target commit, filenames, byte lengths, hashes, notes, and all remaining `NOT CHECKED` rows. This phase creates no tag or release.
+It displays the version, target commit, filenames, byte lengths, hashes, and release notes. This phase creates no GitHub issue, tag, or release.
 
 If matching generated files already exist, regeneration must be byte-identical. The helper refuses to overwrite mismatched or unknown files.
 
@@ -159,18 +149,18 @@ If matching generated files already exist, regeneration must be byte-identical. 
 
 Public mutation requires a human response naming the exact version requested by the prompt. A generic yes, a different version, empty input, or declined confirmation does not publish. Declining leaves the matching prepared files and open issue resumable.
 
-Immediately before publication, the helper repeats input, Git, issue, tag, and release conflict checks. It then creates a GitHub prerelease targeting the recorded commit, uses the generated `release-notes.md` as its public description, and uploads exactly:
+Immediately before publication, the helper repeats input, Git, tag, and release conflict checks. It then creates a GitHub prerelease targeting the recorded commit, uses the generated `release-notes.md` as its public description, and uploads exactly:
 
 1. the Windows MSI;
 2. the macOS DMG;
 3. `SHA256SUMS.txt`.
 
-The evidence sidecars and `release-notes.md` are not release assets. The helper downloads all published assets to owned temporary storage and verifies release metadata, filenames, sizes, SHA-256 values, and exact bytes before posting the release URL and evidence to the issue. It never pushes a branch or closes the issue.
+The evidence sidecars and `release-notes.md` are not release assets. The helper downloads all published assets to owned temporary storage and verifies release metadata, filenames, sizes, SHA-256 values, and exact bytes. It never pushes a branch or creates or updates an issue.
 
 ## Failure, cancellation, and acceptance
 
-Before issue creation, any failure is non-mutating. After issue creation, preparation or publication failures are recorded on that issue with observed facts; matching state may be resumed, while mismatches are never replaced automatically.
+Any failure before `gh release create` is non-mutating. GitHub provider errors during publication are surfaced directly; the command does not create a separate release issue.
 
 Installer ownership protections are never bypassed. Unknown local files are never deleted. Authentication remains in the operating system/`gh` store and is never copied into prompts, evidence, generated notes, or issues.
 
-Automated preparation and publication are implementation evidence only. Download warning paths, installation/copy, launch, keyboard/focus/accessibility, terminal behavior, and cleanup must be checked on their declared target operating systems. Unrun checks remain `NOT CHECKED`; a human decides acceptance and issue disposition.
+The published prerelease description is public-facing and contains only release information and relevant unsigned-preview warnings. The release itself is the durable publication record.
