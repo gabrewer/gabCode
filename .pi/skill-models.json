@@ -12,18 +12,18 @@
     },
     "build-preview-dmg": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "max"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "build-preview-msi": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "max"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "release-preview": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "max"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     }
   },
   "skills": {
