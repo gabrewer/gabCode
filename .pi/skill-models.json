@@ -3,19 +3,19 @@
     "pm-agent": {
       "provider": "openai-codex",
       "model": "gpt-5.6-sol",
-      "thinking": "max"
+      "thinking": "high"
     },
     "team-lead": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "max"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     }
   },
   "skills": {
     "product-designer": {
       "provider": "openai-codex",
       "model": "gpt-5.6-sol",
-      "thinking": "max"
+      "thinking": "high"
     },
     "pm": {
       "provider": "openai-codex",
@@ -24,38 +24,38 @@
     },
     "domain-modeler": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "api-developer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "test-writer": {
       "provider": "openai-codex",
       "model": "gpt-5.6-terra",
-      "thinking": "high"
+      "thinking": "medium"
     },
     "backend-builder": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "frontend-builder": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "destroyer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "max"
+      "model": "gpt-5.6-terra",
+      "thinking": "high"
     },
     "review-agent": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "max"
+      "model": "gpt-5.6-terra",
+      "thinking": "high"
     },
     "git-committer": {
       "provider": "openai-codex",
@@ -64,38 +64,38 @@
     },
     "gabcode-dotnet-inspect": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-luna",
+      "thinking": "low"
     },
     "dotnet-concurrency-specialist": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-luna",
+      "thinking": "low"
     },
     "gabcode-native-accessibility": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-luna",
+      "thinking": "low"
     },
     "gabcode-protocol-contracts": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "gabcode-windows-desktop": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "gabcode-macos-desktop": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
-      "thinking": "high"
+      "model": "gpt-5.6-terra",
+      "thinking": "medium"
     },
     "gabcode-native-testing": {
       "provider": "openai-codex",
       "model": "gpt-5.6-terra",
-      "thinking": "high"
+      "thinking": "medium"
     }
   }
 }
