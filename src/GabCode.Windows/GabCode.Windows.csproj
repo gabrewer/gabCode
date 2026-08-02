@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <PlatformTarget>x64</PlatformTarget>
+    <ApplicationIcon>gabcode.ico</ApplicationIcon>
     <WindowsTerminalAssetRoot>$(MSBuildThisFileDirectory)..\..\third_party\microsoft-terminal\v1.24.11911.0\win-x64</WindowsTerminalAssetRoot>
   </PropertyGroup>
 

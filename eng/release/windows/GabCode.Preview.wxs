@@ -17,6 +17,8 @@
 
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPCOMMENTS" Value="Unsigned and unsupported developer preview" />
+    <Property Id="ARPPRODUCTICON" Value="AddRemoveProgramsIcon" />
+    <Icon Id="AddRemoveProgramsIcon" SourceFile="!(bindpath.Icon)\gabcode.ico" />
 
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="LocalProgramsFolder" Name="Programs">
@@ -36,7 +38,8 @@
                 Name="gabCode"
                 Description="Open the gabCode developer preview"
                 Target="[INSTALLFOLDER]GabCode.Windows.exe"
-                WorkingDirectory="INSTALLFOLDER" />
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AddRemoveProgramsIcon" />
       <RegistryValue Root="HKCU"
                      Key="Software\gabCode\Installer"
                      Name="StartMenuShortcut"

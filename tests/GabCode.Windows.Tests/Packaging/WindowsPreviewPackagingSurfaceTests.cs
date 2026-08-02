@@ -50,6 +50,38 @@ public sealed class WindowsPreviewPackagingSurfaceTests
     }
 
     [Fact]
+    public void Windows_application_icon_is_source_owned_and_bound_to_the_executable()
+    {
+        var root = GetRepositoryRoot();
+        var iconPath = Path.Combine(root, "src", "GabCode.Windows", "gabcode.ico");
+        var projectPath = Path.Combine(root, "src", "GabCode.Windows", "GabCode.Windows.csproj");
+
+        Assert.True(File.Exists(iconPath), $"Missing source-owned Windows icon: {iconPath}");
+        Assert.Equal("dde94924b9a428a890cf6b25cdb7546b3e3497b590e7f793f03aeb70eadb575d", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(iconPath))).ToLowerInvariant());
+
+        var project = XDocument.Load(projectPath);
+        var propertyGroup = Assert.Single(project.Root!.Elements("PropertyGroup"));
+        Assert.Equal("gabcode.ico", propertyGroup.Element("ApplicationIcon")?.Value);
+        Assert.DoesNotContain("gabcode-icon-assets", File.ReadAllText(projectPath), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Windows_installer_binds_the_same_icon_to_start_menu_and_apps_identity_without_external_paths()
+    {
+        var root = GetRepositoryRoot();
+        var wixPath = Path.Combine(root, "eng", "release", "windows", "GabCode.Preview.wxs");
+        var document = XDocument.Load(wixPath);
+        XNamespace wix = "http://wixtoolset.org/schemas/v4/wxs";
+
+        var icon = Assert.Single(document.Descendants(wix + "Icon"));
+        Assert.EndsWith("\\gabcode.ico", icon.Attribute("SourceFile")?.Value, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("AddRemoveProgramsIcon", document.Descendants(wix + "Property").Single(p => p.Attribute("Id")?.Value == "ARPPRODUCTICON").Attribute("Value")?.Value);
+        Assert.Equal("AddRemoveProgramsIcon", document.Descendants(wix + "Shortcut").Single().Attribute("Icon")?.Value);
+        Assert.Contains("!(bindpath.Icon)", File.ReadAllText(wixPath), StringComparison.Ordinal);
+        Assert.DoesNotContain("gabcode-icon-assets", File.ReadAllText(wixPath), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Windows_preview_documentation_states_the_generic_artifact_and_unsigned_support_boundary()
     {
         var documentationPath = Path.Combine(GetRepositoryRoot(), "Documentation", "release", "windows-unsigned-preview.md");

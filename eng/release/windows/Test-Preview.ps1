@@ -244,13 +244,14 @@ try {
     $propertyRows = @(Get-MsiRows $resolvedPackagePath 'SELECT `Property`, `Value` FROM `Property`' 2)
     $properties = @{}
     foreach ($row in $propertyRows) { $properties[$row[0]] = $row[1] }
-    foreach ($requiredProperty in @('ProductCode', 'ProductName', 'ProductVersion', 'UpgradeCode', 'ARPNOMODIFY')) {
+    foreach ($requiredProperty in @('ProductCode', 'ProductName', 'ProductVersion', 'UpgradeCode', 'ARPNOMODIFY', 'ARPPRODUCTICON')) {
         if (-not $properties.ContainsKey($requiredProperty)) { throw "MSI Property table is missing '$requiredProperty'." }
     }
     if ($properties.ProductName -ne 'gabCode developer preview' -or
         $properties.ProductVersion -ne $numericVersion -or
         $properties.UpgradeCode -ne $upgradeCode -or
-        $properties.ARPNOMODIFY -ne '1') {
+        $properties.ARPNOMODIFY -ne '1' -or
+        $properties.ARPPRODUCTICON -ne 'AddRemoveProgramsIcon') {
         throw 'MSI product identity or numeric version does not match the approved preview contract.'
     }
     if ($properties.ContainsKey('ALLUSERS') -and -not [string]::IsNullOrEmpty($properties.ALLUSERS)) {
@@ -267,9 +268,14 @@ try {
         throw 'MSI install directory is not the approved per-user application area.'
     }
 
-    $shortcutRows = @(Get-MsiRows $resolvedPackagePath 'SELECT `Shortcut`, `Directory_`, `Name`, `Target` FROM `Shortcut`' 4)
-    if ($shortcutRows.Count -ne 1 -or $shortcutRows[0][1] -ne 'ProgramMenuFolder' -or $shortcutRows[0][2] -ne 'gabCode' -or $shortcutRows[0][3] -ne '[INSTALLFOLDER]GabCode.Windows.exe') {
-        throw 'MSI must contain exactly one Start menu shortcut and no desktop shortcut.'
+    $shortcutRows = @(Get-MsiRows $resolvedPackagePath 'SELECT `Shortcut`, `Directory_`, `Name`, `Target`, `Icon_` FROM `Shortcut`' 5)
+    if ($shortcutRows.Count -ne 1 -or $shortcutRows[0][1] -ne 'ProgramMenuFolder' -or $shortcutRows[0][2] -ne 'gabCode' -or $shortcutRows[0][3] -ne '[INSTALLFOLDER]GabCode.Windows.exe' -or $shortcutRows[0][4] -ne 'AddRemoveProgramsIcon') {
+        throw 'MSI must contain exactly one icon-bound Start menu shortcut and no desktop shortcut.'
+    }
+
+    $iconRows = @(Get-MsiRows $resolvedPackagePath 'SELECT `Name` FROM `Icon`' 1)
+    if ($iconRows.Count -ne 1 -or $iconRows[0][0] -ne 'AddRemoveProgramsIcon') {
+        throw 'MSI must embed exactly the gabCode Add/Remove Programs icon.'
     }
 
     $msiFiles = @(Get-MsiRows $resolvedPackagePath 'SELECT `FileName`, `FileSize` FROM `File`' 2 | ForEach-Object {
