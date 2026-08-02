@@ -69,6 +69,8 @@ readonly executable_path="$app_path/Contents/MacOS/gabCode"
 [[ "$(plutil -extract CFBundleIdentifier raw -expect string "$app_path/Contents/Info.plist")" == "$expected_bundle_identifier" ]] || fail "unexpected bundle identifier"
 [[ "$(plutil -extract CFBundleShortVersionString raw -expect string "$app_path/Contents/Info.plist")" == "$expected_marketing_version" ]] || fail "unexpected marketing version"
 [[ "$(plutil -extract CFBundleVersion raw -expect string "$app_path/Contents/Info.plist")" == "$expected_build_number" ]] || fail "unexpected build number"
+[[ "$(plutil -extract CFBundleIconName raw -expect string "$app_path/Contents/Info.plist")" == 'AppIcon' ]] || fail "app does not declare the compiled AppIcon catalog"
+[[ -f "$app_path/Contents/Resources/Assets.car" ]] || fail "app does not contain the compiled asset catalog"
 [[ "$(lipo -archs "$executable_path")" == 'arm64' ]] || fail "app executable must be arm64 only"
 file "$executable_path" | grep -F 'arm64' >/dev/null || fail "file inspection did not report arm64"
 
