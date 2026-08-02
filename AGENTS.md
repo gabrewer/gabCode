@@ -39,7 +39,7 @@ Read the approved sprint record and the task-named files before changing code.
 
 - This repository's orchestration state backend is always `github-issues`.
 - Planning and execution must use `github-issues` without prompting for a backend.
-- Create one GitHub sprint/control issue per PRD by default; milestones and platform increments are embedded tasks. Split into a child/follow-up issue only when the next coherent scope would exceed the canonical review-size checkpoint or a human explicitly requests it, and record the reason/link.
+- Create one GitHub sprint/control issue per PRD by default. For a genuinely cross-platform PRD, use that parent control sprint plus linked Windows and macOS implementation sprints; the parent owns combined acceptance/parity and neither child proves the other. Do not create empty triads for platform-only, documentation-only, or insufficiently shaped work. Record every split's reason/link and apply the canonical review-size checkpoints.
 - Do not use filesystem-backed orchestration state unless a human explicitly changes this repository policy.
 - Keep `.pi/tmp/` drafts and tool runtime state untracked.
 - Never close GitHub issues or apply final completion labels; prepare evidence for human disposition.

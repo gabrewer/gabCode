@@ -17,7 +17,7 @@ Read `AGENTS.md`, the initial PRD, the gabCode orchestration context, the agreed
 
 ## Build the sprint
 
-Create one coherent, reviewable increment in one GitHub sprint/control issue per PRD by default. Milestones and Windows/macOS platform increments are embedded tasks, not automatic issue boundaries. Create a child/follow-up issue only when the next coherent scope would exceed the canonical review-size checkpoint or a human explicitly requests a split; record the forecast, reason, and link.
+Create one coherent, reviewable increment in one GitHub sprint/control issue per PRD by default. For a genuinely cross-platform PRD, make it the parent control sprint and create linked Windows and macOS implementation sprints: the parent owns combined scope/acceptance, shared vocabulary/fixtures, dependencies, parity/intentional-difference review, child links/status, and combined readiness; it owns no platform production work. Each child owns its complete native implementation and target-OS evidence. Do not create empty triads for platform-only, documentation-only, or insufficiently shaped work. Record each split's forecast, reason, and link and apply canonical review-size checkpoints.
 
 - declare Windows client, macOS client, or explicit shared specification/fixture ownership; never imply shared production-runtime ownership;
 - distinguish prescriptive tasks from goal-oriented tasks;

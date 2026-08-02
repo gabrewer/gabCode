@@ -189,7 +189,9 @@ Record the configured backend in the epic issue:
 - Every feature has a **feature branch**.
 - Every feature/PRD has one **parent sprint/control issue** by default, with milestones and tasks grouped into steps.
 - Milestones are organizational groupings, not GitHub issue boundaries. Embed task status, owner, dependencies, acceptance, verification, and evidence in the control issue by default.
-- Create a child or follow-up issue only when adding the next coherent scope is forecast to exceed the canonical review-size checkpoint, or when a human explicitly requests a split. Record the review-size reason and the linked issue relationship in the control issue.
+- For a PRD that genuinely requires both target platforms, use the control issue as the parent sprint and create linked Windows and macOS implementation sprints. The parent owns combined scope/acceptance, shared vocabulary/fixtures, dependencies, parity and intentional-difference review, child status, and combined readiness; it owns no platform production implementation. Each child owns only its complete native implementation and target-OS evidence. One child never proves the other.
+- Do not create an empty parent/Windows/macOS triad for platform-specific, documentation-only, or insufficiently shaped work.
+- Create a child or follow-up issue only when the cross-platform topology applies, adding the next coherent scope is forecast to exceed the canonical review-size checkpoint, or a human explicitly requests a split. Record the review-size reason and linked issue relationship in the control issue.
 - Every task has an **emoji status indicator** (see key below).
 - Routine progress artifacts are **GitHub issue comments**, not new files under `docs/sprints/`, `docs/reviews/`, or `docs/reports/`.
 - Durable product, architecture, migration, or API documentation may still live under `docs/` when it is a real deliverable rather than sprint status.
@@ -346,7 +348,7 @@ Checkpoint behavior:
 
 ### Lesson learned: high-quality sprint control issue
 
-For every PRD, use a single umbrella/control issue by default; large parity, migration, or multi-workstream features are the strongest reason to keep cohesive execution visible in one place. Split only at a coherent task or milestone boundary when the next scope would exceed the canonical review-size checkpoint or a human explicitly requests it. The control issue should contain or link all of the following before implementation starts:
+For every PRD, use a single umbrella/control issue by default. When a PRD genuinely requires Windows and macOS implementation, that issue is the parent control sprint and links the two platform implementation sprints; otherwise keep actual scope embedded. Large parity, migration, or multi-workstream features are the strongest reason to keep cohesive execution visible in the parent. Split only at a coherent task or milestone boundary when the cross-platform topology applies, the next scope would exceed the canonical review-size checkpoint, or a human explicitly requests it. The control issue should contain or link all of the following before implementation starts:
 
 1. **Source delta audit** — a matrix comparing reference behavior to current behavior with exact source paths/line references, status (`implemented`, `gap`, `accepted deviation`, `blocked`), and required fix.
 2. **Implementation-ready workstreams** — grouped batches with files to keep open, backend contract tasks, frontend tasks, test tasks, and final verification commands.
@@ -495,8 +497,8 @@ Once the user approves the plan:
   - Include a Contract Impact Check before the task board.
   - Include a `Quality Gates` section for destroyer, review, and test/smoke gates.
   - Every task has its status emoji (start with 🏃/🚧 for the first task, rest 🧱 ready) in the control issue.
-  - Keep milestones and tasks embedded in that one control issue by default; Windows/macOS target increments remain separate tasks and evidence rows, not automatic issue splits.
-  - Create a child/follow-up issue only at a coherent boundary when the next scope is forecast to cross the canonical review-size checkpoint or the human explicitly requests it; record the forecast, reason, and issue link in the control issue.
+  - Keep milestones and tasks embedded in that one control issue by default. For a genuinely cross-platform PRD, create linked Windows and macOS implementation sprints beneath the parent control issue; keep their target evidence separate and never treat one child as proof of the other.
+  - Outside that required cross-platform topology, create a child/follow-up issue only at a coherent boundary when the next scope is forecast to cross the canonical review-size checkpoint or the human explicitly requests it; record the forecast, reason, and issue link in the control issue.
   - Every created issue has appropriate labels applied.
 - Define explicit PR/review boundaries when the plan is likely to reach 8 commits or 30 changed files; split the plan into follow-up or stacked PR slices when it is likely to reach 15 commits or 60 files unless the work is genuinely atomic.
 - Create **verification scripts** at `verify/<feature-name>/` only for tasks that need repository-owned deterministic verification.
