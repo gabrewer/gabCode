@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  A native worktree navigator for developers using Pi, Git, GitHub, and VS Code.
+  A native worktree navigator for developers using CLI coding harnesses, Git, GitHub, and VS Code.
 </p>
 
 gabCode is being designed and built in the open. The repository currently establishes independent native Windows and macOS clients, embedded terminal foundations, and reproducible developer-preview packaging while the broader worktree-navigation experience continues to take shape.
@@ -25,13 +25,14 @@ gabCode is being designed and built in the open. The repository currently establ
 Parallel coding work becomes difficult when terminals, branches, reviews, and editor windows lose their shared context. gabCode is designed to make the active worktree obvious and keep the tools around it aligned—without introducing a second source of truth.
 
 - **Native on each platform** — dedicated WPF and SwiftUI clients instead of a web shell.
+- **Harness-agnostic** — use Pi, Claude Code, GitHub Copilot CLI, Codex CLI, or another CLI coding tool.
 - **Worktree-aware by design** — each coding session stays connected to the checkout it belongs to.
 - **Grounded in developer tools** — the filesystem, Git, and read-only GitHub state remain authoritative.
 - **Built for focused handoffs** — move from terminal context to review and editor context with less guesswork.
 
 ## Product direction
 
-![gabCode product direction: worktrees, Pi, Git and GitHub, and VS Code connected in one context](Documentation/media/readme/gabcode-workflow.png)
+![gabCode product direction: worktrees, a CLI coding harness, Git and GitHub, and VS Code connected in one context](Documentation/media/readme/gabcode-workflow.png)
 
 The [initial product requirements document](Documentation/design/gabcode-initial-prd.md) owns the product boundary, architecture direction, and planned milestones. gabCode is designed to observe source, pull requests, project documents, commits, and diffs without becoming a competing system of record.
 
@@ -134,6 +135,7 @@ The command validates the prepared inputs and generates a public prerelease desc
 - [Independent native clients architecture](Documentation/design/independent-native-clients-prd.md)
 - [Windows local preview workflow](Documentation/release/windows-unsigned-preview.md)
 - [macOS local preview workflow](Documentation/release/macos-unsigned-preview.md)
+- [Pi build orchestration](TOOL-PI.md) — contributor tooling used to build gabCode, not a runtime dependency
 
 ## License
 
