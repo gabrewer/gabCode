@@ -51,7 +51,7 @@ The preview is informational only. It must not become the source of the terminal
 
 ### 4. Preserve approved text exactly — Must-have
 
-After approval, forward the original clipboard text unchanged through the terminal’s normal paste path. Do not normalize line endings, trim whitespace, remove a final newline, convert newlines to spaces, or rewrite bracketed-paste framing.
+After approval, preserve the original clipboard text unchanged inside standard bracketed-paste framing so supporting terminal line editors can insert it for review. Do not normalize line endings, trim whitespace, remove a final newline, or convert newlines to spaces.
 
 ### 5. Cancel without side effects — Must-have
 

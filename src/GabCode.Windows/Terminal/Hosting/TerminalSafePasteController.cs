@@ -25,7 +25,10 @@ internal sealed class TerminalSafePasteController
         var preview = TerminalPastePreview.Create(clipboardSnapshot);
         if (confirmation.Confirm(owner, preview))
         {
-            writeInput(clipboardSnapshot);
+            // Keep the user payload intact while using the terminal-standard framing that
+            // lets bracketed-paste-aware line editors insert it for review instead of
+            // treating each embedded newline as an immediate submission.
+            writeInput($"\x1b[200~{clipboardSnapshot}\x1b[201~");
         }
     }
 }
