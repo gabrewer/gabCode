@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum TerminalWorkspaceTerminal: Equatable {
@@ -18,10 +19,11 @@ final class TerminalWorkspace {
 
     init(
         workingDirectory: URL,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular)
     ) {
-        terminal1 = TerminalSession(workingDirectory: workingDirectory, environment: environment)
-        terminal2 = TerminalSession(workingDirectory: workingDirectory, environment: environment)
+        terminal1 = TerminalSession(workingDirectory: workingDirectory, environment: environment, font: font)
+        terminal2 = TerminalSession(workingDirectory: workingDirectory, environment: environment, font: font)
     }
 
     init(terminal1: TerminalSession, terminal2: TerminalSession) {
@@ -44,6 +46,11 @@ final class TerminalWorkspace {
             return
         }
         try await session.start()
+    }
+
+    func apply(font: NSFont) {
+        terminal1.apply(font: font)
+        terminal2.apply(font: font)
     }
 
     func stop(gracePeriod: Duration) async {

@@ -3,11 +3,15 @@ import SwiftUI
 
 @MainActor
 struct TerminalWorkspaceView: View {
+    @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
     @StateObject private var presentation: TerminalWorkspacePresentation
 
-    init(workingDirectory: URL) {
+    init(workingDirectory: URL, font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular)) {
         _presentation = StateObject(
-            wrappedValue: TerminalWorkspacePresentation(workingDirectory: workingDirectory)
+            wrappedValue: TerminalWorkspacePresentation(
+                workspace: TerminalWorkspace(workingDirectory: workingDirectory, font: font),
+                workingDirectory: workingDirectory
+            )
         )
     }
 
@@ -42,6 +46,9 @@ struct TerminalWorkspaceView: View {
             await presentation.start()
             await Task.yield()
             presentation.focusMainTerminal()
+        }
+        .onReceive(fontPreference.$effectiveSelection) { _ in
+            presentation.apply(font: fontPreference.effectiveFont)
         }
         .onAppear {
             TerminalCommandRouter.shared.connect(presentation)
