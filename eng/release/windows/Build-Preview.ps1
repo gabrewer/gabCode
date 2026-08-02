@@ -53,6 +53,7 @@ function Test-ContainsBytes([byte[]] $Bytes, [byte[]] $Pattern) {
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $sourcePath = Join-Path $PSScriptRoot 'GabCode.Preview.wxs'
 $applicationProject = Join-Path $repositoryRoot 'src\GabCode.Windows\GabCode.Windows.csproj'
+$iconRoot = Join-Path $repositoryRoot 'src\GabCode.Windows'
 $terminalRoot = Join-Path $repositoryRoot 'third_party\microsoft-terminal\v1.24.11911.0'
 $terminalManifestPath = Join-Path $terminalRoot 'manifest.json'
 $versionMatch = [regex]::Match($Version, '^(?<major>\d+)\.(?<minor>\d+)\.(?<build>\d+)-preview\.(?<preview>\d+)$')
@@ -209,6 +210,7 @@ try {
         & dotnet wix build -acceptEula wix7 $generatedSourcePath `
             -arch x64 `
             -bindpath "Publish=$publishPath" `
+            -bindpath "Icon=$iconRoot" `
             -intermediatefolder $intermediatePath `
             -pdbtype none `
             -out $packagePath
