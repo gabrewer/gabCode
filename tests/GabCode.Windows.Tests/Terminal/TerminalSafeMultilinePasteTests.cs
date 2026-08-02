@@ -48,7 +48,7 @@ public sealed class TerminalSafeMultilinePasteTests
         controller.Paste(null, clipboardSnapshot, writes.Add);
 
         Assert.Equal(2, confirmation.CallCount);
-        Assert.Equal([clipboardSnapshot], writes);
+        Assert.Equal(["\u001B[200~" + clipboardSnapshot + "\u001B[201~"], writes);
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed class TerminalSafeMultilinePasteTests
                 confirmation.Approve = true;
                 _ = SendMessage(terminalWindow, WmRButtonDown, IntPtr.Zero, IntPtr.Zero);
                 _ = SendMessage(terminalWindow, WmRButtonUp, IntPtr.Zero, IntPtr.Zero);
-                Assert.Equal(multilineClipboardText, await connection.Input.Task.WaitAsync(Timeout));
+                Assert.Equal("\u001B[200~" + multilineClipboardText + "\u001B[201~", await connection.Input.Task.WaitAsync(Timeout));
                 Assert.Equal(2, confirmation.CallCount);
             }
             finally
