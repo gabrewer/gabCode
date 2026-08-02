@@ -149,7 +149,7 @@ The generated issue declares `github-issues`, records artifact facts and remaini
 The helper deterministically creates:
 
 - `SHA256SUMS.txt`, containing sorted lowercase hashes for the MSI and DMG only;
-- `release-notes.md`, describing the unsupported unsigned/ad-hoc preview and linking its control issue.
+- `release-notes.md`, the public GitHub prerelease description. It deterministically identifies the preview version and target commit, summarizes reviewed commit subjects since the previous preview tag in **Highlights**, **Bug Fixes**, and **Other Changes**, links issue/PR references present in that history, and retains the unsigned/ad-hoc and `NOT CHECKED` disclosures. It never derives claims from local session input or evidence sidecars.
 
 It updates the open control issue with the prepared facts and displays the version, tag, target commit, filenames, byte lengths, hashes, notes, and all remaining `NOT CHECKED` rows. This phase creates no tag or release.
 
@@ -159,7 +159,7 @@ If matching generated files already exist, regeneration must be byte-identical. 
 
 Public mutation requires a human response naming the exact version requested by the prompt. A generic yes, a different version, empty input, or declined confirmation does not publish. Declining leaves the matching prepared files and open issue resumable.
 
-Immediately before publication, the helper repeats input, Git, issue, tag, and release conflict checks. It then creates a GitHub prerelease targeting the recorded commit and uploads exactly:
+Immediately before publication, the helper repeats input, Git, issue, tag, and release conflict checks. It then creates a GitHub prerelease targeting the recorded commit, uses the generated `release-notes.md` as its public description, and uploads exactly:
 
 1. the Windows MSI;
 2. the macOS DMG;
