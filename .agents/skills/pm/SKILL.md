@@ -17,7 +17,7 @@ Read `AGENTS.md`, the initial PRD, the gabCode orchestration context, the agreed
 
 ## Build the sprint
 
-Create one coherent, reviewable increment:
+Create one coherent, reviewable increment in one GitHub sprint/control issue per PRD by default. Milestones and Windows/macOS platform increments are embedded tasks, not automatic issue boundaries. Create a child/follow-up issue only when the next coherent scope would exceed the canonical review-size checkpoint or a human explicitly requests a split; record the forecast, reason, and link.
 
 - declare Windows client, macOS client, or explicit shared specification/fixture ownership; never imply shared production-runtime ownership;
 - distinguish prescriptive tasks from goal-oriented tasks;

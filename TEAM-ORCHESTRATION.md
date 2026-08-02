@@ -187,8 +187,9 @@ Record the configured backend in the epic issue:
 
 - All `gh` CLI calls use the `gh` tool.
 - Every feature has a **feature branch**.
-- Every feature has a **parent (epic) issue** with tasks grouped into steps.
-- Every task has its own **child issue**, unless the project intentionally uses a single sprint issue with an embedded checklist.
+- Every feature/PRD has one **parent sprint/control issue** by default, with milestones and tasks grouped into steps.
+- Milestones are organizational groupings, not GitHub issue boundaries. Embed task status, owner, dependencies, acceptance, verification, and evidence in the control issue by default.
+- Create a child or follow-up issue only when adding the next coherent scope is forecast to exceed the canonical review-size checkpoint, or when a human explicitly requests a split. Record the review-size reason and the linked issue relationship in the control issue.
 - Every task has an **emoji status indicator** (see key below).
 - Routine progress artifacts are **GitHub issue comments**, not new files under `docs/sprints/`, `docs/reviews/`, or `docs/reports/`.
 - Durable product, architecture, migration, or API documentation may still live under `docs/` when it is a real deliverable rather than sprint status.
@@ -345,7 +346,7 @@ Checkpoint behavior:
 
 ### Lesson learned: high-quality sprint control issue
 
-For large parity, migration, or multi-workstream features, prefer a single umbrella/control issue when the human wants cohesive execution instead of issue sprawl. The control issue should contain or link all of the following before implementation starts:
+For every PRD, use a single umbrella/control issue by default; large parity, migration, or multi-workstream features are the strongest reason to keep cohesive execution visible in one place. Split only at a coherent task or milestone boundary when the next scope would exceed the canonical review-size checkpoint or a human explicitly requests it. The control issue should contain or link all of the following before implementation starts:
 
 1. **Source delta audit** — a matrix comparing reference behavior to current behavior with exact source paths/line references, status (`implemented`, `gap`, `accepted deviation`, `blocked`), and required fix.
 2. **Implementation-ready workstreams** — grouped batches with files to keep open, backend contract tasks, frontend tasks, test tasks, and final verification commands.
@@ -493,12 +494,13 @@ Once the user approves the plan:
 - Create the authoritative sprint/epic record in GitHub Issues as an epic issue with tasks grouped into second-level headers with emoji.
   - Include a Contract Impact Check before the task board.
   - Include a `Quality Gates` section for destroyer, review, and test/smoke gates.
-  - Every task has its status emoji (start with 🏃/🚧 for the first task, rest 🧱 ready).
-  - Every task has its own child issue unless the project intentionally uses one sprint issue with embedded checklist tasks.
-  - Every issue has appropriate labels applied.
+  - Every task has its status emoji (start with 🏃/🚧 for the first task, rest 🧱 ready) in the control issue.
+  - Keep milestones and tasks embedded in that one control issue by default; Windows/macOS target increments remain separate tasks and evidence rows, not automatic issue splits.
+  - Create a child/follow-up issue only at a coherent boundary when the next scope is forecast to cross the canonical review-size checkpoint or the human explicitly requests it; record the forecast, reason, and issue link in the control issue.
+  - Every created issue has appropriate labels applied.
 - Define explicit PR/review boundaries when the plan is likely to reach 8 commits or 30 changed files; split the plan into follow-up or stacked PR slices when it is likely to reach 15 commits or 60 files unless the work is genuinely atomic.
-- Create **verification scripts** at `verify/<feature-name>/` — one shell script per task that needs verification, named by task ID (e.g., `verify/user-auth/task-003.sh`).
-- Create `task-issues.json` — a mapping of task IDs to GitHub issue numbers (e.g., `{"task-001": 42, "task-002": 43}`).
+- Create **verification scripts** at `verify/<feature-name>/` only for tasks that need repository-owned deterministic verification.
+- Create `task-issues.json` only when child issues actually exist; otherwise the embedded control-issue task board is the authoritative mapping.
 - Commit durable artifacts only: plan docs that should survive, verification scripts, task mapping, and configuration. Do not commit temporary issue-body/comment files.
 
 ---

@@ -44,6 +44,7 @@ When the `activate_orchestration_resource` tool is available, use it before each
 - Make shared specification, vocabulary, fixture, or artifact-schema work explicit rather than hiding it in a platform task; do not turn it into a shared production runtime boundary.
 - Treat terminal dependency feasibility, licensing, packaging, lifecycle, input, and accessibility as evidence-bearing risks when relevant.
 - Apply the state-backend structure, task definition, quality gates, PR-size checkpoints, and human approval boundary from `TEAM-ORCHESTRATION.md`.
+- Create one GitHub sprint/control issue per PRD by default and embed milestone/task work there. Create a child/follow-up issue only when the next coherent scope would exceed the canonical review-size checkpoint or the human explicitly requests a split; record the reason and linked issue.
 - Do not create implementation artifacts or begin `/team-lead` execution.
 
 Finish by showing the authoritative sprint record, unresolved questions, dependencies, verification expectations, and the exact decision needed from the user before execution.
