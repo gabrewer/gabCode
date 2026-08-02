@@ -22,6 +22,10 @@ final class WindowWorkspaceRegistryTests: XCTestCase {
 
         XCTAssertTrue(registry.presentation(for: firstWindow) === first)
         XCTAssertTrue(registry.presentation(for: secondWindow) === second)
+        registry.focus(secondWindow)
+        XCTAssertTrue(registry.focusedPresentation === second)
+        registry.resignFocus(secondWindow)
+        XCTAssertNil(registry.focusedPresentation)
         XCTAssertEqual(registry.activeTerminalCount, 4)
 
         registry.unregister(firstWindow)

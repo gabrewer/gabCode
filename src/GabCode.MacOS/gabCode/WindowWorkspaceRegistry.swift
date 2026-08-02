@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 @MainActor
 final class WindowWorkspaceRegistry {
@@ -10,6 +11,26 @@ final class WindowWorkspaceRegistry {
     }
 
     private var entries: [Entry] = []
+    @Published private(set) var focusedPresentation: TerminalWorkspacePresentation?
+
+    init(notificationCenter: NotificationCenter = .default) {
+        notificationCenter.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow else { return }
+            Task { @MainActor in self?.focus(window) }
+        }
+        notificationCenter.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow else { return }
+            Task { @MainActor in self?.resignFocus(window) }
+        }
+    }
 
     var presentations: [TerminalWorkspacePresentation] {
         prune()
@@ -24,10 +45,20 @@ final class WindowWorkspaceRegistry {
         prune()
         entries.removeAll { $0.window === window || $0.presentation === presentation }
         entries.append(Entry(window: window, presentation: presentation))
+        if window.isKeyWindow { focusedPresentation = presentation }
     }
 
     func unregister(_ window: NSWindow) {
+        if focusedPresentation === presentation(for: window) { focusedPresentation = nil }
         entries.removeAll { $0.window == nil || $0.window === window }
+    }
+
+    func focus(_ window: NSWindow) {
+        focusedPresentation = presentation(for: window)
+    }
+
+    func resignFocus(_ window: NSWindow) {
+        if focusedPresentation === presentation(for: window) { focusedPresentation = nil }
     }
 
     func presentation(for window: NSWindow?) -> TerminalWorkspacePresentation? {
@@ -36,8 +67,8 @@ final class WindowWorkspaceRegistry {
         return entries.first { $0.window === window }?.presentation
     }
 
-    func focusedPresentation() -> TerminalWorkspacePresentation? {
-        presentation(for: NSApp.keyWindow)
+    func currentFocusedPresentation() -> TerminalWorkspacePresentation? {
+        presentation(for: NSApp.keyWindow) ?? focusedPresentation
     }
 
     func setMutationLocked(_ locked: Bool) {
