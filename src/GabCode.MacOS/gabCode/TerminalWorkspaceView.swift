@@ -41,7 +41,7 @@ struct TerminalWorkspaceView: View {
         .frame(minWidth: 760, minHeight: 640)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("terminal-workspace")
-        .background(WindowCloseInterceptor())
+        .background(WindowCloseInterceptor(presentation: presentation))
         .task {
             await presentation.start()
             await Task.yield()
@@ -52,11 +52,9 @@ struct TerminalWorkspaceView: View {
         }
         .onAppear {
             TerminalCommandRouter.shared.connect(presentation)
-            TerminalShutdownCoordinator.shared.connect(presentation)
         }
         .onDisappear {
             TerminalCommandRouter.shared.disconnect(presentation)
-            TerminalShutdownCoordinator.shared.disconnect(presentation)
         }
     }
 

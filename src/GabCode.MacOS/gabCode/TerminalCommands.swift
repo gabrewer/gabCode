@@ -6,13 +6,14 @@ final class TerminalCommandRouter: ObservableObject {
     static let shared = TerminalCommandRouter()
 
     @Published private(set) var isAvailable = false
-    private weak var presentation: TerminalWorkspacePresentation?
     private var mutationLockCancellable: AnyCancellable?
+    private weak var fallbackPresentation: TerminalWorkspacePresentation?
 
     private init() {}
 
     func connect(_ presentation: TerminalWorkspacePresentation) {
-        self.presentation = presentation
+        fallbackPresentation = presentation
+        mutationLockCancellable?.cancel()
         mutationLockCancellable = presentation.$isMutationLocked
             .map { !$0 }
             .removeDuplicates()
@@ -22,52 +23,45 @@ final class TerminalCommandRouter: ObservableObject {
     }
 
     func disconnect(_ presentation: TerminalWorkspacePresentation) {
-        guard self.presentation === presentation else {
+        guard fallbackPresentation === presentation else {
             return
         }
+        fallbackPresentation = nil
         mutationLockCancellable?.cancel()
         mutationLockCancellable = nil
-        self.presentation = nil
         isAvailable = false
     }
 
-    func swapTerminals() {
-        presentation?.swapTerminals()
+    private var targetPresentation: TerminalWorkspacePresentation? {
+        WindowWorkspaceRegistry.shared.focusedPresentation() ?? fallbackPresentation
     }
 
-    func focusTerminal1() {
-        presentation?.focus(.terminal1)
-    }
-
-    func focusTerminal2() {
-        presentation?.focus(.terminal2)
-    }
+    func swapTerminals() { targetPresentation?.swapTerminals() }
+    func focusTerminal1() { targetPresentation?.focus(.terminal1) }
+    func focusTerminal2() { targetPresentation?.focus(.terminal2) }
 }
 
 struct TerminalWorkspaceCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
     @ObservedObject private var router = TerminalCommandRouter.shared
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Window") { openWindow(id: "main") }
+                .keyboardShortcut("n", modifiers: .command)
+        }
+
         CommandMenu("Terminal") {
-            Button("Swap Terminals") {
-                router.swapTerminals()
-            }
-            .keyboardShortcut("t", modifiers: [.command, .shift])
-            .disabled(!router.isAvailable)
-
+            Button("Swap Terminals") { router.swapTerminals() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(!router.isAvailable)
             Divider()
-
-            Button("Focus Terminal 1") {
-                router.focusTerminal1()
-            }
-            .keyboardShortcut("1", modifiers: .command)
-            .disabled(!router.isAvailable)
-
-            Button("Focus Terminal 2") {
-                router.focusTerminal2()
-            }
-            .keyboardShortcut("2", modifiers: .command)
-            .disabled(!router.isAvailable)
+            Button("Focus Terminal 1") { router.focusTerminal1() }
+                .keyboardShortcut("1", modifiers: .command)
+                .disabled(!router.isAvailable)
+            Button("Focus Terminal 2") { router.focusTerminal2() }
+                .keyboardShortcut("2", modifiers: .command)
+                .disabled(!router.isAvailable)
         }
     }
 }

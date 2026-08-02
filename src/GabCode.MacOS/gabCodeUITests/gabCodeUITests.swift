@@ -104,6 +104,30 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testCommandNCreatesIndependentTerminalWorkspaceWindow() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        app.launchArguments += ["--terminal-directory", directory.path]
+        app.launch()
+
+        XCTAssertTrue(app.groups["terminal-workspace"].waitForExistence(timeout: 5))
+        app.typeKey("n", modifierFlags: .command)
+
+        let workspaces = app.groups.matching(identifier: "terminal-workspace")
+        let secondWorkspace = workspaces.element(boundBy: 1)
+        XCTAssertTrue(secondWorkspace.waitForExistence(timeout: 5), "Command-N must create a second native workspace window.")
+        XCTAssertGreaterThanOrEqual(app.windows.count, 2)
+        XCTAssertEqual(app.staticTexts.matching(identifier: "terminal-directory-path").count, 2)
+        XCTAssertEqual(app.buttons.matching(identifier: "swap-terminals").count, 2)
+
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(app.sheets.buttons["Close and Stop Terminals"].waitForExistence(timeout: 5))
+        app.sheets.buttons["Close and Stop Terminals"].click()
+        let oneWorkspace = expectation(for: NSPredicate(format: "count == 1"), evaluatedWith: workspaces)
+        XCTAssertEqual(XCTWaiter.wait(for: [oneWorkspace], timeout: 5), .completed, "Closing one window must preserve the other workspace.")
+    }
+
+    @MainActor
     func testCommandCommaOpensAccessibleTerminalFontSettings() throws {
         app.launch()
         XCTAssertTrue(app.groups["terminal-workspace"].waitForExistence(timeout: 5))
