@@ -94,6 +94,19 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testCommandCommaOpensAccessibleTerminalFontSettings() throws {
+        app.launch()
+        XCTAssertTrue(app.groups["terminal-workspace"].waitForExistence(timeout: 5))
+
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertTrue(app.staticTexts["Terminal font"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.popUpButtons["terminal-font-face"].exists)
+        XCTAssertTrue(app.textFields["terminal-font-size"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["terminal-font-preview"].exists)
+        XCTAssertTrue(app.buttons["Restore System Default"].exists)
+    }
+
+    @MainActor
     func testActiveCloseAndQuitRequireConfirmationAndCancelPreservesTerminals() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

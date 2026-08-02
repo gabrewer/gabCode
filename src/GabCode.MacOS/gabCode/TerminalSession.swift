@@ -59,6 +59,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     private var startupInProgress = false
     private var startupStopRequested = false
     private var startupWaiters: [CheckedContinuation<Void, Never>] = []
+    private var configuredFont: NSFont
 
     @Published private(set) var state: TerminalSessionState = .idle
     private(set) var processIdentifier: pid_t?
@@ -99,12 +100,14 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     init(
         workingDirectory: URL,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular),
         processGroupSignaler: @escaping (pid_t, Int32) -> Void = { processGroup, signal in
             _ = kill(-processGroup, signal)
         }
     ) {
         self.workingDirectory = workingDirectory
         self.environment = environment
+        self.configuredFont = font
         self.processGroupSignaler = processGroupSignaler
         let terminalView = LocalProcessTerminalView(
             frame: CGRect(x: 0, y: 0, width: 800, height: 500)
@@ -113,6 +116,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         super.init()
 
         terminalView.processDelegate = self
+        terminalView.font = font
         terminalView.configureNativeColors()
         terminalView.terminal.changeScrollback(Self.defaultScrollbackLines)
         terminalView.setAccessibilityLabel("gabCode terminal feasibility host")
@@ -184,6 +188,11 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
             throw TerminalSessionError.launchCancelled
         }
         state = .ready
+    }
+
+    func apply(font: NSFont) {
+        configuredFont = font
+        hostedTerminalView?.font = font
     }
 
     func attachTerminalView(to host: NSView) {

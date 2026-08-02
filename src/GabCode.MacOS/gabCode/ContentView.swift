@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
+
     @ViewBuilder
     var body: some View {
         if let workingDirectory = TerminalWorkspaceLaunch.workingDirectory() {
-            TerminalWorkspaceView(workingDirectory: workingDirectory)
+            TerminalWorkspaceView(workingDirectory: workingDirectory, font: fontPreference.effectiveFont)
         } else {
             TerminalDirectoryUnavailableView()
         }

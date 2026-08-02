@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Darwin
 import Foundation
@@ -56,6 +57,11 @@ final class TerminalWorkspacePresentation: ObservableObject {
         }
         didStart = true
         try? await workspace.start()
+    }
+
+    func apply(font: NSFont) {
+        workspace.apply(font: font)
+        objectWillChange.send()
     }
 
     func setMutationLocked(_ isLocked: Bool) {
