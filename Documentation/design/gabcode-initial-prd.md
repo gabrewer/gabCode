@@ -145,7 +145,11 @@ An **Open in VS Code** action is available from:
 
 The action opens the current worktree's file, preferably at the relevant line and column. It uses an existing worktree `.code-workspace` file when available and otherwise opens the worktree folder. Historical commit contents remain read-only in gabCode; VS Code opens the current worktree version of the file. Deleted files do not offer this action.
 
-### 8. Local Tool Diagnostics and Layout Persistence — Should-have
+### 8. Safe Multiline Terminal Paste — Must-have
+
+Single-line clipboard text is pasted immediately. Multiline clipboard text requires a fresh native confirmation with a short preview before gabCode sends it to the terminal. Approval forwards the original text unchanged; cancellation sends nothing. See `Documentation/design/windows-terminal-safe-multiline-paste-prd.md`.
+
+### 9. Local Tool Diagnostics and Layout Persistence — Should-have
 
 - Detect `git`, `gh`, VS Code, and user-configured CLI harness executables without installing or updating them.
 - Report executable paths, versions, and `gh` authentication state.
