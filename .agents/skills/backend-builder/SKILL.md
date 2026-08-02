@@ -1,6 +1,6 @@
 ---
 name: backend-builder
-description: Implements approved gabCode shared-core tasks in the C# NativeAOT sidecar, including protocol, Git/gh adapters, watchers, normalized state, preferences, and associations. Use for shared-core implementation.
+description: Reserved guardrail for a future human-approved gabCode backend architecture. It owns no current production work.
 metadata:
   provider: openai-codex
   model: gpt-5.6-sol
@@ -9,28 +9,25 @@ metadata:
 
 # Backend Builder
 
-For gabCode, backend work means the shared C# NativeAOT sidecar unless the approved task explicitly says otherwise. It is not a web-server role by default.
+GabCode has no current backend or shared production runtime. Do not implement through this role unless a future human-approved architecture decision explicitly creates a backend boundary; Windows and macOS production work belongs to their declared native client.
 
 ## Read first
 
-Read `AGENTS.md`, the approved task, relevant domain/contract decisions, task tests, and task-named source files. Confirm the real build/test commands before editing.
+Read `AGENTS.md`, the approved task, the explicit architecture approval, relevant domain/boundary decisions, task tests, and task-named source files. Confirm the real build/test commands before editing.
 
-Load `.agents/skills/gabcode-protocol-contracts/SKILL.md` for protocol work, `.agents/skills/dotnet-concurrency-specialist/SKILL.md` for watcher/process/lifecycle work, and `.agents/skills/gabcode-dotnet-inspect/SKILL.md` when exact APIs matter. Reactivate `backend-builder` when model routing is available before implementation.
+Load `.agents/skills/gabcode-protocol-contracts/SKILL.md` only to verify the new boundary approval. Reactivate `backend-builder` when model routing is available before implementation.
 
-## Implement
+## Guardrail
 
-- Make the smallest change that satisfies the approved task and tests.
-- Preserve NativeAOT/trimming compatibility and source-generated JSON serialization.
-- Keep protocol standard output free of diagnostic text.
-- Treat Git, filesystem, and read-only `gh` output as external authorities with explicit timeout, cancellation, malformed-output, and degraded-tool behavior.
-- Keep local metadata limited to preferences and explicit associations.
-- Respect process cleanup, bounded resources, and watcher/reconciliation requirements in scope.
+- Stop and report `BLOCKED: no approved backend architecture exists` if the task lacks a new explicit architecture decision.
+- Do not move platform-owned Git/`gh`, normalization, watchers/reconciliation, local metadata, diagnostics, cancellation, or cleanup into a shared process.
+- If a future boundary is approved, make the smallest change that satisfies its approved task and tests without expanding it into a web service by default.
 
 ## Boundaries
 
 - Never alter tests. If a test or contract appears wrong, stop and report the exact conflict.
-- Do not introduce HTTP services, databases, authentication, tenancy, Marten, or event sourcing without approved scope.
-- Do not move native terminal controls, window behavior, or platform UX into the sidecar.
+- Do not introduce HTTP services, databases, authentication, tenancy, Marten, event sourcing, a sidecar, or a shared runtime without approved scope.
+- Do not move native terminal controls, window behavior, platform UX, or complete platform-owned data behavior into a hypothetical backend.
 - Use supported package tooling rather than hand-editing generated dependency state.
 - During remediation, touch only task-owned files explicitly named by the review finding. Report out-of-scope findings as blocked/deferred.
 

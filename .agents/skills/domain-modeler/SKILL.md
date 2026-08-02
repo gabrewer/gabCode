@@ -36,7 +36,7 @@ State invariants, identity, lifecycle, ownership, and failure behavior using the
 - GitHub data comes from read-only `gh` operations.
 - Local metadata stores preferences and explicit associations, not competing repository truth.
 - Do not introduce aggregates, events, commands, Marten, event sourcing, databases, or services merely because generic orchestration examples mention them.
-- Do not design the client/core wire format; hand typed-boundary needs to `api-developer`.
+- Do not design an internal client/core wire format. Route only an explicitly approved typed boundary or language-neutral artifact schema to `api-developer`; a new shared runtime requires a separate human-approved architecture decision.
 - Do not implement code unless the approved task explicitly makes domain code this worker's deliverable.
 
 Record only durable architecture output required by the sprint, then return a precise summary and open decisions to `/team-lead`.

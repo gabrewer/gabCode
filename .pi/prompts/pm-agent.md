@@ -22,7 +22,7 @@ Do not implement product code.
 
 - Use `github-issues` as the repository-configured state backend without prompting. If an existing planning record declares another backend, stop and ask the user to resolve the conflict rather than using it.
 - Inspect the repository before proposing paths or commands.
-- Identify the owning workstream: Windows client, macOS client, shared core, or an explicit cross-workstream contract change.
+- Identify the owning workstream: Windows client, macOS client, or explicit shared specification/fixture work. Do not plan a shared production runtime, sidecar, or internal client/core protocol without a new human-approved architecture decision.
 - Preserve unrelated working-tree changes and existing agent resources.
 - If the request is ambiguous, discuss it with the user before creating authoritative artifacts.
 
@@ -41,7 +41,7 @@ When the `activate_orchestration_resource` tool is available, use it before each
 - Do not invent source projects, test projects, package paths, commands, issue numbers, scripts, or task mappings.
 - For a greenfield workstream, make establishing a real build/test/launch surface the first increment before planning dependent work.
 - Keep Windows and macOS implementation in separate platform increments with target-machine evidence.
-- Make shared protocol changes explicit rather than hiding them in a platform task.
+- Make shared specification, vocabulary, fixture, or artifact-schema work explicit rather than hiding it in a platform task; do not turn it into a shared production runtime boundary.
 - Treat terminal dependency feasibility, licensing, packaging, lifecycle, input, and accessibility as evidence-bearing risks when relevant.
 - Apply the state-backend structure, task definition, quality gates, PR-size checkpoints, and human approval boundary from `TEAM-ORCHESTRATION.md`.
 - Do not create implementation artifacts or begin `/team-lead` execution.

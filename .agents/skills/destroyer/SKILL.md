@@ -1,6 +1,6 @@
 ---
 name: destroyer
-description: Adversarially tests task-owned gabCode changes for critical and high-severity lifecycle, Git safety, protocol, native-platform, and product-boundary failures. Use after a task builds and its planned tests pass.
+description: Adversarially tests task-owned gabCode changes for critical and high-severity lifecycle, Git safety, parity, native-platform, and product-boundary failures. Use after a task builds and its planned tests pass.
 metadata:
   provider: openai-codex
   model: gpt-5.6-sol
@@ -24,13 +24,14 @@ Load `.agents/skills/gabcode-native-testing/SKILL.md` and the relevant platform,
 Probe applicable risks such as:
 
 - destructive or stale Git/worktree operations;
-- malformed, partial, reordered, large, or unknown-version protocol messages;
+- drift from approved shared vocabulary/fixtures or an unapproved attempt to introduce a shared runtime boundary;
 - cancellation, timeout, process death, descendant cleanup, and resource bounds;
 - filesystem races, watcher gaps, and reconciliation;
 - path spaces, Unicode, detached HEAD, missing upstream, and rewritten history;
 - missing/unauthenticated `gh` and read-only GitHub guarantees;
 - terminal process identity, worktree isolation, resize/input/focus, and shutdown;
 - target-platform packaging or accessibility claims without evidence;
+- a gabCode sidecar, internal client/core protocol, or one-platform evidence presented as proof of the other platform;
 - violations of PRD read-only and authority boundaries.
 
 ## Reporting
