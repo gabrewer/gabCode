@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 
 final class gabCodeUITests: XCTestCase {
@@ -28,23 +29,21 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
-    func testMissingTerminalDirectoryShowsExplanationWithoutStartingTerminalWorkspace() throws {
+    func testLaunchWithoutDirectoryStartsHomeTerminalWorkspace() throws {
         app.launch()
 
-        let window = app.windows["gabCode"]
-        XCTAssertTrue(window.waitForExistence(timeout: 5), "Expected an accessible window named gabCode.")
         XCTAssertTrue(
-            app.staticTexts["terminal-directory-required"].waitForExistence(timeout: 5),
-            "Expected the native controlled-directory explanation."
+            app.groups["terminal-workspace"].waitForExistence(timeout: 5),
+            "Launching without a prototype override must start the home-directory terminal workspace."
         )
-        XCTAssertFalse(app.groups["terminal-workspace"].exists, "Missing input must not create terminal hosts.")
-
-        app.typeKey("q", modifierFlags: .command)
-        let stopped = expectation(
-            for: NSPredicate(format: "state == %d", XCUIApplication.State.notRunning.rawValue),
-            evaluatedWith: app
+        let displayedDirectory = app.staticTexts["terminal-directory-path"]
+        XCTAssertTrue(displayedDirectory.waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            displayedDirectory.value as? String,
+            loginHomeDirectory.path
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 5), .completed, "No-session Command-Q must remain standard.")
+        XCTAssertTrue(app.groups["terminal-1-region"].exists)
+        XCTAssertTrue(app.groups["terminal-2-region"].exists)
     }
 
     @MainActor
@@ -130,6 +129,16 @@ final class gabCodeUITests: XCTestCase {
         app.typeKey("1", modifierFlags: .command)
         app.typeText("printf alive > 'cancel preserved terminal.txt'\n")
         waitForFile(marker, message: "Cancel must preserve Terminal 1 and its focus route.")
+    }
+
+    private var loginHomeDirectory: URL {
+        guard let passwordEntry = getpwuid(getuid()) else {
+            fatalError("The current user's home directory could not be resolved.")
+        }
+        return URL(
+            fileURLWithPath: String(cString: passwordEntry.pointee.pw_dir),
+            isDirectory: true
+        ).standardizedFileURL
     }
 
     private func waitForFile(_ file: URL, message: String) {

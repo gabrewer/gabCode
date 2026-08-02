@@ -126,11 +126,14 @@ final class TerminalWorkspacePresentation: ObservableObject {
 enum TerminalWorkspaceLaunch {
     static let directoryArgument = "--terminal-directory"
 
-    static func workingDirectory(arguments: [String] = ProcessInfo.processInfo.arguments) -> URL? {
-        guard
-            let optionIndex = arguments.firstIndex(of: directoryArgument),
-            arguments.indices.contains(optionIndex + 1)
-        else {
+    static func workingDirectory(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL? {
+        guard let optionIndex = arguments.firstIndex(of: directoryArgument) else {
+            return validatedDirectory(homeDirectory)
+        }
+        guard arguments.indices.contains(optionIndex + 1) else {
             return nil
         }
 
@@ -139,15 +142,22 @@ enum TerminalWorkspaceLaunch {
             return nil
         }
 
-        let directory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        return validatedDirectory(URL(fileURLWithPath: path, isDirectory: true))
+    }
+
+    private static func validatedDirectory(_ directory: URL) -> URL? {
+        let standardizedDirectory = directory.standardizedFileURL
         var isDirectory: ObjCBool = false
         guard
-            FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+            FileManager.default.fileExists(
+                atPath: standardizedDirectory.path,
+                isDirectory: &isDirectory
+            ),
             isDirectory.boolValue,
-            access(directory.path, R_OK | X_OK) == 0
+            access(standardizedDirectory.path, R_OK | X_OK) == 0
         else {
             return nil
         }
-        return directory
+        return standardizedDirectory
     }
 }

@@ -46,18 +46,18 @@ Because this preview is not Developer ID signed or notarized, normal launch is r
 2. Choosing **Done**, then opening **System Settings → Privacy & Security**, showed **“gabCode.app” was blocked to protect your Mac**.
 3. Choosing **Open Anyway** displayed a second **Open “gabCode.app”?** warning with **Move to Trash**, **Open Anyway**, and **Done** actions.
 4. Confirming **Open Anyway** required an administrator username and password. An authorized human must review the app and enter those credentials; automated release tooling must not supply or store them.
-5. After authorization, launch gabCode again from Applications with the controlled directory argument below if it did not remain open.
+5. After authorization, launch gabCode again from Applications if it did not remain open.
 
 The final credential entry and post-approval launch were `NOT CHECKED` during automated task execution because no administrator credentials were provided. macOS policy and wording can vary by security settings. Do not globally disable Gatekeeper, run `spctl --master-disable`, or remove quarantine metadata as an installation instruction.
 
-On launch, the current prototype requires an explicit controlled worktree directory argument. From Terminal:
+Launch gabCode normally from Applications; no command-line argument is required. Until project and worktree selection exists, both ordinary login-shell terminals start in the current user's home directory. gabCode does not start or interpret Pi.
+
+For controlled development or testing only, an explicit accessible absolute directory remains available as an optional override:
 
 ```bash
 open -a /Applications/gabCode.app --args \
-  --terminal-directory '/absolute/path/to/controlled/worktree'
+  --terminal-directory '/absolute/path/to/controlled/directory'
 ```
-
-The prototype opens two ordinary login-shell terminals rooted in that directory. gabCode does not start or interpret Pi.
 
 ## Remove
 
@@ -74,7 +74,7 @@ Removal deletes only the application bundle. This preview has no uninstaller and
 - **“Apple could not verify…” / unidentified developer:** use the one-time path above only after checksum verification. This result is expected for this preview.
 - **Damaged or unreadable DMG:** run `hdiutil verify`; download again if verification fails.
 - **Wrong architecture:** this artifact is `arm64` only and will not support Intel Macs.
-- **No terminal workspace appears:** launch with an existing, readable controlled directory through `--terminal-directory` as shown above.
+- **No terminal workspace appears:** verify that the current user's home directory is readable and searchable. For controlled diagnostics, use the optional `--terminal-directory` override shown above.
 - **A terminal remains after exit:** stop and report the process details; clean process-group shutdown is required and must not be represented as successful.
 - **DMG will not eject:** close Finder windows and any processes using the volume, then eject it in Finder or Disk Utility. Do not leave verification mounts attached.
 
@@ -99,5 +99,5 @@ The DMG includes gabCode's MIT license and the SwiftTerm 1.15.0 notice pinned at
 - **Accessibility tree/screen reader:** NOT CHECKED — VoiceOver installation and launch exercise requires a human.
 - **Dynamic status and errors:** PASS for the native Gatekeeper rejection and two-stage warning text; post-credential result is `NOT CHECKED`.
 - **Contrast/scaling/reduced motion:** NOT CHECKED — human target-machine exercise is required.
-- **Terminal integration:** PASS — an installed non-quarantined copy launched two ordinary shells in a controlled spaces-and-Unicode repository, accepted independent commands, presented active-terminal close confirmation, and left no installed-app process or shell after confirmed exit.
+- **Terminal integration:** PASS — the packaged app launches without arguments and starts two ordinary shells in the current user's home directory. Automated native UI evidence verifies the displayed home path; target-process inspection verifies both shell working directories. The optional controlled-directory flow also accepted independent commands, presented active-terminal close confirmation, and left no installed-app process or shell after confirmed exit.
 - **Human target-machine validation still needed:** yes — complete administrator-approved Gatekeeper launch, keyboard-only Finder copy, VoiceOver, contrast, scaling, and reduced-motion checks.
