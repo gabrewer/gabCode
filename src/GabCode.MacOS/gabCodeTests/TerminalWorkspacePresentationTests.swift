@@ -4,15 +4,31 @@ import XCTest
 
 @MainActor
 final class TerminalWorkspacePresentationTests: XCTestCase {
-    func testLaunchReadsOnlyTheExplicitTerminalDirectoryArgument() throws {
+    func testLaunchDefaultsToHomeDirectoryAndHonorsExplicitTerminalDirectory() throws {
+        let homeDirectory = try makeTemporaryDirectory()
         let directory = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer {
+            try? FileManager.default.removeItem(at: homeDirectory)
+            try? FileManager.default.removeItem(at: directory)
+        }
 
-        XCTAssertNil(TerminalWorkspaceLaunch.workingDirectory(arguments: ["gabCode"]))
-        XCTAssertNil(TerminalWorkspaceLaunch.workingDirectory(arguments: ["gabCode", "--terminal-directory"]))
         XCTAssertEqual(
             TerminalWorkspaceLaunch.workingDirectory(
-                arguments: ["gabCode", "--terminal-directory", directory.path]
+                arguments: ["gabCode"],
+                homeDirectory: homeDirectory
+            ),
+            homeDirectory
+        )
+        XCTAssertNil(
+            TerminalWorkspaceLaunch.workingDirectory(
+                arguments: ["gabCode", "--terminal-directory"],
+                homeDirectory: homeDirectory
+            )
+        )
+        XCTAssertEqual(
+            TerminalWorkspaceLaunch.workingDirectory(
+                arguments: ["gabCode", "--terminal-directory", directory.path],
+                homeDirectory: homeDirectory
             ),
             directory
         )
