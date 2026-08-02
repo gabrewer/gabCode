@@ -1,5 +1,8 @@
 .pi/tmp/
 
+# Local editor workspace files
+*.code-workspace
+
 # .NET and Visual Studio generated output
 bin/
 obj/
