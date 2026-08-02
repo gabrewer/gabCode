@@ -3,14 +3,24 @@ import XCTest
 
 final class gabCodeUITests: XCTestCase {
     private var app: XCUIApplication!
+    private var preferenceSuiteName: String!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        preferenceSuiteName = "gabCode.UITests.TerminalFont.\(UUID().uuidString)"
         app = XCUIApplication()
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"]
+        app.launchEnvironment["GABCODE_UI_TEST_PREFERENCE_SUITE"] = preferenceSuiteName
     }
 
     override func tearDownWithError() throws {
+        defer {
+            if let preferenceSuiteName {
+                UserDefaults(suiteName: preferenceSuiteName)?
+                    .removePersistentDomain(forName: preferenceSuiteName)
+            }
+        }
+
         guard let app, app.state != .notRunning else {
             return
         }
@@ -101,9 +111,33 @@ final class gabCodeUITests: XCTestCase {
         app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.staticTexts["Terminal font"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.popUpButtons["terminal-font-face"].exists)
-        XCTAssertTrue(app.textFields["terminal-font-size"].exists)
+        let pointSize = app.textFields["terminal-font-size"]
+        XCTAssertTrue(pointSize.exists)
         XCTAssertTrue(app.descendants(matching: .any)["terminal-font-preview"].exists)
         XCTAssertTrue(app.buttons["Restore System Default"].exists)
+
+        let effectiveValue = app.staticTexts["terminal-font-effective-value"]
+        pointSize.click()
+        pointSize.typeKey("a", modifierFlags: .command)
+        pointSize.typeText("24")
+        let changedImmediately = expectation(
+            for: NSPredicate(format: "value CONTAINS %@", "24 pt"),
+            evaluatedWith: effectiveValue
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [changedImmediately], timeout: 5),
+            .completed,
+            "A valid point-size edit must update the effective preference without Return or Apply."
+        )
+
+        pointSize.typeKey("a", modifierFlags: .command)
+        pointSize.typeText("7")
+        XCTAssertTrue(
+            (effectiveValue.value as? String)?.contains("24 pt") == true,
+            "An invalid intermediate edit must not replace the last effective size."
+        )
+        pointSize.typeKey(.return, modifierFlags: [])
+        XCTAssertEqual(pointSize.value as? String, "24")
     }
 
     @MainActor

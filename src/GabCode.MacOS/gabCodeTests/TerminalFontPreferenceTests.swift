@@ -105,6 +105,33 @@ final class TerminalFontPreferenceTests: XCTestCase {
         )
     }
 
+    func testPointSizeInputResolvesEveryValidEditAndPreservesInvalidIntermediateText() throws {
+        XCTAssertEqual(
+            TerminalPointSizeInput.selection(from: "8", face: .systemDefault),
+            try XCTUnwrap(TerminalFontSelection.systemDefault(pointSize: 8))
+        )
+        XCTAssertEqual(
+            TerminalPointSizeInput.selection(
+                from: "15.5",
+                face: .named(postScriptName: "MesloLGMNerdFontMono-Regular")
+            ),
+            try XCTUnwrap(
+                TerminalFontSelection.named(
+                    postScriptName: "MesloLGMNerdFontMono-Regular",
+                    pointSize: 15.5
+                )
+            )
+        )
+        XCTAssertEqual(
+            TerminalPointSizeInput.selection(from: "72", face: .systemDefault),
+            try XCTUnwrap(TerminalFontSelection.systemDefault(pointSize: 72))
+        )
+        XCTAssertNil(TerminalPointSizeInput.selection(from: "", face: .systemDefault))
+        XCTAssertNil(TerminalPointSizeInput.selection(from: "7", face: .systemDefault))
+        XCTAssertNil(TerminalPointSizeInput.selection(from: "73", face: .systemDefault))
+        XCTAssertNil(TerminalPointSizeInput.selection(from: "not a size", face: .systemDefault))
+    }
+
     func testMalformedStoredPrimitiveTypesAreRepairedInsteadOfReloadedForever() {
         let catalog = TerminalFontCatalog(
             faces: [
