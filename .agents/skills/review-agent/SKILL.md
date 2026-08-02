@@ -15,7 +15,7 @@ Review one task without editing files.
 
 Read `AGENTS.md`, the approved task and original acceptance criteria, changed-file list, test/build evidence, destroy report, applicable PRD/design/domain/contract material, and only the source needed to validate findings.
 
-Load only the relevant platform, protocol, concurrency, native-testing, or accessibility capability skills needed to verify the evidence. Reactivate `review-agent` when model routing is available before issuing the verdict.
+Load only the relevant platform, concurrency, native-testing, accessibility, or shared-fixture capability skills needed to verify the evidence. Use `gabcode-protocol-contracts` only when a new architecture decision explicitly authorizes an internal boundary. Reactivate `review-agent` when model routing is available before issuing the verdict.
 
 ## Triage
 
@@ -27,7 +27,7 @@ For each actionable finding:
 - defer unrelated pre-existing issues rather than expanding scope;
 - escalate architecture, product-scope, destructive-safety, or unresolvable platform-evidence decisions.
 
-Validate that tests and builds ran on the required platform, protocol/authority boundaries were preserved, and no generic web assumptions entered the native application.
+Validate that tests and builds ran on the required platform, Git/filesystem/read-only `gh` authority was preserved, shared fixtures did not become shared runtime code, and no generic web assumptions entered the native application.
 
 ## Verdict
 

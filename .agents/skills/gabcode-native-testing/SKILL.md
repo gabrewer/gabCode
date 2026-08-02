@@ -1,6 +1,6 @@
 ---
 name: gabcode-native-testing
-description: Designs and evaluates gabCode automated and target-machine evidence across native clients, child processes, PTYs, JSON protocol, filesystem watchers, Git, gh, accessibility, and cleanup. Use during test writing, building, destroyer, review, and sprint smoke testing.
+description: Designs and evaluates gabCode automated and target-machine evidence across native clients, child processes, PTYs, filesystem watchers, Git, gh, shared fixtures, accessibility, and cleanup. Use during test writing, building, destroyer, review, and sprint smoke testing.
 metadata:
   provider: openai-codex
   model: gpt-5.6-terra
@@ -17,7 +17,7 @@ Choose the smallest layer that proves the risk:
 
 1. **Pure tests** — parsing, normalization, invariants, compatibility, and state transitions.
 2. **Component tests** — adapters and lifecycle components with controlled process/filesystem boundaries.
-3. **Process integration** — launch the sidecar or test child process; exercise real framing, cancellation, exit, and stderr/stdout behavior.
+3. **Process integration** — exercise a target native client's direct installed-tool adapter or controlled child process, including arguments, cancellation, exit, and stderr/stdout behavior.
 4. **Temporary Git repositories** — create real repositories/worktrees/remotes for Git semantics rather than mocking command text.
 5. **Native host tests** — exercise WPF or SwiftUI/AppKit integration where supported.
 6. **Target-machine manual evidence** — terminal rendering/input, Narrator/VoiceOver, focus, IME, resize/reflow, packaging, signing, and cleanup that automation cannot prove.
@@ -40,9 +40,9 @@ Choose the smallest layer that proves the risk:
 
 Use structured Git output and real repositories. Cover detached HEAD, missing upstream, dirty/renamed/deleted files, stale worktree registrations, rewritten history, and guarded removal. For `gh`, distinguish missing executable, unauthenticated, remote mismatch, permission, not-found, and transient failures while preserving read-only behavior.
 
-### Protocol and processes
+### Processes and shared fixtures
 
-Test the selected framing, source-generated serialization, correlation, malformed/unknown/versioned records, concurrent requests, cancellation, sidecar death, diagnostics separation, and pending-operation completion.
+Test direct installed-tool invocation, malformed/unknown/versioned external output, cancellation, child-process death, diagnostics separation, and pending-operation cleanup. Exercise shared logical fixtures from each platform's own test surface; a fixture pass never replaces target-OS Git, filesystem, watcher, process, or cleanup evidence.
 
 ### Native terminals
 

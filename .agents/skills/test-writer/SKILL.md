@@ -1,6 +1,6 @@
 ---
 name: test-writer
-description: Writes gabCode tests and baseline evidence before implementation across native, process, filesystem, Git, gh, protocol, and PTY boundaries. Use for an approved task before its builder phase.
+description: Writes gabCode tests and baseline evidence before implementation across native, process, filesystem, Git, gh, watcher, fixture, and PTY boundaries. Use for an approved task before its builder phase.
 metadata:
   provider: openai-codex
   model: gpt-5.6-terra
@@ -23,8 +23,8 @@ Use the repository's native framework and the narrowest test level that proves t
 
 - pure tests for isolated transformations and invariants;
 - temporary real Git repositories for Git semantics;
-- process integration tests for the NativeAOT sidecar and JSON framing;
-- filesystem/watcher tests with bounded reconciliation behavior;
+- direct native-client process integration tests for installed tools or controlled child processes;
+- shared logical fixture-consumer tests plus filesystem/watcher tests with bounded reconciliation behavior;
 - controlled `gh` adapter tests for missing, unauthenticated, permission, remote-mismatch, and transient failures;
 - target-platform native or PTY tests where the framework supports them;
 - clearly documented manual evidence for behavior automation cannot prove.
@@ -38,6 +38,7 @@ As applicable, cover paths with spaces/Unicode, detached or missing-upstream Git
 ## Boundaries
 
 - Do not add Vitest, Playwright, browser hosts, or web infrastructure by default.
+- Do not assume or create a gabCode sidecar/client-core protocol. Shared fixtures supplement rather than replace each platform's real integration and target-OS evidence.
 - Do not mock away a boundary whose behavior is the point of the task.
 - Do not claim platform behavior without target-platform evidence.
 - Do not broaden tests into pre-existing unrelated behavior.

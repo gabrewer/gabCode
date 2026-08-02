@@ -1,6 +1,6 @@
 ---
 name: dotnet-concurrency-specialist
-description: Analyzes .NET concurrency, async coordination, race conditions, cancellation, and lifecycle cleanup for gabCode. Use for shared-core watchers, process management, retained terminal state, UI/background coordination, and nondeterministic tests.
+description: Analyzes Windows/.NET concurrency, async coordination, race conditions, cancellation, and lifecycle cleanup for gabCode. Use for Windows-client watchers, process management, retained terminal state, UI/background coordination, and nondeterministic tests.
 metadata:
   provider: openai-codex
   model: gpt-5.6-sol
@@ -31,8 +31,8 @@ Pay special attention to:
 - terminal view movement racing with process exit or shutdown;
 - cancellation versus graceful process termination and descendant cleanup;
 - timers or callbacks firing after disposal;
-- concurrent writes to the standard-input protocol stream;
-- protocol response completion racing with sidecar death;
+- direct installed-tool output completion racing with cancellation or child-process exit;
+- Windows-client watcher/process callbacks racing with disposal;
 - UI thread affinity and background result publication;
 - test cleanup racing with asynchronous callbacks or child processes.
 

@@ -1,6 +1,6 @@
 ---
 name: gabcode-dotnet-inspect
-description: Inspects .NET and NuGet API surfaces for gabCode without guessing signatures. Use for WPF, NativeAOT, System.Text.Json, Windows terminal integration, framework APIs, package versions, and compatibility questions.
+description: Inspects Windows/.NET and NuGet API surfaces for gabCode without guessing signatures. Use for WPF, Windows terminal integration, framework APIs, package versions, and compatibility questions.
 metadata:
   provider: openai-codex
   model: gpt-5.6-sol
@@ -41,11 +41,11 @@ For platform libraries, use the relevant `--platform` scope. For local files, in
 
 Typical questions include:
 
-- whether a serialization API is source-generation and NativeAOT compatible;
+- the exact process, filesystem, or serialization API available to the Windows client;
 - the exact WPF hosting or interop surface available to the Windows client;
 - package APIs and changes for a pinned terminal dependency;
 - cancellation and process APIs on the selected .NET target;
-- public members that would cross the client/core contract;
+- public members of an explicitly approved Windows-facing or artifact-schema boundary;
 - differences between versions before pinning or upgrading a dependency.
 
 Return the exact command, package/version or file, relevant signatures, and any uncertainty to the worker that loaded this skill.

@@ -33,18 +33,18 @@ Before adopting a worker role, activate its resource route when the `activate_or
 Load only the workers required by the approved plan:
 
 - `domain-modeler` when durable product concepts or authority boundaries change;
-- `api-developer` when the typed client/core or another explicit contract changes;
+- `api-developer` only when an explicitly approved typed boundary or language-neutral artifact schema changes;
 - `test-writer` before implementation of new behavior;
-- `backend-builder` for shared NativeAOT sidecar work;
-- `frontend-builder` for the declared native Windows or macOS client;
+- `frontend-builder` for the complete declared native Windows or macOS client;
+- `backend-builder` only after a future human-approved backend architecture decision;
 - `destroyer`, `review-agent`, and `git-committer` for the canonical quality gates.
 
 Canonical workers may load these supporting capabilities when relevant:
 
 - `gabcode-windows-desktop` or `gabcode-macos-desktop` for the declared native platform;
-- `gabcode-protocol-contracts` for client/core boundary work;
-- `gabcode-dotnet-inspect` for exact .NET/package API evidence;
-- `dotnet-concurrency-specialist` for watchers, processes, cancellation, races, or lifecycle work;
+- `gabcode-protocol-contracts` only as a guard while reviewing a proposed internal protocol under a new approved architecture decision;
+- `gabcode-dotnet-inspect` for exact Windows/.NET/package API evidence;
+- `dotnet-concurrency-specialist` for Windows/.NET watchers, processes, cancellation, races, or lifecycle work;
 - `gabcode-native-accessibility` for user-visible native behavior;
 - `gabcode-native-testing` for test, adversarial, review, and smoke evidence.
 
@@ -66,6 +66,8 @@ For each task:
 8. Record durable evidence in the configured GitHub Issues backend before moving on.
 
 Never use broad reset or clean commands that could destroy unrelated work. If safe task-only rollback is impossible, stop and ask the user.
+
+Do not create, launch, package, or route work through a gabCode sidecar or internal client/core protocol unless a separate human-approved architecture decision explicitly authorizes that boundary.
 
 ## Completion boundary
 

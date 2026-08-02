@@ -13,8 +13,8 @@ Use this supporting skill only for a task whose target platform is Windows. Vali
 
 ## Architecture boundary
 
-- The WPF client owns windows, menus, navigation, layout, focus, keyboard behavior, accessibility, and terminal views.
-- The shared sidecar owns normalized Git/GitHub and local metadata behavior.
+- The complete WPF client owns windows, menus, navigation, layout, focus, keyboard behavior, accessibility, terminal views, direct Git/read-only `gh`, normalization, watchers/reconciliation, and local metadata.
+- Use shared requirements, vocabulary, and language-neutral fixtures as conformance inputs only; do not create or depend on a shared runtime.
 - Keep the Windows Terminal control and ConPTY behind gabCode-owned abstractions so dependency details do not leak through the client.
 - A terminal session/process has identity independent of the layout region displaying its view.
 
