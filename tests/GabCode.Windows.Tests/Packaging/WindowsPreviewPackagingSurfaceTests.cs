@@ -6,8 +6,8 @@ namespace GabCode.Windows.Tests.Packaging;
 
 public sealed class WindowsPreviewPackagingSurfaceTests
 {
-    private const string PreviewVersion = "0.0.1-preview.1";
-    private const string MsiName = "gabCode-0.0.1-preview.1-windows-x64.msi";
+    private const string PreviewVersionPattern = "x.y.z-preview.n";
+    private const string MsiNamePattern = "gabCode-x.y.z-preview.n-windows-x64.msi";
 
     [Fact]
     public void Windows_preview_packaging_surface_declares_the_pinned_Wix_tool_and_entry_points()
@@ -29,7 +29,7 @@ public sealed class WindowsPreviewPackagingSurfaceTests
     }
 
     [Fact]
-    public void Wix_source_models_a_per_user_stable_upgrade_preview_package_without_a_desktop_shortcut()
+    public void Wix_source_and_generic_build_script_model_a_per_user_stable_upgrade_preview_package_without_a_desktop_shortcut()
     {
         var wixSourcePath = Path.Combine(GetRepositoryRoot(), "eng", "release", "windows", "GabCode.Preview.wxs");
         Assert.True(File.Exists(wixSourcePath), $"Missing WiX source: {wixSourcePath}");
@@ -43,17 +43,22 @@ public sealed class WindowsPreviewPackagingSurfaceTests
         Assert.Equal("yes", package.Element(wix + "MajorUpgrade")?.Attribute("AllowSameVersionUpgrades")?.Value);
         Assert.DoesNotContain(document.Descendants(wix + "Shortcut"), shortcut =>
             string.Equals("DesktopFolder", shortcut.Attribute("Directory")?.Value, StringComparison.Ordinal));
+
+        var buildScript = File.ReadAllText(Path.Combine(GetRepositoryRoot(), "eng", "release", "windows", "Build-Preview.ps1"));
+        Assert.Contains("New-StableGuid \"gabCode/windows-x64/product/$Version\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("$package.SetAttribute('Version', $numericVersion)", buildScript, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Windows_preview_documentation_states_the_exact_artifact_and_unsigned_support_boundary()
+    public void Windows_preview_documentation_states_the_generic_artifact_and_unsigned_support_boundary()
     {
         var documentationPath = Path.Combine(GetRepositoryRoot(), "Documentation", "release", "windows-unsigned-preview.md");
         Assert.True(File.Exists(documentationPath), $"Missing Windows preview documentation: {documentationPath}");
 
         var documentation = File.ReadAllText(documentationPath);
-        Assert.Contains(PreviewVersion, documentation, StringComparison.Ordinal);
-        Assert.Contains(MsiName, documentation, StringComparison.Ordinal);
+        Assert.Contains(PreviewVersionPattern, documentation, StringComparison.Ordinal);
+        Assert.Contains(MsiNamePattern, documentation, StringComparison.Ordinal);
+        Assert.DoesNotContain("0.0.1-preview.1", documentation, StringComparison.Ordinal);
         Assert.Contains("unsigned", documentation, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Windows 11", documentation, StringComparison.Ordinal);
         Assert.Contains("MIT", documentation, StringComparison.Ordinal);
