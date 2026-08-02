@@ -198,7 +198,7 @@ Templates support `$1`, `$2`, `$@`, and related positional argument forms.
 Use the Lessi.App sequence-parity workflow as the target quality bar for generated Pi prompt templates:
 
 - **Read-before-write list**: name exact standards, spec files, source areas, tests, and existing issue comments to read before planning or execution.
-- **Single source of truth**: state that the repository-configured `github-issues` backend is authoritative. Prefer one umbrella/control sprint issue with comments/checklists when the human wants to avoid issue sprawl.
+- **Single source of truth**: state that the repository-configured `github-issues` backend is authoritative. Use one umbrella/control sprint issue per PRD by default, embedding milestones, tasks, comments, and checklists. Create a child/follow-up issue only when the next coherent scope would exceed the canonical review-size checkpoint or a human explicitly requests a split; record the reason and link.
 - **Full-stack default**: require a Contract Impact Check before tasking. Frontend-only is allowed only when explicitly marked `UI polish only`, `docs only`, or `frontend prototype only`.
 - **No state tunneling**: forbid production behavior that hides structured domain state in free-text fields such as `notes`, `description`, `metadataJson`, or local/session storage when a typed API contract is required.
 - **Write-side validation**: if typed IDs link persisted resources, require create/update paths to reject malformed, nonexistent, deleted, cross-user/tenant, and invalid child-item references before persistence.

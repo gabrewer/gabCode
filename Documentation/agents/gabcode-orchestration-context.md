@@ -52,7 +52,7 @@ Planning should identify one owning workstream:
 - **macOS client** — the complete Swift/SwiftUI/AppKit application, including SwiftTerm/Unix PTY, direct Git/`gh`, normalization, watchers/reconciliation, local data, native process behavior, and UX.
 - **Shared specification/fixtures** — durable behavior vocabulary, language-neutral conformance inputs, and expected outcomes only; never a production source project or runtime service.
 
-Windows and macOS implementation must be planned as separate platform increments and validated on their respective operating systems. Shared specification or fixture work must be explicit and cannot hide production implementation inside a cross-platform task. A new internal runtime boundary requires a separate human-approved architecture decision.
+Windows and macOS implementation must be planned as separate platform increments and validated on their respective operating systems. Those increments are embedded tasks in one PRD sprint/control issue by default, not automatic child-issue boundaries. Create a follow-up or child issue only when the next coherent scope would exceed the canonical review-size checkpoint or a human explicitly requests a split, and record the reason/link. Shared specification or fixture work must be explicit and cannot hide production implementation inside a cross-platform task. A new internal runtime boundary requires a separate human-approved architecture decision.
 
 Because this is a greenfield repository, plans must inspect the repository before naming project paths or commands. If a workstream has no real build surface, its first task should establish and verify one. Do not create downstream verification scripts against hypothetical projects.
 
