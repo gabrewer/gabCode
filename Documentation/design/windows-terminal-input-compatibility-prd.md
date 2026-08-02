@@ -6,6 +6,7 @@
 | Platform | Windows |
 | Parent direction | `Documentation/design/gabcode-initial-prd.md` |
 | Related foundation | `Documentation/design/windows-native-terminal-foundation-prd.md` |
+| Related paste safety | `Documentation/design/windows-terminal-safe-multiline-paste-prd.md` |
 
 ## Product Name & One-Liner
 
@@ -50,6 +51,7 @@ The supported shell resolution is the configured Windows Terminal default profil
 - Replacing the approved Windows Terminal WPF control or ConPTY unless a separately approved decision requires it.
 - Implementing macOS terminal behavior.
 - Parsing, recording, or interpreting shell or Pi output.
+- Defining multiline-paste confirmation behavior, which is owned by `Documentation/design/windows-terminal-safe-multiline-paste-prd.md`.
 
 ## Technical Considerations
 

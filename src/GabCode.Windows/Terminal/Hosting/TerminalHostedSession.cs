@@ -9,6 +9,9 @@ namespace GabCode.Windows.Terminal.Hosting;
 internal sealed class TerminalHostedSession : IAsyncDisposable
 {
     private readonly ConptyTerminalConnection connection;
+    private readonly ITerminalMultilinePasteConfirmationService pasteConfirmation = new TerminalMultilinePasteConfirmationService();
+    private readonly TerminalSafePasteController safePaste;
+    private TerminalNativePasteInterceptor? nativePasteInterceptor;
     private Task? startTask;
     private Task? closeTask;
     private bool controlConnected;
@@ -33,6 +36,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
             TimeSpan.FromSeconds(2),
             profile.EnvironmentOverrides));
         connection.StateChanged += Connection_StateChanged;
+        safePaste = new TerminalSafePasteController(pasteConfirmation);
     }
 
     internal event EventHandler<TerminalSessionState>? StateChanged;
@@ -80,11 +84,19 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
         Control.SetTheme(TerminalThemeFactory.CreateDefault(), "Cascadia Mono", 12);
         Control.Connection = connection;
         controlConnected = true;
+        nativePasteInterceptor = new TerminalNativePasteInterceptor(
+            Control,
+            PasteClipboardSnapshot,
+            ShowClipboardReadFailure,
+            Control.GetSelectedText);
+        nativePasteInterceptor.Attach();
         await connection.StartAsync();
     }
 
     private async Task CloseCoreAsync()
     {
+        nativePasteInterceptor?.Dispose();
+        nativePasteInterceptor = null;
         if (controlConnected)
         {
             Control.Connection = null!;
@@ -94,6 +106,27 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
         await connection.CloseAsync();
         connection.StateChanged -= Connection_StateChanged;
     }
+
+    private void PasteClipboardSnapshot(string clipboardSnapshot)
+    {
+        var owner = Window.GetWindow(Control);
+        if (connection.State != TerminalSessionState.Running)
+        {
+            pasteConfirmation.ShowTerminalUnavailable(owner);
+            return;
+        }
+
+        try
+        {
+            safePaste.Paste(owner, clipboardSnapshot, connection.WriteInput);
+        }
+        catch (InvalidOperationException)
+        {
+            pasteConfirmation.ShowTerminalUnavailable(owner);
+        }
+    }
+
+    private void ShowClipboardReadFailure() => pasteConfirmation.ShowClipboardReadFailure(Window.GetWindow(Control));
 
     private void Connection_StateChanged(object? sender, TerminalSessionState state) =>
         StateChanged?.Invoke(this, state);
