@@ -4,6 +4,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { access, lstat, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
@@ -277,4 +278,4 @@ async function main() {
   console.log(JSON.stringify(await publish({ facts, confirmation: options["--confirm"], issueNumber: issue.number }), null, 2));
 }
 
-if (import.meta.url === new URL(process.argv[1], "file:").href) main().catch((error) => { console.error(`ERROR: ${error.message}`); process.exitCode = 1; });
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch((error) => { console.error(`ERROR: ${error.message}`); process.exitCode = 1; });

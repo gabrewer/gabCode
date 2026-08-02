@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { copyFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const helperPath = new URL("./preview-release.mjs", import.meta.url);
+const execFile = promisify(execFileCallback);
 const sourceCommit = "0123456789abcdef0123456789abcdef01234567";
 const version = "0.0.2-preview.3";
 
@@ -61,6 +65,13 @@ function fakeTools({ issueState = "none", history = [] } = {}) {
 async function load() {
   return import(`${helperPath.href}?${Date.now()}-${Math.random()}`);
 }
+
+test("CLI entry point executes on Windows-style file paths", async () => {
+  await assert.rejects(
+    () => execFile(process.execPath, [fileURLToPath(helperPath), "invalid"], { encoding: "utf8" }),
+    (error) => error.code === 1 && /usage: node eng\/release\/preview-release\.mjs/.test(error.stderr),
+  );
+});
 
 test("preflight rejects partial, extra, and tampered inputs before any gh mutation", async (t) => {
   const { root, artifactsRoot, directory } = await fixture();
