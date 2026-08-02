@@ -13,3 +13,6 @@ TestResults/
 DerivedData/
 xcuserdata/
 *.xcuserstate
+
+# Generated release artifacts
+/artifacts/

@@ -67,6 +67,18 @@ open src/GabCode.MacOS/gabCode.xcodeproj
 
 Select the shared `gabCode` scheme and **My Mac** destination, then press `Command-R`.
 
+### Unsigned Apple Silicon preview packaging
+
+The reproducible ad-hoc/non-notarized preview packaging surface is documented in [macOS unsigned developer preview](Documentation/release/macos-unsigned-preview.md). On the declared target Mac:
+
+```bash
+./eng/release/macos/build-preview.sh \
+  0.0.1-preview.1 \
+  artifacts/v0.0.1-preview.1
+./eng/release/macos/test-preview.sh \
+  artifacts/v0.0.1-preview.1/gabCode-0.0.1-preview.1-macos-arm64.dmg
+```
+
 ## License
 
 gabCode is available under the [MIT License](LICENSE).
