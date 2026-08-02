@@ -7,19 +7,31 @@ final class TerminalCommandRouter: ObservableObject {
 
     @Published private(set) var isAvailable = false
     private var mutationLockCancellable: AnyCancellable?
+    private var focusedPresentationCancellable: AnyCancellable?
     private weak var fallbackPresentation: TerminalWorkspacePresentation?
 
-    private init() {}
+    private init() {
+        focusedPresentationCancellable = WindowWorkspaceRegistry.shared.$focusedPresentation
+            .sink { [weak self] presentation in
+                self?.observeAvailability(for: presentation)
+            }
+    }
 
     func connect(_ presentation: TerminalWorkspacePresentation) {
         fallbackPresentation = presentation
+        observeAvailability(for: WindowWorkspaceRegistry.shared.currentFocusedPresentation() ?? presentation)
+    }
+
+    private func observeAvailability(for presentation: TerminalWorkspacePresentation?) {
         mutationLockCancellable?.cancel()
+        guard let presentation else {
+            isAvailable = false
+            return
+        }
         mutationLockCancellable = presentation.$isMutationLocked
             .map { !$0 }
             .removeDuplicates()
-            .sink { [weak self] isAvailable in
-                self?.isAvailable = isAvailable
-            }
+            .sink { [weak self] isAvailable in self?.isAvailable = isAvailable }
     }
 
     func disconnect(_ presentation: TerminalWorkspacePresentation) {
@@ -33,7 +45,7 @@ final class TerminalCommandRouter: ObservableObject {
     }
 
     private var targetPresentation: TerminalWorkspacePresentation? {
-        WindowWorkspaceRegistry.shared.focusedPresentation() ?? fallbackPresentation
+        WindowWorkspaceRegistry.shared.currentFocusedPresentation() ?? fallbackPresentation
     }
 
     func swapTerminals() { targetPresentation?.swapTerminals() }
