@@ -9,7 +9,7 @@
   "platformToolset": "v143",
   "patch": {
     "path": "eng/windows-terminal/patches/hyperlink-activation.patch",
-    "sha256": "9F500F379DEC1FBA88EEBD3D8E8C50650F590787C12F03B8467CB0418A9CA97"
+    "sha256": "B0E43AD8D1FE3EBB02243B4CDDA1B5C768715A7D21D9AD7745D84AD0B5519E89"
   },
   "provenanceFiles": [
     {
@@ -36,7 +36,7 @@
       "file": "Microsoft.Terminal.Control.dll",
       "path": "win-x64/Microsoft.Terminal.Control.dll",
       "bytes": 1659904,
-      "sha256": "13B709083AB635B499531DF8FA2B351CF4F84C8D5D3A04F3765265464A21D2DC"
+      "sha256": "9D7BB1B1FC744873FE59CFF02091E9C4C1721C15DA951BF2B15CFE9519E9551C"
     }
   ]
 }
