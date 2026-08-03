@@ -29,4 +29,11 @@ internal sealed class TerminalMultilinePasteConfirmationService : ITerminalMulti
         "Terminal paste unavailable",
         MessageBoxButton.OK,
         MessageBoxImage.Warning);
+
+    public void ShowUnsafePasteContent(Window? owner) => _ = MessageBox.Show(
+        owner,
+        "This multiline text contains terminal paste control codes. Nothing was pasted.",
+        "Terminal paste unavailable",
+        MessageBoxButton.OK,
+        MessageBoxImage.Warning);
 }

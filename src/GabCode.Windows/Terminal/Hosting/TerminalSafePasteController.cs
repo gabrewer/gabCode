@@ -22,6 +22,15 @@ internal sealed class TerminalSafePasteController
             return;
         }
 
+        if (clipboardSnapshot.Contains("\x1b[200~", StringComparison.Ordinal) ||
+            clipboardSnapshot.Contains("\x1b[201~", StringComparison.Ordinal) ||
+            clipboardSnapshot.Contains("\u009B200~", StringComparison.Ordinal) ||
+            clipboardSnapshot.Contains("\u009B201~", StringComparison.Ordinal))
+        {
+            confirmation.ShowUnsafePasteContent(owner);
+            return;
+        }
+
         var preview = TerminalPastePreview.Create(clipboardSnapshot);
         if (confirmation.Confirm(owner, preview))
         {
