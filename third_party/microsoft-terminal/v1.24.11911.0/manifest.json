@@ -7,6 +7,10 @@
   "platform": "x64",
   "windowsSdk": "10.0.22621.0",
   "platformToolset": "v143",
+  "patch": {
+    "path": "eng/windows-terminal/patches/hyperlink-activation.patch",
+    "sha256": "9F500F379DEC1FBA88EEBD3D8E8C50650F590787C12F03B8467CB0418A9CA97"
+  },
   "provenanceFiles": [
     {
       "file": "LICENSE",
@@ -25,14 +29,14 @@
     {
       "file": "Microsoft.Terminal.Wpf.dll",
       "path": "win-x64/Microsoft.Terminal.Wpf.dll",
-      "bytes": 23552,
-      "sha256": "5B74201D3D8EEBB0D2FC3ABC35A1AB08EACFCA4203FBCFD4D1F5727F43EB386B"
+      "bytes": 25600,
+      "sha256": "E2041C179DB52DB1A8C5A13679D94A38274A647476CEFBB5F33C8289E2A7634A"
     },
     {
       "file": "Microsoft.Terminal.Control.dll",
       "path": "win-x64/Microsoft.Terminal.Control.dll",
-      "bytes": 1653760,
-      "sha256": "1F56A0A3B903BEAB561E7BFBC22CA66221668D801215A969B1A76094ACC30CB5"
+      "bytes": 1659904,
+      "sha256": "13B709083AB635B499531DF8FA2B351CF4F84C8D5D3A04F3765265464A21D2DC"
     }
   ]
 }

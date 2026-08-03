@@ -120,7 +120,7 @@ The Windows Terminal WPF content surface is accepted as provided by the pinned d
 
 - ordinary terminal input remains owned by the terminal;
 - `Tab` is not required to escape the terminal HWND to sibling WPF controls;
-- terminal search and hyperlink activation are not product requirements;
+- terminal search is not a product requirement; Windows hyperlink activation is defined by `Documentation/design/windows-terminal-hyperlink-activation-prd.md`;
 - dedicated Narrator, IME, high-contrast, text-scaling, and reduced-motion qualification of terminal content is not required;
 - the existing focusable `WPFTermControl` UI Automation text provider is retained without a gabCode-owned accessibility bridge.
 

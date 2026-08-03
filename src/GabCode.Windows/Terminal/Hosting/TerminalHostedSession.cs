@@ -12,6 +12,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     private readonly ConptyTerminalConnection connection;
     private readonly ITerminalMultilinePasteConfirmationService pasteConfirmation = new TerminalMultilinePasteConfirmationService();
     private readonly TerminalSafePasteController safePaste;
+    private readonly TerminalHyperlinkActivationService hyperlinkActivation;
     private TerminalNativePasteInterceptor? nativePasteInterceptor;
     private Task? startTask;
     private Task? closeTask;
@@ -41,6 +42,8 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
             profile.EnvironmentOverrides));
         connection.StateChanged += Connection_StateChanged;
         safePaste = new TerminalSafePasteController(pasteConfirmation);
+        hyperlinkActivation = new TerminalHyperlinkActivationService(workingDirectory);
+        Control.HyperlinkActivated += Control_HyperlinkActivated;
     }
 
     internal event EventHandler<TerminalSessionState>? StateChanged;
@@ -143,6 +146,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
             Control.Connection = null!;
             controlConnected = false;
         }
+        Control.HyperlinkActivated -= Control_HyperlinkActivated;
 
         await connection.CloseAsync();
         connection.StateChanged -= Connection_StateChanged;
@@ -178,6 +182,9 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     }
 
     private void ShowClipboardReadFailure() => pasteConfirmation.ShowClipboardReadFailure(Window.GetWindow(Control));
+
+    private void Control_HyperlinkActivated(object? sender, string target) =>
+        hyperlinkActivation.TryActivate(target);
 
     private void Connection_StateChanged(object? sender, TerminalSessionState state) =>
         StateChanged?.Invoke(this, state);
