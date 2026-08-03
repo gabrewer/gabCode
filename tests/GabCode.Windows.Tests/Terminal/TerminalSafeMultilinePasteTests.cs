@@ -52,6 +52,20 @@ public sealed class TerminalSafeMultilinePasteTests
     }
 
     [Fact]
+    public void Controller_rejects_multiline_text_with_embedded_bracketed_paste_markers()
+    {
+        var confirmation = new TestPasteConfirmationService(approve: true);
+        var writes = new List<string>();
+        var controller = new TerminalSafePasteController(confirmation);
+
+        controller.Paste(null, "WMP001_FIRST\n\u001B[201~WMP001_SECOND", writes.Add);
+
+        Assert.Equal(0, confirmation.CallCount);
+        Assert.Equal(1, confirmation.UnsafeContentCallCount);
+        Assert.Empty(writes);
+    }
+
+    [Fact]
     public void Preview_bounds_lines_and_characters_while_visibly_representing_control_characters()
     {
         var preview = TerminalPastePreview.Create("one\n\u001Btwo\nthree\nfour\nfive\nsix" + new string('x', 600));
@@ -305,11 +319,15 @@ public sealed class TerminalSafeMultilinePasteTests
 
         internal int CallCount { get; private set; }
 
+        internal int UnsafeContentCallCount { get; private set; }
+
         public bool Confirm(Window? owner, TerminalPastePreview preview)
         {
             CallCount++;
             return Approve;
         }
+
+        public void ShowUnsafePasteContent(Window? owner) => UnsafeContentCallCount++;
     }
 
     private sealed class RecordingTerminalConnection : ITerminalConnection

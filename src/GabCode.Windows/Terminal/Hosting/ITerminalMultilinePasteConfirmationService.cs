@@ -13,4 +13,8 @@ internal interface ITerminalMultilinePasteConfirmationService
     void ShowTerminalUnavailable(Window? owner)
     {
     }
+
+    void ShowUnsafePasteContent(Window? owner)
+    {
+    }
 }
