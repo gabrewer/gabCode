@@ -1,0 +1,291 @@
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.cpp b/src/cascadia/TerminalControl/HwndTerminal.cpp
+index 59cadc9a5..eeaed9ad8 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.cpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.cpp
+@@ -127,6 +127,20 @@ try
+
+     if (publicTerminal)
+     {
++        // Ctrl+Click activation takes precedence over VT mouse reporting.
++        if (uMsg == WM_LBUTTONDOWN && GetKeyState(VK_CONTROL) < 0 && publicTerminal->_terminal)
++        {
++            const auto font = publicTerminal->_actualFont.GetSize();
++            const til::point cell{ GET_X_LPARAM(lParam) / font.width, GET_Y_LPARAM(lParam) / font.height };
++            const auto lock = publicTerminal->_terminal->LockForWriting();
++            const auto uri = publicTerminal->_terminal->GetHyperlinkAtViewportPosition(cell);
++            if (!uri.empty() && publicTerminal->_pfnHyperlinkCallback)
++            {
++                publicTerminal->_pfnHyperlinkCallback(uri.c_str());
++                return 0;
++            }
++        }
++
+         if (_IsMouseMessage(uMsg))
+         {
+             if (publicTerminal->_CanSendVTMouseInput() && publicTerminal->_SendMouseEvent(uMsg, wParam, lParam))
+@@ -302,6 +316,7 @@ HRESULT HwndTerminal::Initialize()
+     _renderEngine = std::move(engine);
+
+     _terminal->Create({ 80, 25 }, 9001, *_renderer);
++    _terminal->EnableUrlDetection();
+     _terminal->SetWriteInputCallback([=](std::wstring_view input) noexcept { _WriteTextToConnection(input); });
+     _terminal->SetCopyToClipboardCallback([=](wil::zwstring_view text) noexcept { _CopyTextToSystemClipboard(text, {}, {}); });
+     _renderer->EnablePainting();
+@@ -325,6 +340,7 @@ try
+     // These two callbacks have a dangling reference to `this`; let's just clear them
+     _terminal->SetWriteInputCallback(nullptr);
+     _terminal->SetCopyToClipboardCallback(nullptr);
++    _pfnHyperlinkCallback = nullptr;
+
+     if (auto localHwnd{ _hwnd.release() })
+     {
+@@ -360,6 +376,11 @@ void HwndTerminal::_WriteTextToConnection(const std::wstring_view input) noexcep
+     CATCH_LOG();
+ }
+
++void HwndTerminal::RegisterHyperlinkCallback(void callback(const wchar_t*))
++{
++    _pfnHyperlinkCallback = callback;
++}
++
+ void HwndTerminal::RegisterWriteCallback(const void _stdcall callback(wchar_t*))
+ {
+     _pfnWriteCallback = callback;
+@@ -487,6 +508,13 @@ try
+ }
+ CATCH_LOG()
+
++void _stdcall TerminalRegisterHyperlinkCallback(void* terminal, void callback(const wchar_t*))
++try
++{
++    static_cast<HwndTerminal*>(terminal)->RegisterHyperlinkCallback(callback);
++}
++CATCH_LOG()
++
+ void _stdcall TerminalRegisterWriteCallback(void* terminal, const void __stdcall callback(wchar_t*))
+ try
+ {
+@@ -868,6 +896,53 @@ try
+         _uiaProvider->RecordKeyEvent(vkey);
+     }
+
++    if (keyDown)
++    {
++        std::wstring hyperlink;
++        bool activationRequested = false;
++        {
++            const auto lock = _terminal->LockForWriting();
++            if (vkey == 'M' && modifiers.IsCtrlPressed() && modifiers.IsShiftPressed() && !modifiers.IsAltPressed())
++            {
++                _terminal->ToggleMarkMode();
++                _renderer->TriggerSelection();
++                _suppressNextCharacter = true;
++                return;
++            }
++
++            if (_terminal->SelectionMode() == ::Terminal::SelectionInteractionMode::Mark)
++            {
++                if (vkey == VK_TAB && !modifiers.IsAltPressed() && !modifiers.IsCtrlPressed())
++                {
++                    _terminal->SelectHyperlink(modifiers.IsShiftPressed() ? ::Terminal::SearchDirection::Backward : ::Terminal::SearchDirection::Forward);
++                    _renderer->TriggerSelection();
++                    _suppressNextCharacter = true;
++                    return;
++                }
++                if (vkey == VK_ESCAPE)
++                {
++                    _ClearSelection();
++                    _suppressNextCharacter = true;
++                    return;
++                }
++                if (vkey == VK_RETURN && modifiers.IsCtrlPressed() && !modifiers.IsAltPressed() && !modifiers.IsShiftPressed())
++                {
++                    hyperlink = _terminal->GetHyperlinkAtBufferPosition(_terminal->GetSelectionAnchor());
++                    activationRequested = true;
++                    _suppressNextCharacter = true;
++                }
++            }
++        }
++        if (activationRequested)
++        {
++            if (!hyperlink.empty() && _pfnHyperlinkCallback)
++            {
++                _pfnHyperlinkCallback(hyperlink.c_str());
++            }
++            return;
++        }
++    }
++
+     TerminalInput::OutputType out;
+     {
+         const auto lock = _terminal->LockForReading();
+@@ -888,6 +963,12 @@ try
+         return;
+     }
+
++    if (_suppressNextCharacter)
++    {
++        _suppressNextCharacter = false;
++        return;
++    }
++
+     TerminalInput::OutputType out;
+     {
+         const auto lock = _terminal->LockForWriting();
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.hpp b/src/cascadia/TerminalControl/HwndTerminal.hpp
+index 90eddcb9d..75abb135f 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.hpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.hpp
+@@ -45,6 +45,7 @@ __declspec(dllexport) void _stdcall AvoidBuggyTSFConsoleFlags();
+ __declspec(dllexport) HRESULT _stdcall CreateTerminal(HWND parentHwnd, _Out_ void** hwnd, _Out_ void** terminal);
+ __declspec(dllexport) void _stdcall TerminalSendOutput(void* terminal, LPCWSTR data);
+ __declspec(dllexport) void _stdcall TerminalRegisterScrollCallback(void* terminal, void __stdcall callback(int, int, int));
++__declspec(dllexport) void _stdcall TerminalRegisterHyperlinkCallback(void* terminal, void callback(const wchar_t*));
+ __declspec(dllexport) HRESULT _stdcall TerminalTriggerResize(_In_ void* terminal, _In_ til::CoordType width, _In_ til::CoordType height, _Out_ til::size* dimensions);
+ __declspec(dllexport) HRESULT _stdcall TerminalTriggerResizeWithDimension(_In_ void* terminal, _In_ til::size dimensions, _Out_ til::size* dimensionsInPixels);
+ __declspec(dllexport) HRESULT _stdcall TerminalCalculateResize(_In_ void* terminal, _In_ til::CoordType width, _In_ til::CoordType height, _Out_ til::size* dimensions);
+@@ -80,6 +81,7 @@ public:
+     void SendOutput(std::wstring_view data);
+     HRESULT Refresh(const til::size windowSize, _Out_ til::size* dimensions);
+     void RegisterScrollCallback(std::function<void(int, int, int)> callback);
++    void RegisterHyperlinkCallback(void callback(const wchar_t*));
+     void RegisterWriteCallback(const void _stdcall callback(wchar_t*));
+     ::Microsoft::Console::Render::IRenderData* GetRenderData() const noexcept;
+     HWND GetHwnd() const noexcept;
+@@ -106,7 +108,9 @@ private:
+     FontInfoDesired _desiredFont;
+     FontInfo _actualFont;
+     int _currentDpi;
++    bool _suppressNextCharacter = false;
+     std::function<void(wchar_t*)> _pfnWriteCallback;
++    std::function<void(const wchar_t*)> _pfnHyperlinkCallback;
+     ::Microsoft::WRL::ComPtr<HwndTerminalAutomationPeer> _uiaProvider;
+
+     std::unique_ptr<::Microsoft::Terminal::Core::Terminal> _terminal;
+diff --git a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
+index cc769cb56..466bc49bf 100644
+--- a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
++++ b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
+@@ -15,6 +15,7 @@ EXPORTS
+   TerminalIsSelectionActive
+   TerminalKillFocus
+   TerminalRegisterScrollCallback
++  TerminalRegisterHyperlinkCallback
+   TerminalRegisterWriteCallback
+   TerminalSendCharEvent
+   TerminalSendKeyEvent
+diff --git a/src/cascadia/TerminalCore/Terminal.cpp b/src/cascadia/TerminalCore/Terminal.cpp
+index 95aa43a12..ebdc663da 100644
+--- a/src/cascadia/TerminalCore/Terminal.cpp
++++ b/src/cascadia/TerminalCore/Terminal.cpp
+@@ -1388,6 +1388,12 @@ TextBuffer& Terminal::_activeBuffer() const noexcept
+     return _inAltBuffer() ? *_altBuffer : *_mainBuffer;
+ }
+
++void Terminal::EnableUrlDetection() noexcept
++{
++    _detectURLs = true;
++    _updateUrlDetection();
++}
++
+ void Terminal::_updateUrlDetection()
+ {
+     if (_detectURLs)
+diff --git a/src/cascadia/TerminalCore/Terminal.hpp b/src/cascadia/TerminalCore/Terminal.hpp
+index b1c27ed3f..a31c2327b 100644
+--- a/src/cascadia/TerminalCore/Terminal.hpp
++++ b/src/cascadia/TerminalCore/Terminal.hpp
+@@ -97,6 +97,7 @@ public:
+     void SetFontInfo(const FontInfo& fontInfo);
+     void SetCursorStyle(const ::Microsoft::Console::VirtualTerminal::DispatchTypes::CursorStyle cursorStyle);
+     void SetOptionalFeatures(winrt::Microsoft::Terminal::Core::ICoreSettings settings);
++    void EnableUrlDetection() noexcept;
+     bool IsXtermBracketedPasteModeEnabled() const noexcept;
+     std::wstring_view GetWorkingDirectory() noexcept;
+
+diff --git a/src/cascadia/WpfTerminalControl/NativeMethods.cs b/src/cascadia/WpfTerminalControl/NativeMethods.cs
+index 96678f718..d847daf7c 100644
+--- a/src/cascadia/WpfTerminalControl/NativeMethods.cs
++++ b/src/cascadia/WpfTerminalControl/NativeMethods.cs
+@@ -19,6 +19,9 @@ namespace Microsoft.Terminal.Wpf
+         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+         public delegate void WriteCallback([In, MarshalAs(UnmanagedType.LPWStr)] string data);
+
++        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
++        public delegate void HyperlinkCallback([In, MarshalAs(UnmanagedType.LPWStr)] string uri);
++
+         public enum WindowMessage : int
+         {
+             /// <summary>
+@@ -206,6 +209,9 @@ namespace Microsoft.Terminal.Wpf
+         [DllImport("Microsoft.Terminal.Control.dll", CharSet = CharSet.Unicode, CallingConvention = CallingConvention.StdCall, PreserveSig = true)]
+         public static extern void TerminalRegisterWriteCallback(IntPtr terminal, [MarshalAs(UnmanagedType.FunctionPtr)] WriteCallback callback);
+
++        [DllImport("Microsoft.Terminal.Control.dll", CharSet = CharSet.Unicode, CallingConvention = CallingConvention.StdCall, PreserveSig = true)]
++        public static extern void TerminalRegisterHyperlinkCallback(IntPtr terminal, [MarshalAs(UnmanagedType.FunctionPtr)] HyperlinkCallback callback);
++
+         [DllImport("Microsoft.Terminal.Control.dll", CharSet = CharSet.Unicode, CallingConvention = CallingConvention.StdCall, PreserveSig = true)]
+         public static extern void TerminalUserScroll(IntPtr terminal, int viewTop);
+
+diff --git a/src/cascadia/WpfTerminalControl/TerminalContainer.cs b/src/cascadia/WpfTerminalControl/TerminalContainer.cs
+index 348c006ca..4b1128278 100644
+--- a/src/cascadia/WpfTerminalControl/TerminalContainer.cs
++++ b/src/cascadia/WpfTerminalControl/TerminalContainer.cs
+@@ -27,6 +27,7 @@ namespace Microsoft.Terminal.Wpf
+         private DispatcherTimer blinkTimer;
+         private NativeMethods.ScrollCallback scrollCallback;
+         private NativeMethods.WriteCallback writeCallback;
++        private NativeMethods.HyperlinkCallback hyperlinkCallback;
+
+         /// <summary>
+         /// Initializes a new instance of the <see cref="TerminalContainer"/> class.
+@@ -70,6 +71,8 @@ namespace Microsoft.Terminal.Wpf
+         /// </summary>
+         internal event EventHandler<int> UserScrolled;
+
++        internal event EventHandler<string> HyperlinkActivated;
++
+         /// <summary>
+         /// Gets or sets a value indicating whether if the renderer should automatically resize to fill the control
+         /// on user action.
+@@ -309,9 +312,11 @@ namespace Microsoft.Terminal.Wpf
+
+             this.scrollCallback = this.OnScroll;
+             this.writeCallback = this.OnWrite;
++            this.hyperlinkCallback = this.OnHyperlink;
+
+             NativeMethods.TerminalRegisterScrollCallback(this.terminal, this.scrollCallback);
+             NativeMethods.TerminalRegisterWriteCallback(this.terminal, this.writeCallback);
++            NativeMethods.TerminalRegisterHyperlinkCallback(this.terminal, this.hyperlinkCallback);
+
+             // If the saved DPI scale isn't the default scale, we push it to the terminal.
+             if (dpiScale.PixelsPerInchX != NativeMethods.USER_DEFAULT_SCREEN_DPI)
+@@ -463,6 +468,11 @@ namespace Microsoft.Terminal.Wpf
+             this.TerminalScrolled?.Invoke(this, (viewTop, viewHeight, bufferSize));
+         }
+
++        private void OnHyperlink(string uri)
++        {
++            this.Dispatcher.BeginInvoke(new Action(() => this.HyperlinkActivated?.Invoke(this, uri)));
++        }
++
+         private void OnWrite(string data)
+         {
+             this.Connection?.WriteInput(data);
+diff --git a/src/cascadia/WpfTerminalControl/TerminalControl.xaml.cs b/src/cascadia/WpfTerminalControl/TerminalControl.xaml.cs
+index 611cde52a..1f4fd8adb 100644
+--- a/src/cascadia/WpfTerminalControl/TerminalControl.xaml.cs
++++ b/src/cascadia/WpfTerminalControl/TerminalControl.xaml.cs
+@@ -58,6 +58,12 @@ namespace Microsoft.Terminal.Wpf
+         /// <summary>
+         /// Sets the connection to a terminal backend.
+         /// </summary>
++        public event EventHandler<string> HyperlinkActivated
++        {
++            add => this.termContainer.HyperlinkActivated += value;
++            remove => this.termContainer.HyperlinkActivated -= value;
++        }
++
+         public ITerminalConnection Connection
+         {
+             set => this.termContainer.Connection = value;

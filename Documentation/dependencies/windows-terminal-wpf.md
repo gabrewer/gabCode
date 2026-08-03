@@ -6,7 +6,7 @@
 
 The exact Microsoft Windows Terminal WPF control source can be acquired and built on the target Windows machine, and its host renders and retains a live terminal HWND. The dependency is approved for gabCode's Windows terminal foundation.
 
-The product explicitly accepts that the pinned WPF surface has no demonstrated keyboard-only route out of terminal focus, exposes neither search nor hyperlink actions through its public WPF/C ABI, and does not close an assigned terminal connection when the control is replaced or destroyed. These observations remain documented integration facts, but they do not block adoption and do not require an upstream patch or future product work unless a later human decision reintroduces those requirements.
+The product accepts that the pinned WPF surface has no demonstrated keyboard-only route out of terminal focus and does not close an assigned terminal connection when the control is replaced or destroyed. Hyperlink activation is now required by `Documentation/design/windows-terminal-hyperlink-activation-prd.md`; this sprint carries a narrow repository-owned patch that exposes terminal hyperlink activation through the WPF/C ABI. Search remains unsupported.
 
 No gabCode product code, tests, upstream source, generated package, or binary was changed for this gate. macOS is **NOT CHECKED**; this is a Windows-only evaluation.
 
@@ -20,7 +20,7 @@ No gabCode product code, tests, upstream source, generated package, or binary wa
 | Release | [Windows Terminal v1.24.11911.0](https://github.com/microsoft/terminal/releases/tag/v1.24.11911.0), published 2026-07-16; non-draft, non-prerelease |
 | Primary license | MIT (`LICENSE`) |
 | Notice obligation | Ship the upstream `NOTICE.md` with any redistribution and review its third-party notices; it contains MIT, BSD-style, Apache-style, public-domain, CC-BY-SA test-spec, and other notices. |
-| Upgrade boundary | Any update is a new pinned tag/commit and must repeat acquisition, clean build, output/dependency inventory, licensing, core runtime/input, and live-view movement checks. Accepted focus, search, hyperlink, and dedicated accessibility limitations remain non-blocking unless a later human decision changes the product requirements. No floating branch, unofficial NuGet package, source retarget, or pinned-source patch is approved. |
+| Upgrade boundary | Any update is a new pinned tag/commit or patch revision and must repeat acquisition, clean build, output/dependency inventory, licensing, core runtime/input, hyperlink, and live-view movement checks. Accepted focus, search, and dedicated accessibility limitations remain non-blocking unless a later human decision changes requirements. No floating branch, unofficial NuGet package, or silent source retarget is approved. |
 
 The WPF wrapper build has `Microsoft.Terminal.Wpf` product version `0.1+5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc`; it is an unsigned local development output, not a signed Microsoft redistribution artifact.
 
@@ -89,7 +89,7 @@ The upstream `WpfTerminalControl.csproj` pack target expects native `Microsoft.T
 
 For the initial Windows x64 integration, gabCode will use an explicit x64 runtime-asset layout built from the pinned source rather than the upstream multi-architecture pack target. The integration sprint must establish how those versioned assets are produced and consumed before adding the application reference.
 
-The chosen implementation must preserve pinned source/build provenance, include `LICENSE` and `NOTICE.md`, inventory shipped assets, meet the .NET desktop-runtime policy, and remain reproducible before packaging/signing work. Do not rely on an unofficial repackaged control. Building Win32 and ARM64 outputs or using the upstream multi-architecture package remains optional future work, not an integration prerequisite.
+The chosen implementation must preserve pinned source/build provenance, identify `eng/windows-terminal/patches/hyperlink-activation.patch` and its hash, include `LICENSE` and `NOTICE.md`, inventory shipped assets, meet the .NET desktop-runtime policy, and remain reproducible before packaging/signing work. Do not rely on an unofficial repackaged control. Building Win32 and ARM64 outputs or using the upstream multi-architecture package remains optional future work, not an integration prerequisite.
 
 ## WPF keyboard-navigation hosting requirement
 
@@ -134,7 +134,7 @@ A future **gabCode-owned Windows-only** ConPTY adapter may implement `ITerminalC
 | Keyboard entry | PASS | The terminal native HWND had keyboard focus at host launch and accepted injected characters. |
 | Keyboard focus escape | **ACCEPTED LIMITATION** | From the focused terminal in the movement harness, `Tab` did not focus the sibling `Escape target` button (`FocusAfterTab: null`, `EscapeTargetFocusedAfterTab: false`). The wrapper forwards `WM_KEYDOWN` and `WM_SYSKEYDOWN` to the terminal; no WPF public escape mechanism was found. Keyboard-only focus escape is not required for the initial product. |
 | Search | **UNSUPPORTED / ACCEPTED LIMITATION** | The upstream WinUI terminal source contains search, but `Microsoft.Terminal.Wpf` exposes no search member and the native C exports expose no search operation. gabCode will not provide terminal search unless a future product decision adds it. |
-| Hyperlinks | **UNSUPPORTED / ACCEPTED LIMITATION** | The upstream WinUI control contains hyperlink handling, but the pinned WPF wrapper/C exports expose no hyperlink event, retrieval, or activation API. gabCode will not provide terminal hyperlink activation unless a future product decision adds it. |
+| Hyperlinks | **PATCHED — TARGET-WINDOWS EVIDENCE REQUIRED** | The repository-owned patch reuses pinned TerminalCore hyperlink data and exposes activation through the WPF/C ABI. `Ctrl+Click` and Mark Mode behavior require target-Windows runtime evidence; gabCode owns target validation and launch policy. |
 | Narrator | **NOT CHECKED / ACCEPTED LIMITATION** | UIA tree is present, but Narrator was not running; a UIA client is not equivalent to screen-reader completion. Dedicated Narrator qualification of terminal content is not required. |
 | IME | **NOT CHECKED / ACCEPTED LIMITATION** | The source contains TSF-specific handling, but no IME target-machine scenario was run. Dedicated IME qualification is not required. |
 | High contrast, text scaling, reduced motion | **NOT CHECKED / ACCEPTED LIMITATION** | Validation machine reported high contrast off and client/menu animation on; no setting-transition or scaled-render scenario was run. Dedicated qualification of the upstream terminal surface is not required. |
