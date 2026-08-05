@@ -1,6 +1,6 @@
 # Windows unsigned developer preview
 
-This document covers `gabCode-x.y.z-preview.n-windows-x64.msi`, the intentionally unsigned Windows artifact for a gabCode `x.y.z-preview.n` release. It is an unsupported developer preview for trusted testers, not a production-ready or trusted package.
+This document covers `gabCode-x.y.z-preview-windows-x64.msi`, the intentionally unsigned Windows artifact for a gabCode `x.y.z-preview` release. It is an unsupported developer preview for trusted testers, not a production-ready or trusted package.
 
 ## Supported target
 
@@ -13,7 +13,7 @@ Windows ARM64, Windows on ARM emulation qualification, Windows 10, and machine-w
 
 ## Version and trust boundary
 
-Only versions matching `x.y.z-preview.n` are supported. The preview ordinal `n` must be positive, and the Windows numeric components must fit `255.255.65535`. The full preview label determines a distinct ProductCode; every preview shares the stable UpgradeCode. Windows Installer receives numeric product version `x.y.z`.
+Only versions matching `x.y.z-preview` are supported. The Windows numeric components must fit `255.255.65535`. The full preview identifier determines a distinct ProductCode; every preview shares the stable UpgradeCode. Windows Installer receives numeric product version `x.y.z`.
 
 The MSI, `GabCode.Windows.exe`, the gabCode application assembly, and the pinned Microsoft Terminal DLLs are intentionally unsigned. `Get-AuthenticodeSignature` must report `NotSigned` for those files. The self-contained payload also preserves valid Microsoft signatures on many .NET and Windows runtime files; those signatures do not sign or establish trust for gabCode.
 
@@ -86,23 +86,23 @@ WiX is pinned as repository-local .NET tool `7.0.0` in `.config/dotnet-tools.jso
 After the workflow implementation has been reviewed and merged to current `origin/main`, use the explicit Pi command:
 
 ```text
-/build-preview-msi x.y.z-preview.n
+/build-preview-msi x.y.z-preview
 ```
 
 The prompt invokes the deterministic entry point:
 
 ```powershell
 pwsh -NoProfile -File eng/release/windows/Prepare-Preview.ps1 `
-  -Version x.y.z-preview.n
+  -Version x.y.z-preview
 ```
 
-Preparation requires a clean working tree with no non-ignored changes and `HEAD == origin/main`. It runs repository restore/build/tests, builds the MSI through `Build-Preview.ps1`, and runs the bounded package/install/repair/same-numeric upgrade/later-numeric upgrade/uninstall verification through `Test-Preview.ps1`.
+Preparation requires a clean working tree with no non-ignored changes and `HEAD == origin/main`. It runs repository restore/build/tests, builds the MSI through `Build-Preview.ps1`, and runs the bounded package/install/repair/later-patch upgrade/uninstall verification through `Test-Preview.ps1`.
 
 Successful preparation writes exactly this Windows pair while preserving a matching Mac pair already present:
 
 ```text
-artifacts/vx.y.z-preview.n/gabCode-x.y.z-preview.n-windows-x64.msi
-artifacts/vx.y.z-preview.n/gabCode-x.y.z-preview.n-windows-x64.evidence.json
+artifacts/vx.y.z-preview/gabCode-x.y.z-preview-windows-x64.msi
+artifacts/vx.y.z-preview/gabCode-x.y.z-preview-windows-x64.evidence.json
 ```
 
 Copy both files together. The evidence records the reviewed full source commit and recomputable artifact facts. Preparation creates no GitHub issue, tag, release, or transfer configuration. `/release-preview <version>` is a separate publish-only command that requires both platform pairs.
@@ -111,10 +111,10 @@ The lower-level package commands remain available for focused diagnostics:
 
 ```powershell
 pwsh -NoProfile -File eng/release/windows/Build-Preview.ps1 `
-  -Version x.y.z-preview.n `
+  -Version x.y.z-preview `
   -OutputDirectory .pi/tmp/windows-package-diagnostic
 pwsh -NoProfile -File eng/release/windows/Test-Preview.ps1 `
-  -PackagePath .pi/tmp/windows-package-diagnostic/gabCode-x.y.z-preview.n-windows-x64.msi
+  -PackagePath .pi/tmp/windows-package-diagnostic/gabCode-x.y.z-preview-windows-x64.msi
 ```
 
 `Build-Preview.ps1` refuses to remove unrelated output entries. `Test-Preview.ps1` uses bounded, noninteractive Windows Installer operations and records logs plus `artifact-report.json` under its selected evidence directory.

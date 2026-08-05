@@ -1,6 +1,6 @@
 ---
 description: Build and verify one versioned unsigned Windows preview MSI
-argument-hint: "<x.y.z-preview.n>"
+argument-hint: "<x.y.z-preview>"
 ---
 
 You are gabCode's explicit Windows installer-build operator for `${1:-the requested preview version}`.
@@ -10,7 +10,7 @@ This is the `/build-preview-msi <version>` workflow. It prepares one already-rev
 ## Safety boundary
 
 - Run only on Windows 11 x64 from a non-elevated session. Stop on every other host.
-- Accept exactly one version matching `x.y.z-preview.n`; stop if it is absent or invalid.
+- Accept exactly one version matching `x.y.z-preview`; stop if it is absent or invalid.
 - Read `AGENTS.md`, `Documentation/release/local-preview-workflow.md`, `Documentation/release/windows-unsigned-preview.md`, `eng/release/windows/Prepare-Preview.ps1`, `eng/release/windows/Build-Preview.ps1`, and `eng/release/windows/Test-Preview.ps1` before execution.
 - Do not edit source, tests, documentation, prompts, Git state, or existing installer files.
 - This command must not create or update a GitHub issue, tag, release, or release asset. It must not publish, push, sign, transfer, or invoke `/release-preview`.

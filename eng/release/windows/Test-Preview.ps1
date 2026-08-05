@@ -170,22 +170,17 @@ function Assert-Sentinels([string] $RepositorySentinel, [string] $RepositoryHash
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $resolvedPackagePath = (Resolve-Path -LiteralPath $PackagePath).Path
-$packageNameMatch = [regex]::Match([System.IO.Path]::GetFileName($resolvedPackagePath), '^gabCode-(?<version>\d+\.\d+\.\d+-preview\.\d+)-windows-x64\.msi$')
+$packageNameMatch = [regex]::Match([System.IO.Path]::GetFileName($resolvedPackagePath), '^gabCode-(?<version>\d+\.\d+\.\d+-preview)-windows-x64\.msi$')
 if (-not $packageNameMatch.Success) {
     throw "Package filename does not match the approved gabCode preview convention: $resolvedPackagePath"
 }
 $releaseVersion = $packageNameMatch.Groups['version'].Value
-$releaseVersionMatch = [regex]::Match($releaseVersion, '^(?<major>\d+)\.(?<minor>\d+)\.(?<build>\d+)-preview\.(?<preview>\d+)$')
+$releaseVersionMatch = [regex]::Match($releaseVersion, '^(?<major>\d+)\.(?<minor>\d+)\.(?<build>\d+)-preview$')
 $numericVersion = '{0}.{1}.{2}' -f $releaseVersionMatch.Groups['major'].Value, $releaseVersionMatch.Groups['minor'].Value, $releaseVersionMatch.Groups['build'].Value
-$previewOrdinal = [long] $releaseVersionMatch.Groups['preview'].Value
-if ($previewOrdinal -eq [long]::MaxValue) {
-    throw 'Cannot create the bounded same-numeric preview upgrade probe because the preview ordinal is already at its maximum.'
-}
-$sameNumericProbeVersion = '{0}.{1}.{2}-preview.{3}' -f $releaseVersionMatch.Groups['major'].Value, $releaseVersionMatch.Groups['minor'].Value, $releaseVersionMatch.Groups['build'].Value, ($previewOrdinal + 1)
 if ([int] $releaseVersionMatch.Groups['build'].Value -ge 65535) {
     throw 'Cannot create the bounded later-numeric upgrade probe because the MSI build version is already 65535.'
 }
-$upgradeProbeVersion = '{0}.{1}.{2}-preview.1' -f $releaseVersionMatch.Groups['major'].Value, $releaseVersionMatch.Groups['minor'].Value, ([int] $releaseVersionMatch.Groups['build'].Value + 1)
+$upgradeProbeVersion = '{0}.{1}.{2}-preview' -f $releaseVersionMatch.Groups['major'].Value, $releaseVersionMatch.Groups['minor'].Value, ([int] $releaseVersionMatch.Groups['build'].Value + 1)
 $upgradeProbeNumericVersion = '{0}.{1}.{2}' -f $releaseVersionMatch.Groups['major'].Value, $releaseVersionMatch.Groups['minor'].Value, ([int] $releaseVersionMatch.Groups['build'].Value + 1)
 $upgradeCode = '{14C3C588-78D0-B414-D61A-021C8DB736E5}'
 $installDirectory = Join-Path $env:LOCALAPPDATA 'Programs\gabCode'
@@ -363,22 +358,6 @@ try {
     Invoke-MsiExec 'repair' @('/fa', $resolvedPackagePath) (Join-Path $evidencePath 'repair.log')
     Assert-Sentinels $repositorySentinel $repositoryHash $userSentinel $userHash
 
-    $sameNumericProbeOutput = Join-Path $evidencePath 'same-numeric-upgrade-package'
-    & (Join-Path $PSScriptRoot 'Build-Preview.ps1') -Version $sameNumericProbeVersion -OutputDirectory $sameNumericProbeOutput
-    if (-not $?) { throw 'Local same-numeric preview package build failed.' }
-    $sameNumericProbePackage = Join-Path $sameNumericProbeOutput "gabCode-$sameNumericProbeVersion-windows-x64.msi"
-    Invoke-MsiExec 'same-numeric-upgrade' @('/i', $sameNumericProbePackage) (Join-Path $evidencePath 'same-numeric-upgrade.log')
-    Assert-Sentinels $repositorySentinel $repositoryHash $userSentinel $userHash
-
-    $sameNumericProducts = @(Get-RelatedProducts $upgradeCode)
-    $sameNumericFileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $installDirectory 'GabCode.Windows.dll')).ProductVersion
-    if ($sameNumericProducts.Count -ne 1 -or
-        $sameNumericProducts[0] -eq $properties.ProductCode -or
-        (Get-InstalledProductVersion $sameNumericProducts[0]) -ne $numericVersion -or
-        -not $sameNumericFileVersion.StartsWith($sameNumericProbeVersion, [StringComparison]::Ordinal)) {
-        throw 'Same-numeric preview label did not replace the first product and payload.'
-    }
-
     $probeOutput = Join-Path $evidencePath 'later-numeric-upgrade-package'
     & (Join-Path $PSScriptRoot 'Build-Preview.ps1') -Version $upgradeProbeVersion -OutputDirectory $probeOutput
     if (-not $?) { throw 'Local later-numeric preview package build failed.' }
@@ -388,9 +367,9 @@ try {
 
     $upgradedProducts = @(Get-RelatedProducts $upgradeCode)
     if ($upgradedProducts.Count -ne 1 -or
-        $upgradedProducts[0] -eq $sameNumericProducts[0] -or
+        $upgradedProducts[0] -eq $properties.ProductCode -or
         (Get-InstalledProductVersion $upgradedProducts[0]) -ne $upgradeProbeNumericVersion) {
-        throw 'Later numeric preview did not replace the same-numeric preview registration.'
+        throw 'Later-patch preview did not replace the baseline preview registration.'
     }
     if (@(Get-ChildItem -LiteralPath (Split-Path $installDirectory -Parent) -Directory -Filter 'gabCode').Count -ne 1) {
         throw 'Upgrade created an unintended side-by-side application directory.'
@@ -413,8 +392,7 @@ try {
         PackageSHA256 = (Get-FileHash -LiteralPath $resolvedPackagePath -Algorithm SHA256).Hash
         PackageSignature = $packageSignature.Status.ToString()
         NumericProductVersion = $numericVersion
-        SameNumericUpgradeProbeVersion = $sameNumericProbeVersion
-        LaterNumericUpgradeProbeVersion = $upgradeProbeNumericVersion
+        LaterPatchUpgradeProbeVersion = $upgradeProbeNumericVersion
         UpgradeCode = $upgradeCode
         ProductCode = $properties.ProductCode
         MsiFileCount = $msiFiles.Count
@@ -445,7 +423,7 @@ try {
     Write-Output "MSI signature: $($packageSignature.Status) (expected)"
     Write-Output "Installed file count: $($installedInventory.Count)"
     foreach ($asset in $terminalEvidence) { Write-Output "$($asset.File): $($asset.Bytes) bytes; SHA256 $($asset.SHA256)" }
-    Write-Output 'Install, repair, same-numeric upgrade, later-numeric upgrade, and uninstall exit codes: 0'
+    Write-Output 'Install, repair, later-patch upgrade, and uninstall exit codes: 0'
     Write-Output 'Repository and user-data sentinels: unchanged'
     Write-Output 'Remaining gabCode application processes: 0'
 }

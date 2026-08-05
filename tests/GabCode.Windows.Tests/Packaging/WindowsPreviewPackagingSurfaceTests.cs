@@ -6,8 +6,8 @@ namespace GabCode.Windows.Tests.Packaging;
 
 public sealed class WindowsPreviewPackagingSurfaceTests
 {
-    private const string PreviewVersionPattern = "x.y.z-preview.n";
-    private const string MsiNamePattern = "gabCode-x.y.z-preview.n-windows-x64.msi";
+    private const string PreviewVersionPattern = "x.y.z-preview";
+    private const string MsiNamePattern = "gabCode-x.y.z-preview-windows-x64.msi";
 
     [Fact]
     public void Windows_preview_packaging_surface_declares_the_pinned_Wix_tool_and_entry_points()

@@ -36,7 +36,7 @@ public sealed class PreviewReleaseContractTests
             required.Order(StringComparer.Ordinal));
 
         var properties = root.GetProperty("properties");
-        Assert.Equal("^\\d+\\.\\d+\\.\\d+-preview\\.[1-9]\\d*$", properties.GetProperty("version").GetProperty("pattern").GetString());
+        Assert.Equal("^\\d+\\.\\d+\\.\\d+-preview$", properties.GetProperty("version").GetProperty("pattern").GetString());
         Assert.Equal("^[0-9a-f]{40}$", properties.GetProperty("sourceCommit").GetProperty("pattern").GetString());
 
         var artifact = properties.GetProperty("artifact");
@@ -54,8 +54,8 @@ public sealed class PreviewReleaseContractTests
     }
 
     [Theory]
-    [InlineData("windows", "^gabCode-\\d+\\.\\d+\\.\\d+-preview\\.[1-9]\\d*-windows-x64\\.msi$", "^gabCode-\\d+\\.\\d+\\.\\d+-preview\\.[1-9]\\d*-windows-x64\\.evidence\\.json$")]
-    [InlineData("macos", "^gabCode-\\d+\\.\\d+\\.\\d+-preview\\.[1-9]\\d*-macos-arm64\\.dmg$", "^gabCode-\\d+\\.\\d+\\.\\d+-preview\\.[1-9]\\d*-macos-arm64\\.evidence\\.json$")]
+    [InlineData("windows", "^gabCode-\\d+\\.\\d+\\.\\d+-preview-windows-x64\\.msi$", "^gabCode-\\d+\\.\\d+\\.\\d+-preview-windows-x64\\.evidence\\.json$")]
+    [InlineData("macos", "^gabCode-\\d+\\.\\d+\\.\\d+-preview-macos-arm64\\.dmg$", "^gabCode-\\d+\\.\\d+\\.\\d+-preview-macos-arm64\\.evidence\\.json$")]
     public void Evidence_schema_encodes_the_exact_platform_filename_pair(string platform, string artifactPattern, string evidencePattern)
     {
         using var document = JsonDocument.Parse(ReadRepositoryFile("eng", "release", "preview-evidence.schema.json"));
@@ -68,12 +68,13 @@ public sealed class PreviewReleaseContractTests
     }
 
     [Theory]
-    [InlineData("0.0.2-preview.3", true)]
-    [InlineData("0.0.2-preview.0", false)]
-    [InlineData("0.0.2-preview.-1", false)]
-    [InlineData("0.0.2-rc.3", false)]
-    [InlineData("0.0.2", false)]
-    [InlineData("v0.0.2-preview.3", false)]
+    [InlineData("0.0.3-preview", true)]
+    [InlineData("0.0.3-preview.1", false)]
+    [InlineData("0.0.3-preview.0", false)]
+    [InlineData("0.0.3-preview.-1", false)]
+    [InlineData("0.0.3-rc", false)]
+    [InlineData("0.0.3", false)]
+    [InlineData("v0.0.3-preview", false)]
     public void Evidence_schema_preview_version_pattern_rejects_unsupported_versions(string version, bool expectedMatch)
     {
         using var document = JsonDocument.Parse(ReadRepositoryFile("eng", "release", "preview-evidence.schema.json"));
