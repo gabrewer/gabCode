@@ -2,15 +2,15 @@
 # Verifies one gabCode unsigned-preview DMG without modifying it or its contents.
 set -euo pipefail
 
-[[ $# -eq 1 ]] || { printf 'ERROR: usage: %s <path-to-gabCode-x.y.z-preview.n-macos-arm64.dmg>\n' "$0" >&2; exit 1; }
+[[ $# -eq 1 ]] || { printf 'ERROR: usage: %s <path-to-gabCode-x.y.z-preview-macos-arm64.dmg>\n' "$0" >&2; exit 1; }
 readonly dmg_path="$1"
 readonly expected_name="$(basename "$dmg_path")"
-if [[ ! "$expected_name" =~ ^gabCode-([0-9]+\.[0-9]+\.[0-9]+)-preview\.([1-9][0-9]*)-macos-arm64\.dmg$ ]]; then
+if [[ ! "$expected_name" =~ ^gabCode-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview-macos-arm64\.dmg$ ]]; then
     printf 'ERROR: expected a versioned gabCode macOS preview DMG\n' >&2
     exit 1
 fi
-readonly expected_marketing_version="${BASH_REMATCH[1]}"
-readonly expected_build_number="${BASH_REMATCH[2]}"
+readonly expected_marketing_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+readonly expected_build_number="${BASH_REMATCH[3]}"
 readonly expected_bundle_identifier='com.gabrewer.gabcode'
 readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly repo_root="$(cd "$script_dir/../../.." && pwd -P)"

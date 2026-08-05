@@ -1,6 +1,6 @@
 # macOS unsigned developer preview
 
-This document covers `gabCode-0.0.1-preview.1-macos-arm64.dmg`, an unsupported preview for trusted developers.
+This document covers the unsupported Apple Silicon preview DMG format for trusted developers. New previews use `gabCode-x.y.z-preview-macos-arm64.dmg`; historical ordinal artifacts such as `gabCode-0.0.1-preview.1-macos-arm64.dmg` remain unchanged.
 
 ## Supported target
 
@@ -84,11 +84,11 @@ On the declared target Mac, from the repository root:
 
 ```bash
 ./eng/release/macos/build-preview.sh \
-  0.0.1-preview.1 \
-  artifacts/v0.0.1-preview.1
+  0.0.3-preview \
+  artifacts/v0.0.3-preview
 ```
 
-The build uses a temporary clean DerivedData directory, forces an arm64 Release bundle with marketing version `0.0.1` and build number `1`, signs nested code before the containing app with an ad-hoc identity, assembles the four-item DMG root, verifies the image, and prints its SHA-256 value. It does not select a signing team or permanently change project publisher settings.
+The build uses a temporary clean DerivedData directory, forces an arm64 Release bundle with marketing version `0.0.3` and build number `3` (the patch component), signs nested code before the containing app with an ad-hoc identity, assembles the four-item DMG root, verifies the image, and prints its SHA-256 value. Its DMG volume is `gabCode 0.0.3 Preview`. It does not select a signing team or permanently change project publisher settings.
 
 The DMG includes gabCode's MIT license and the SwiftTerm 1.15.0 notice pinned at revision `dd2fb8ac5b861e7bf617c872895e338f38165648`.
 

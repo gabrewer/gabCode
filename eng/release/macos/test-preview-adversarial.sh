@@ -11,10 +11,10 @@ fail() {
     exit 1
 }
 
-[[ $# -eq 1 ]] || fail "usage: $0 <path-to-gabCode-x.y.z-preview.n-macos-arm64.dmg>"
+[[ $# -eq 1 ]] || fail "usage: $0 <path-to-gabCode-x.y.z-preview-macos-arm64.dmg>"
 readonly source_dmg="$1"
 [[ -f "$source_dmg" ]] || fail "DMG does not exist: $source_dmg"
-[[ "$expected_name" =~ ^gabCode-[0-9]+\.[0-9]+\.[0-9]+-preview\.[1-9][0-9]*-macos-arm64\.dmg$ ]] || fail "expected a versioned macOS preview DMG"
+[[ "$expected_name" =~ ^gabCode-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview-macos-arm64\.dmg$ ]] || fail "expected a versioned macOS preview DMG"
 [[ -x "$verifier" ]] || fail "artifact verifier is not executable"
 
 for command in hdiutil ditto; do
