@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 const helperPath = new URL("./preview-release.mjs", import.meta.url);
 const execFile = promisify(execFileCallback);
 const sourceCommit = "0123456789abcdef0123456789abcdef01234567";
-const version = "0.0.2-preview.3";
+const version = "0.0.3-preview";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "gabcode-preview-release-"));
@@ -65,6 +65,14 @@ function fakeTools({ issueState = "none", history = [] } = {}) {
 async function load() {
   return import(`${helperPath.href}?${Date.now()}-${Math.random()}`);
 }
+
+test("preview release contract accepts the unnumbered preview identifier and rejects ordinal identifiers", async () => {
+  const { parseVersion } = await load();
+  assert.deepEqual(parseVersion(version), { version, tag: `v${version}`, numeric: "0.0.3", preview: undefined });
+  for (const invalid of ["0.0.3-preview.1", "0.0.3-preview.0", "0.0.3", "0.0.3-rc"]) {
+    assert.throws(() => parseVersion(invalid), /x\.y\.z-preview/);
+  }
+});
 
 test("CLI entry point executes on Windows-style file paths", async () => {
   await assert.rejects(
@@ -173,6 +181,7 @@ test("prepare creates deterministic checksums and safe public notes without publ
   assert.match(notes, /## Highlights/);
   assert.match(notes, /## Bug Fixes/);
   assert.match(notes, /#31/);
+  assert.match(notes, /Changes since `v0\.0\.1-preview\.1`/);
   assert.doesNotMatch(notes, /javascript:|\nforged/);
   assert.equal(sums.trim().split("\n").length, 2);
   assert.equal(tools.calls.some(([command, action]) => command === "gh" && action === "release"), false);

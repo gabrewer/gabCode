@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const versionPattern = /^(\d+)\.(\d+)\.(\d+)-preview\.([1-9]\d*)$/;
+const versionPattern = /^(\d+)\.(\d+)\.(\d+)-preview$/;
 const platforms = Object.freeze({
   windows: { artifactSuffix: "windows-x64.msi", evidenceSuffix: "windows-x64.evidence.json" },
   macos: { artifactSuffix: "macos-arm64.dmg", evidenceSuffix: "macos-arm64.evidence.json" },
@@ -24,11 +24,11 @@ function exactKeys(value, keys, name) {
 
 export function parseVersion(version) {
   const match = versionPattern.exec(version ?? "");
-  expect(match, "Version must be x.y.z-preview.n with a positive ordinal.");
+  expect(match, "Version must be x.y.z-preview.");
   const numbers = match.slice(1).map(Number);
-  expect(Number.isSafeInteger(numbers[0]) && Number.isSafeInteger(numbers[1]) && Number.isSafeInteger(numbers[2]) && Number.isSafeInteger(numbers[3]), "Version components must be safe integers.");
+  expect(numbers.every(Number.isSafeInteger), "Version components must be safe integers.");
   expect(numbers[0] <= 255 && numbers[1] <= 255 && numbers[2] <= 65535, `Windows MSI version exceeds 255.255.65535: ${version}`);
-  return { version, tag: `v${version}`, numeric: numbers.slice(0, 3).join("."), preview: numbers[3] };
+  return { version, tag: `v${version}`, numeric: numbers.join("."), preview: undefined };
 }
 
 async function defaultExecute(command, args, { cwd, allowFailure = false } = {}) {
@@ -131,7 +131,7 @@ function linkedSubject(subject, repository) {
 
 export async function generateReleaseNotes({ facts, repositoryRoot = process.cwd(), execute = defaultExecute }) {
   const previous = await run(execute, "git", ["describe", "--tags", "--abbrev=0", `${facts.sourceCommit}^`], { cwd: repositoryRoot, allowFailure: true });
-  const previousTag = previous.code === 0 && /^v\d+\.\d+\.\d+-preview\.\d+$/.test(previous.stdout.trim()) ? previous.stdout.trim() : undefined;
+  const previousTag = previous.code === 0 && /^v\d+\.\d+\.\d+-preview(?:\.\d+)?$/.test(previous.stdout.trim()) ? previous.stdout.trim() : undefined;
   const range = previousTag ? `${previousTag}..${facts.sourceCommit}` : facts.sourceCommit;
   const history = await run(execute, "git", ["log", "--format=%H%x1f%s", range], { cwd: repositoryRoot });
   const changes = { highlights: [], fixes: [], other: [] };
@@ -206,7 +206,7 @@ export async function publish({ facts, repositoryRoot = process.cwd(), execute =
   return { tag: facts.tag, url: metadata.url };
 }
 
-function usage() { return "usage: node eng/release/preview-release.mjs <preflight|prepare|publish> --version x.y.z-preview.n [--artifacts-root artifacts] [--confirm x.y.z-preview.n]"; }
+function usage() { return "usage: node eng/release/preview-release.mjs <preflight|prepare|publish> --version x.y.z-preview [--artifacts-root artifacts] [--confirm x.y.z-preview]"; }
 async function main() {
   const [action, ...argumentsList] = process.argv.slice(2);
   const options = Object.fromEntries(argumentsList.filter((_, index) => index % 2 === 0).map((key, index) => [key, argumentsList[index * 2 + 1]]));

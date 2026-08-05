@@ -12,7 +12,7 @@ The build commands prepare one platform artifact and its evidence. `/release-pre
 
 ## Supported version and derived identities
 
-Only `x.y.z-preview.n` is accepted, where `x`, `y`, and `z` are non-negative decimal integers and `n` is a positive decimal integer. Stable versions, other prerelease labels, and a zero preview ordinal are rejected.
+Only `x.y.z-preview` is accepted, where `x`, `y`, and `z` are non-negative decimal integers. Each new preview advances the patch version. Stable versions, other prerelease labels, and ordinal preview suffixes are rejected.
 
 Because the same version feeds Windows Installer, the parsed numeric components must fit its supported range:
 
@@ -20,18 +20,18 @@ Because the same version feeds Windows Installer, the parsed numeric components 
 - `y`: 0–255
 - `z`: 0–65535
 
-For `x.y.z-preview.n`, all commands derive these identities without editing source files:
+For `x.y.z-preview`, all commands derive these identities without editing source files:
 
 | Identity | Value |
 | --- | --- |
 | Marketing/numeric version | `x.y.z` |
 | Preview/build ordinal | `n` |
-| Git tag | `vx.y.z-preview.n` |
-| Windows artifact | `gabCode-x.y.z-preview.n-windows-x64.msi` |
-| Windows evidence | `gabCode-x.y.z-preview.n-windows-x64.evidence.json` |
-| macOS artifact | `gabCode-x.y.z-preview.n-macos-arm64.dmg` |
-| macOS evidence | `gabCode-x.y.z-preview.n-macos-arm64.evidence.json` |
-| macOS volume | `gabCode x.y.z Preview n` |
+| Git tag | `vx.y.z-preview` |
+| Windows artifact | `gabCode-x.y.z-preview-windows-x64.msi` |
+| Windows evidence | `gabCode-x.y.z-preview-windows-x64.evidence.json` |
+| macOS artifact | `gabCode-x.y.z-preview-macos-arm64.dmg` |
+| macOS evidence | `gabCode-x.y.z-preview-macos-arm64.evidence.json` |
+| macOS volume | `gabCode x.y.z Preview` |
 
 The filename version, package metadata, evidence version, and later release tag must agree exactly.
 
@@ -52,14 +52,14 @@ A preparation command records the full lowercase 40-character source commit that
 On the declared Apple Silicon target Mac, run:
 
 ```text
-/build-preview-dmg x.y.z-preview.n
+/build-preview-dmg x.y.z-preview
 ```
 
 The prompt validates the host, version, source authority, and owned output, then invokes `eng/release/macos/prepare-preview.sh`. The preparation command runs the reviewed package resolution, native tests, arm64 Release build, ad-hoc signing, expected Gatekeeper rejection, DMG verification, inventory/notices checks, prohibited-content checks, and adversarial verifier. It atomically writes only:
 
 ```text
-artifacts/vx.y.z-preview.n/gabCode-x.y.z-preview.n-macos-arm64.dmg
-artifacts/vx.y.z-preview.n/gabCode-x.y.z-preview.n-macos-arm64.evidence.json
+artifacts/vx.y.z-preview/gabCode-x.y.z-preview-macos-arm64.dmg
+artifacts/vx.y.z-preview/gabCode-x.y.z-preview-macos-arm64.evidence.json
 ```
 
 It creates no GitHub issue, tag, or release.
@@ -69,14 +69,14 @@ It creates no GitHub issue, tag, or release.
 On the declared Windows 11 x64 target, from a non-elevated session, run:
 
 ```text
-/build-preview-msi x.y.z-preview.n
+/build-preview-msi x.y.z-preview
 ```
 
 The prompt validates the host, version, source authority, and owned output, then invokes `eng/release/windows/Prepare-Preview.ps1`. The preparation command runs the reviewed restore/build/test/package and bounded MSI verification gates. Existing installations and processes remain protected by `Test-Preview.ps1`; the workflow never removes an installation it did not create. It atomically writes only:
 
 ```text
-artifacts/vx.y.z-preview.n/gabCode-x.y.z-preview.n-windows-x64.msi
-artifacts/vx.y.z-preview.n/gabCode-x.y.z-preview.n-windows-x64.evidence.json
+artifacts/vx.y.z-preview/gabCode-x.y.z-preview-windows-x64.msi
+artifacts/vx.y.z-preview/gabCode-x.y.z-preview-windows-x64.evidence.json
 ```
 
 It creates no GitHub issue, tag, or release.
@@ -100,11 +100,11 @@ The artifact and matching evidence sidecar are one transfer unit. Copy the missi
 Before `/release-preview` runs, one machine must contain these four regular, non-symlink inputs:
 
 ```text
-artifacts/vx.y.z-preview.n/
-├── gabCode-x.y.z-preview.n-macos-arm64.dmg
-├── gabCode-x.y.z-preview.n-macos-arm64.evidence.json
-├── gabCode-x.y.z-preview.n-windows-x64.msi
-└── gabCode-x.y.z-preview.n-windows-x64.evidence.json
+artifacts/vx.y.z-preview/
+├── gabCode-x.y.z-preview-macos-arm64.dmg
+├── gabCode-x.y.z-preview-macos-arm64.evidence.json
+├── gabCode-x.y.z-preview-windows-x64.msi
+└── gabCode-x.y.z-preview-windows-x64.evidence.json
 ```
 
 A missing sidecar, partial pair, unexpected entry, link/reparse point, mismatched commit/version/name/hash, or changed artifact blocks the initial run. On a safe resume, only the two known generated files described below may additionally exist, and their contents must match regeneration.
@@ -114,7 +114,7 @@ A missing sidecar, partial pair, unexpected entry, link/reparse point, mismatche
 Run only after all four inputs are in place:
 
 ```text
-/release-preview x.y.z-preview.n
+/release-preview x.y.z-preview
 ```
 
 The cross-platform helper uses Node built-ins plus installed `git` and authenticated `gh`. It does not invoke Xcode, .NET, WiX, either platform build prompt, or either preparation script.

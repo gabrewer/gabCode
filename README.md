@@ -124,7 +124,7 @@ The reproducible ad-hoc/non-notarized preview packaging surface is documented in
 After preparing the matching Windows MSI/evidence and macOS DMG/evidence pairs on their target machines and placing all four files under `artifacts/v<version>/`, publish from either platform:
 
 ```text
-/release-preview x.y.z-preview.n
+/release-preview x.y.z-preview
 ```
 
 The command validates the prepared inputs and generates a public prerelease description from reviewed commit history before requesting the exact version as publication confirmation. See [the local preview workflow](Documentation/release/local-preview-workflow.md).
