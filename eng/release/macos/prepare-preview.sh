@@ -4,10 +4,14 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd "$script_dir/../../.." && pwd -P)"
 fail(){ printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-[[ $# -eq 1 ]] || fail "usage: $0 <x.y.z-preview.n>"
+[[ $# -eq 1 ]] || fail "usage: $0 <x.y.z-preview>"
 version="$1"
-[[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)-preview\.([1-9][0-9]*)$ ]] || fail 'version must be x.y.z-preview.n with a positive ordinal'
-(( 10#${BASH_REMATCH[1]} <= 255 && 10#${BASH_REMATCH[2]} <= 255 && 10#${BASH_REMATCH[3]} <= 65535 )) || fail 'version components are out of range'
+[[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)-preview$ ]] || fail 'version must be x.y.z-preview'
+major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"; patch="${BASH_REMATCH[3]}"
+for component in "$major" "$minor" "$patch"; do
+    [[ "$component" == 0 || "$component" != 0* ]] || fail 'version components must not contain leading zeroes'
+done
+(( 10#$major <= 255 && 10#$minor <= 255 && 10#$patch <= 65535 )) || fail 'version components are out of range'
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || fail 'Apple Silicon macOS is required'
 for command in git xcodebuild xcrun shasum; do command -v "$command" >/dev/null || fail "required command is unavailable: $command"; done
 [[ -f "$repo_root/eng/release/preview-evidence.schema.json" ]] || fail 'preview-evidence.schema.json is missing'

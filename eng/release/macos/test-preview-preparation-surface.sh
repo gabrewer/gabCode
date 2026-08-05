@@ -43,11 +43,44 @@ require_contains "$verifier" 'CFBundleVersion'
 require_contains "$prompt" '/build-preview-dmg'
 require_contains "$prompt" 'prepare-preview.sh'
 require_contains "$prompt" 'macOS'
-require_contains "$workflow" 'gabCode-x.y.z-preview.n-macos-arm64.evidence.json'
+require_contains "$workflow" 'gabCode-x.y.z-preview-macos-arm64.evidence.json'
+require_contains "$prepare" "usage: \$0 <x.y.z-preview>"
+require_contains "$build" "usage: %s <x.y.z-preview> <output-directory>"
+require_contains "$build" 'readonly build_number="$patch"'
+require_contains "$build" 'readonly volume_name="gabCode ${marketing_version} Preview"'
+require_contains "$verifier" 'gabCode-x.y.z-preview-macos-arm64.dmg'
+require_contains "$adversarial" 'gabCode-x.y.z-preview-macos-arm64.dmg'
+require_contains "$prompt" 'argument-hint: "<x.y.z-preview>"'
 
-# All invalid forms must stop before source preparation or artifact mutation. The absent
-# preparation script is intentionally a RED baseline until the builder supplies it.
-for version in '' '0.0.2-preview.0' '0.0.2-preview.-1' '0.0.2' '256.0.2-preview.3' '0.0.65536-preview.3' '00.0.2-preview.3'; do
+# Historical ordinal artifact instructions remain as an immutable compatibility record in
+# the release document; new entry points and the operator prompt must not accept them.
+for file in "$prepare" "$build" "$verifier" "$adversarial" "$prompt"; do
+    if grep -Fq 'preview.n' "$file" || grep -Eq 'preview\\\\\.|preview\.[0-9]' "$file"; then
+        fail "ordinal preview syntax remains in: $file"
+    fi
+done
+
+# Standalone artifact verifiers must reject non-canonical filenames before attempting to
+# inspect their contents.
+for artifact_name in 'gabCode-00.0.3-preview-macos-arm64.dmg' 'gabCode-0.00.3-preview-macos-arm64.dmg' 'gabCode-0.0.03-preview-macos-arm64.dmg'; do
+    temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/gabcode-preview-surface.XXXXXX")"
+    artifact="$temporary_root/$artifact_name"
+    : > "$artifact"
+    for script in "$verifier" "$adversarial"; do
+        if "$script" "$artifact" >"$temporary_root/output" 2>&1; then
+            rm -rf "$temporary_root"
+            fail "non-canonical artifact name unexpectedly succeeded: $artifact_name"
+        fi
+        grep -Fq 'expected a versioned' "$temporary_root/output" || {
+            rm -rf "$temporary_root"
+            fail "verifier inspected a non-canonical artifact name: $artifact_name"
+        }
+    done
+    rm -rf "$temporary_root"
+done
+
+# All invalid forms must stop before source preparation or artifact mutation.
+for version in '' '0.0.2-preview.0' '0.0.2-preview.-1' '0.0.2' '0.0.2-preview.1' '256.0.2-preview' '0.0.65536-preview' '00.0.2-preview'; do
     temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/gabcode-preview-surface.XXXXXX")"
     output="$temporary_root/artifacts"
     mkdir "$output"
