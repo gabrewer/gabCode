@@ -49,7 +49,8 @@ public sealed class WindowsPreviewPreparationSurfaceTests
         var workflow = File.ReadAllText(Path.Combine(root, "Documentation", "release", "local-preview-workflow.md"));
 
         Assert.Contains("Prepare-Preview.ps1", documentation, StringComparison.Ordinal);
-        Assert.Contains("x.y.z-preview.n", documentation, StringComparison.Ordinal);
+        Assert.Contains("x.y.z-preview", documentation, StringComparison.Ordinal);
+        Assert.DoesNotContain("x.y.z-preview.n", documentation, StringComparison.Ordinal);
         Assert.DoesNotContain("0.0.1-preview.1", documentation, StringComparison.Ordinal);
         Assert.Contains("It creates no GitHub issue, tag, or release.", workflow, StringComparison.Ordinal);
         Assert.Contains("workflow does not configure or automate transport", workflow, StringComparison.OrdinalIgnoreCase);

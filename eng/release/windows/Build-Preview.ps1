@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidatePattern('^\d+\.\d+\.\d+-preview\.\d+$')]
+    [ValidatePattern('^\d+\.\d+\.\d+-preview$')]
     [string] $Version,
 
     [Parameter(Mandatory)]
@@ -56,17 +56,14 @@ $applicationProject = Join-Path $repositoryRoot 'src\GabCode.Windows\GabCode.Win
 $iconRoot = Join-Path $repositoryRoot 'src\GabCode.Windows'
 $terminalRoot = Join-Path $repositoryRoot 'third_party\microsoft-terminal\v1.24.11911.0'
 $terminalManifestPath = Join-Path $terminalRoot 'manifest.json'
-$versionMatch = [regex]::Match($Version, '^(?<major>\d+)\.(?<minor>\d+)\.(?<build>\d+)-preview\.(?<preview>\d+)$')
+$versionMatch = [regex]::Match($Version, '^(?<major>\d+)\.(?<minor>\d+)\.(?<build>\d+)-preview$')
 $componentValues = [System.Collections.Generic.List[uint64]]::new()
-foreach ($componentName in @('major', 'minor', 'build', 'preview')) {
+foreach ($componentName in @('major', 'minor', 'build')) {
     [uint64] $componentValue = 0
     if (-not [uint64]::TryParse($versionMatch.Groups[$componentName].Value, [ref] $componentValue)) {
         throw "Preview version component '$componentName' is outside the supported unsigned integer range."
     }
     $componentValues.Add($componentValue)
-}
-if ($componentValues[3] -eq 0) {
-    throw 'Preview ordinal must be a positive integer.'
 }
 $numericVersion = '{0}.{1}.{2}' -f $versionMatch.Groups['major'].Value, $versionMatch.Groups['minor'].Value, $versionMatch.Groups['build'].Value
 if ($componentValues[0] -gt 255 -or $componentValues[1] -gt 255 -or $componentValues[2] -gt 65535) {
