@@ -20,7 +20,7 @@ The initial audience is an individual developer using Git repositories, VS Code,
 
 ## Core Features
 
-1. **Workspace-backed project entry** — A gabCode project is represented by a user-chosen `*.gabcode-workspace` file containing a required human-readable workspace name and one project-folder reference. The reference may be relative to the workspace file or absolute, matching VS Code workspace path behavior. The folder must belong to one Git repository. Creating a project from a new folder initializes Git; creating one from an existing non-Git folder offers to initialize Git.
+1. **Workspace-backed project entry** — A gabCode project is represented by a user-chosen `*.gabcode-workspace` file containing a required human-readable workspace name and one project-folder reference. The reference may be relative to the workspace file or absolute, matching VS Code workspace path behavior. The folder must belong to one Git repository. Creating a project from a new folder initializes Git; creating one from an existing non-Git folder offers to initialize Git. Creating a workspace from an already running gabCode project opens the new workspace in a separate gabCode instance; it does not replace or stop the current instance's terminals.
    *Must-have*
 
 2. **Direct return to the active project** — gabCode opens directly to the last project. Project selection remains available through application navigation rather than requiring a project-library home screen.
@@ -80,6 +80,8 @@ This language-neutral artifact is shared requirements only. Windows and macOS ea
 
 On successful activation, the native and accessible title is `<workspace name> — <selected context> — gabCode`. The initial selected context is the resolved project folder's final path component; a later worktree-navigation increment changes it to the selected worktree directory name, falling back to its folder name. The full resolved path belongs in project chrome/help, not the title. Title and terminal state change only after complete activation succeeds; a failed open or replacement preserves the existing title and terminal pair. Both terminals are then created with the exact normalized resolved folder as their starting directory.
 
+**Create versus open:** Creating a workspace descriptor is a separate-instance flow. After Git validation and atomic descriptor publication, gabCode launches a new instance for that descriptor and leaves the current instance, project, title, and terminals untouched. Opening an existing workspace into the current instance is the distinct replacement flow; only that flow may confirm and stop the current instance's terminals before activation.
+
 ## Non-Goals
 
 - General non-Git project types.
@@ -119,7 +121,7 @@ On successful activation, the native and accessible title is `<workspace name> �
 
 ## Project Context Decision
 
-A gabCode window is bound to one explicit workspace rather than continuously following the focused terminal's directory. This model was selected because retained terminals, worktree cleanup, and Git actions require a stable repository context even when several terminals have different directories or a foreground tool such as Pi is running.
+A gabCode window is bound to one explicit workspace rather than continuously following the focused terminal's directory. This model was selected because retained terminals, worktree cleanup, and Git actions require a stable repository context even when several terminals have different directories or a foreground tool such as Pi is running. Workspace creation uses a separate gabCode instance so creating a project never disrupts the active project's retained terminals.
 
 The following alternatives were considered:
 
@@ -134,6 +136,7 @@ This decision prioritizes predictable retained-process ownership, safe lifecycle
 - A project is identified by a user-chosen `*.gabcode-workspace` file, not by the active terminal's current directory.
 - The initial workspace contains a required human-readable name and one project folder belonging to one Git repository.
 - The native window title is `<workspace name> — <selected context> — gabCode`; the selected context begins as the project folder name and later follows the selected worktree directory name.
+- Creating a workspace from an active project publishes the descriptor atomically and opens it in a new gabCode instance; it never replaces or stops the active project's terminals. Opening an existing workspace into the current window is the only operation that performs terminal-confirmed replacement.
 - Workspace folder references may be relative or absolute, matching VS Code's path model; relative references resolve from the workspace file.
 - A terminal remains owned by its creating worktree when its current directory changes, and terminal navigation never changes gabCode's selected project or worktree.
 - Closing a popped-out worktree window asks for confirmation and then gracefully stops its terminals.
