@@ -202,7 +202,7 @@ The workspace descriptor is a language-neutral artifact owned by the user. The c
 
 ```json
 {
-  "version": 2,
+  "version": 1,
   "name": "gabCode Development",
   "project": {
     "path": "..",
@@ -217,7 +217,7 @@ The workspace descriptor is a language-neutral artifact owned by the user. The c
 - `project.branch` is an ordinary branch name; `main`, `master`, and `trunk` have no special behavior.
 - Git worktree data resolves the branch to the terminal working directory at activation time.
 - Git and the filesystem remain authoritative; terminal state, status, output, and preferences do not enter the descriptor.
-- Native clients must preserve a compatibility/migration decision for existing version-1 descriptors rather than silently reinterpret their meaning.
+- This is the initial workspace descriptor contract; no existing workspace files require migration.
 
 ### Windows Terminal Implementation
 
