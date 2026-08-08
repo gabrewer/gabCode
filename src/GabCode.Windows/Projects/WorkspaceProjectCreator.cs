@@ -19,9 +19,12 @@ internal sealed class WorkspaceProjectCreator
         this.preference = preference ?? new LastWorkspacePreference();
     }
 
+    internal Task<string> ValidateGitFolderAsync(string folder, CancellationToken cancellationToken = default) =>
+        validator.FindRepositoryAsync(folder, cancellationToken);
+
     internal async Task<ProjectContext> CreateAsync(string workspacePath, string workspaceName, string folder, CancellationToken cancellationToken = default)
     {
-        _ = await validator.FindRepositoryAsync(folder, cancellationToken);
+        _ = await ValidateGitFolderAsync(folder, cancellationToken);
         var document = new WorkspaceDocument(1, workspaceName, new WorkspaceFolder(folder));
         await store.SaveNewAsync(workspacePath, document, folder, cancellationToken);
         await preference.WriteAsync(workspacePath, cancellationToken);

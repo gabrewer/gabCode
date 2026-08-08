@@ -152,10 +152,30 @@ public partial class MainWindow : Window
 
     private async void CreateWorkspaceButton_Click(object sender, RoutedEventArgs e)
     {
-        var folderDialog = new OpenFolderDialog { Title = "Choose an existing Git folder" };
-        if (folderDialog.ShowDialog(this) != true) return;
-        var nameDialog = new WorkspaceNameDialog(Path.GetFileName(folderDialog.FolderName)) { Owner = this };
+        var nameDialog = new WorkspaceNameDialog("New Workspace") { Owner = this };
         if (nameDialog.ShowDialog() != true) return;
+
+        string? gitFolder = null;
+        while (gitFolder is null)
+        {
+            var folderDialog = new OpenFolderDialog { Title = $"Select Git Folder for {nameDialog.WorkspaceName}" };
+            if (folderDialog.ShowDialog(this) != true) return;
+            try
+            {
+                _ = await projectCreator.ValidateGitFolderAsync(folderDialog.FolderName);
+                gitFolder = folderDialog.FolderName;
+            }
+            catch (Exception exception)
+            {
+                _ = MessageBox.Show(
+                    this,
+                    $"The workspace Git folder must be inside an existing Git repository. {exception.Message}",
+                    "Git folder required",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+
         var saveDialog = new SaveFileDialog
         {
             Filter = "gabCode workspace (*.gabcode-workspace)|*.gabcode-workspace",
@@ -166,7 +186,7 @@ public partial class MainWindow : Window
         if (saveDialog.ShowDialog(this) != true) return;
         try
         {
-            _ = await projectCreator.CreateAsync(saveDialog.FileName, nameDialog.WorkspaceName, folderDialog.FolderName);
+            _ = await projectCreator.CreateAsync(saveDialog.FileName, nameDialog.WorkspaceName, gitFolder);
         }
         catch (Exception exception)
         {
