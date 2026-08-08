@@ -32,7 +32,7 @@ gabCode makes worktrees easy to navigate and observe. It does not need to unders
 
 ### 1. Worktree-Centered Project Navigation — Must-have
 
-A gabCode project maps to exactly one Git repository. The default directory convention is configurable:
+A gabCode project maps to one project root and one Git worktree set. The project root itself does not need to be a Git repository. A conventional layout is configurable:
 
 ```text
 project/
@@ -42,14 +42,23 @@ project/
     └── wt-feature-two/
 ```
 
-- Discover registered worktrees through `git worktree list --porcelain`.
+- Discover registered worktrees through `git worktree list --porcelain`; Git is authoritative for branch-to-worktree resolution.
+- Let the user select the branch/worktree to activate; `main` is an ordinary branch name, not a special case.
 - Present worktrees as the primary sections in the application sidebar.
 - Allow the sidebar to move between the left and right sides.
 - Show factual status such as branch, clean or dirty state, ahead or behind state, last commit, changed-file count, and running terminals.
 - Scope terminals, files, commits, changes, PRDs, and issues to the selected worktree.
 - Refresh when Git or the filesystem changes.
 
-### 2. Guarded Worktree Creation and Removal — Must-have
+### 2. Workspace Identity and Branch Selection — Must-have
+
+- Create or open a `*.gabcode-workspace` descriptor at the project root, including when that root is not itself a Git repository.
+- A workspace records the project-root path and the user-selected branch/worktree identity; it does not infer identity from a folder named `main`.
+- Resolve the selected branch to its current Git worktree using read-only Git queries before starting terminals.
+- If the project root, repository discovery, or selected branch cannot be resolved, show actionable recovery and start no terminals.
+- Keep the descriptor independent of terminal state, output, Git status, and local preferences.
+
+### 3. Guarded Worktree Creation and Removal — Must-have
 
 Users can create and remove secondary worktrees without leaving gabCode.
 
@@ -73,7 +82,7 @@ Removal must:
 
 A worktree disappears from gabCode when it is no longer returned by Git. gabCode keeps no archive of removed worktrees.
 
-### 3. Two Native Terminals per Worktree — Must-have
+### 4. Two Native Terminals per Worktree — Must-have
 
 Each opened worktree has two independent, generic terminals. gabCode does not prescribe a CLI harness, build, test, Git, or any other role for either terminal; the user may run any local command in either terminal.
 
@@ -92,7 +101,7 @@ On Windows, terminals use the user's configured Windows Terminal default profile
 
 gabCode always warns before exiting when terminal processes are active. After confirmation, it attempts graceful termination, waits briefly, and then terminates remaining process trees.
 
-### 4. Worktree Changes and Commit Visibility — Must-have
+### 5. Worktree Changes and Commit Visibility — Must-have
 
 For the selected worktree, gabCode shows:
 
@@ -107,7 +116,7 @@ For worktrees created by gabCode, the creation point may be recorded as addition
 
 gabCode does not stage, commit, amend, rebase, merge, push, or otherwise mutate repository history through this interface.
 
-### 5. User-Selected PRD and GitHub Issue Associations — Must-have
+### 6. User-Selected PRD and GitHub Issue Associations — Must-have
 
 The user can associate one or more PRDs and GitHub issues with a worktree.
 
@@ -121,7 +130,7 @@ The user can associate one or more PRDs and GitHub issues with a worktree.
 
 Explicit links already present in PRDs and GitHub issues may be rendered as links, but gabCode does not treat them as workflow instructions.
 
-### 6. Read-Only Files, Documents, and Diffs — Must-have
+### 7. Read-Only Files, Documents, and Diffs — Must-have
 
 The selected worktree provides read-only navigation for:
 
@@ -133,7 +142,7 @@ The selected worktree provides read-only navigation for:
 
 Opening a document replaces the terminal currently occupying the main area and retains that same running terminal in the bottom-panel workflow without assigning it a special role. Closing the document can promote the retained terminal back to the main area.
 
-### 7. Open in VS Code — Must-have
+### 8. Open in VS Code — Must-have
 
 An **Open in VS Code** action is available from:
 
@@ -145,11 +154,11 @@ An **Open in VS Code** action is available from:
 
 The action opens the current worktree's file, preferably at the relevant line and column. It uses an existing worktree `.code-workspace` file when available and otherwise opens the worktree folder. Historical commit contents remain read-only in gabCode; VS Code opens the current worktree version of the file. Deleted files do not offer this action.
 
-### 8. Safe Multiline Terminal Paste — Must-have
+### 9. Safe Multiline Terminal Paste — Must-have
 
 Single-line clipboard text is pasted immediately. Multiline clipboard text requires a fresh native confirmation with a short preview before gabCode sends it to the terminal. Approval forwards the original text unchanged; cancellation sends nothing. See `Documentation/design/windows-terminal-safe-multiline-paste-prd.md`.
 
-### 9. Local Tool Diagnostics and Layout Persistence — Should-have
+### 10. Local Tool Diagnostics and Layout Persistence — Should-have
 
 - Detect `git`, `gh`, VS Code, and user-configured CLI harness executables without installing or updating them.
 - Report executable paths, versions, and `gh` authentication state.
@@ -186,6 +195,29 @@ gabCode will not:
 - **Local metadata:** Platform-owned per-user, per-project storage; no repository metadata files are required.
 
 There is no gabCode companion sidecar or internal client/core protocol. Neither native application embeds, launches, packages, or requires the other platform's runtime. Each platform implements and validates its behavior independently.
+
+### Workspace Descriptor Contract
+
+The workspace descriptor is a language-neutral artifact owned by the user. The current project-root model is:
+
+```json
+{
+  "version": 2,
+  "name": "gabCode Development",
+  "project": {
+    "path": "..",
+    "branch": "trunk"
+  }
+}
+```
+
+- `name` is required and non-empty.
+- `project.path` is relative to the descriptor when relative, or a native absolute path.
+- `project.path` may be a non-Git project root containing the repository's worktrees.
+- `project.branch` is an ordinary branch name; `main`, `master`, and `trunk` have no special behavior.
+- Git worktree data resolves the branch to the terminal working directory at activation time.
+- Git and the filesystem remain authoritative; terminal state, status, output, and preferences do not enter the descriptor.
+- Native clients must preserve a compatibility/migration decision for existing version-1 descriptors rather than silently reinterpret their meaning.
 
 ### Windows Terminal Implementation
 
@@ -253,7 +285,8 @@ Deliver production-foundation prototypes on both platforms:
 
 Deliver:
 
-- Project registration and configurable `main`/`wt` discovery.
+- Project-root registration and configurable discovery of the repository/worktree set beneath it; no directory name is reserved for the primary branch.
+- Branch/worktree selection and resolution through Git.
 - Worktree-centered movable sidebar.
 - Worktree status and automatic refresh.
 - Selected-worktree context switching.
