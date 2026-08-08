@@ -6,7 +6,9 @@ struct WorkspaceDescriptor: Equatable, Sendable {
 
     let version: Int
     let name: String
-    let originalFolderPath: String
+    let originalProjectPath: String
+    let projectRoot: URL
+    let branch: String
     let resolvedFolder: URL
 
     enum WorkspaceDescriptorError: Error, Equatable {
@@ -16,9 +18,12 @@ struct WorkspaceDescriptor: Equatable, Sendable {
         case missingVersion
         case missingName
         case emptyName
-        case invalidFolderCount
-        case missingFolderPath
-        case emptyFolderPath
+        case missingProject
+        case unknownProjectProperty(String)
+        case missingProjectPath
+        case emptyProjectPath
+        case missingBranch
+        case emptyBranch
         case destinationExists
         case writeFailed
     }
@@ -34,7 +39,7 @@ struct WorkspaceDescriptor: Equatable, Sendable {
             throw WorkspaceDescriptorError.malformed
         }
 
-        let allowedKeys = Set(["version", "name", "folders"])
+        let allowedKeys = Set(["version", "name", "project"])
         if let unknown = dictionary.keys.first(where: { !allowedKeys.contains($0) }) {
             throw WorkspaceDescriptorError.unknownProperty(unknown)
         }
@@ -54,19 +59,24 @@ struct WorkspaceDescriptor: Equatable, Sendable {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw WorkspaceDescriptorError.emptyName
         }
-        guard let folders = dictionary["folders"] as? [[String: Any]], folders.count == 1 else {
-            throw WorkspaceDescriptorError.invalidFolderCount
+        guard let project = dictionary["project"] as? [String: Any] else {
+            throw WorkspaceDescriptorError.missingProject
         }
-        let folder = folders[0]
-        let folderKeys = Set(["path"])
-        if let unknown = folder.keys.first(where: { !folderKeys.contains($0) }) {
-            throw WorkspaceDescriptorError.unknownProperty(unknown)
+        let allowedProjectKeys = Set(["path", "branch"])
+        if let unknown = project.keys.first(where: { !allowedProjectKeys.contains($0) }) {
+            throw WorkspaceDescriptorError.unknownProjectProperty(unknown)
         }
-        guard let originalPath = folder["path"] as? String else {
-            throw WorkspaceDescriptorError.missingFolderPath
+        guard let originalPath = project["path"] as? String else {
+            throw WorkspaceDescriptorError.missingProjectPath
         }
         guard !originalPath.isEmpty else {
-            throw WorkspaceDescriptorError.emptyFolderPath
+            throw WorkspaceDescriptorError.emptyProjectPath
+        }
+        guard let branch = project["branch"] as? String else {
+            throw WorkspaceDescriptorError.missingBranch
+        }
+        guard !branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw WorkspaceDescriptorError.emptyBranch
         }
 
         let base = descriptorURL.deletingLastPathComponent().standardizedFileURL
@@ -74,23 +84,32 @@ struct WorkspaceDescriptor: Equatable, Sendable {
         return WorkspaceDescriptor(
             version: version,
             name: name,
-            originalFolderPath: originalPath,
+            originalProjectPath: originalPath,
+            projectRoot: resolved,
+            branch: branch,
             resolvedFolder: resolved
         )
     }
 
-    static func write(name: String, folder: URL, to descriptorURL: URL) throws {
+    static func write(
+        name: String,
+        projectRoot: URL,
+        branch: String,
+        to descriptorURL: URL
+    ) throws {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw WorkspaceDescriptorError.emptyName
         }
-        let folderPath = folder.standardizedFileURL.path
+        guard !branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw WorkspaceDescriptorError.emptyBranch
+        }
+        let projectPath = projectRoot.standardizedFileURL.path
         let descriptorDirectory = descriptorURL.deletingLastPathComponent().standardizedFileURL
-        let path = relativePath(from: descriptorDirectory, to: folder.standardizedFileURL)
-            ?? folderPath
+        let path = relativePath(from: descriptorDirectory, to: projectRoot.standardizedFileURL) ?? projectPath
         let object: [String: Any] = [
             "version": supportedVersion,
             "name": name,
-            "folders": [["path": path]]
+            "project": ["path": path, "branch": branch]
         ]
         let data: Data
         do {
@@ -100,10 +119,7 @@ struct WorkspaceDescriptor: Equatable, Sendable {
         }
 
         do {
-            try FileManager.default.createDirectory(
-                at: descriptorDirectory,
-                withIntermediateDirectories: true
-            )
+            try FileManager.default.createDirectory(at: descriptorDirectory, withIntermediateDirectories: true)
         } catch {
             throw WorkspaceDescriptorError.writeFailed
         }
@@ -124,10 +140,19 @@ struct WorkspaceDescriptor: Equatable, Sendable {
         }
     }
 
+    func resolved(to folder: URL) -> WorkspaceDescriptor {
+        WorkspaceDescriptor(
+            version: version,
+            name: name,
+            originalProjectPath: originalProjectPath,
+            projectRoot: projectRoot,
+            branch: branch,
+            resolvedFolder: folder.standardizedFileURL
+        )
+    }
+
     private static func relativePath(from base: URL, to target: URL) -> String? {
-        guard base.pathComponents.first == target.pathComponents.first else {
-            return nil
-        }
+        guard base.pathComponents.first == target.pathComponents.first else { return nil }
         let baseComponents = base.pathComponents
         let targetComponents = target.pathComponents
         var common = 0

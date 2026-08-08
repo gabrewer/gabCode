@@ -4,49 +4,51 @@ import XCTest
 
 @MainActor
 final class WorkspaceDescriptorTests: XCTestCase {
-    func testDecodesStrictV1DescriptorAndResolvesRelativeFolder() throws {
+    func testDecodesStrictV1DescriptorAndResolvesRelativeProjectRoot() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let folder = root.appendingPathComponent("Repository ünicode", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let project = root.appendingPathComponent("Project ünicode", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         let descriptorURL = root.appendingPathComponent("project.gabcode-workspace")
-        let data = Data("{\"version\":1,\"name\":\"My Project\",\"folders\":[{\"path\":\"Repository ünicode\"}]}".utf8)
+        let data = Data("{\"version\":1,\"name\":\"My Project\",\"project\":{\"path\":\"Project ünicode\",\"branch\":\"trunk\"}}".utf8)
 
         let descriptor = try WorkspaceDescriptor.decode(data: data, from: descriptorURL)
 
         XCTAssertEqual(descriptor.name, "My Project")
-        XCTAssertEqual(descriptor.resolvedFolder, folder.standardizedFileURL)
-        XCTAssertEqual(descriptor.originalFolderPath, "Repository ünicode")
+        XCTAssertEqual(descriptor.projectRoot, project.standardizedFileURL)
+        XCTAssertEqual(descriptor.originalProjectPath, "Project ünicode")
+        XCTAssertEqual(descriptor.branch, "trunk")
     }
 
     func testDecodesAbsolutePathWithoutRewritingOriginalValue() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let descriptorURL = root.appendingPathComponent("project.gabcode-workspace")
-        let absolutePath = root.appendingPathComponent("repo", isDirectory: true).path
+        let absolutePath = root.appendingPathComponent("project", isDirectory: true).path
         try FileManager.default.createDirectory(atPath: absolutePath, withIntermediateDirectories: true)
 
-        let json = "{\"version\":1,\"name\":\"Absolute\",\"folders\":[{\"path\":\"\(absolutePath)\"}]}"
+        let json = "{\"version\":1,\"name\":\"Absolute\",\"project\":{\"path\":\"\(absolutePath)\",\"branch\":\"feature/demo\"}}"
         let descriptor = try WorkspaceDescriptor.decode(
             data: Data(json.utf8),
             from: descriptorURL
         )
 
-        XCTAssertEqual(descriptor.originalFolderPath, absolutePath)
-        XCTAssertEqual(descriptor.resolvedFolder, URL(fileURLWithPath: absolutePath).standardizedFileURL)
+        XCTAssertEqual(descriptor.originalProjectPath, absolutePath)
+        XCTAssertEqual(descriptor.projectRoot, URL(fileURLWithPath: absolutePath).standardizedFileURL)
+        XCTAssertEqual(descriptor.branch, "feature/demo")
     }
 
-    func testRejectsMalformedUnknownUnsupportedMissingAndMultipleFolderValues() throws {
+    func testRejectsMalformedUnknownUnsupportedMissingAndEmptyProjectValues() throws {
         let descriptorURL = URL(fileURLWithPath: "/tmp/project.gabcode-workspace")
         let cases: [(String, WorkspaceDescriptorError)] = [
             ("not json", .malformed),
-            ("{\"version\":1,\"name\":\"x\",\"folders\":[{\"path\":\"x\"}],\"extra\":true}", .unknownProperty("extra")),
-            ("{\"version\":2,\"name\":\"x\",\"folders\":[{\"path\":\"x\"}]}", .unsupportedVersion(2)),
-            ("{\"version\":1,\"name\":\"\",\"folders\":[{\"path\":\"x\"}]}", .emptyName),
-            ("{\"version\":1,\"folders\":[{\"path\":\"x\"}]}", .missingName),
-            ("{\"version\":1,\"name\":\"x\",\"folders\":[]}", .invalidFolderCount),
-            ("{\"version\":1,\"name\":\"x\",\"folders\":[{\"path\":\"a\"},{\"path\":\"b\"}]}", .invalidFolderCount),
-            ("{\"version\":1,\"name\":\"x\",\"folders\":[{\"path\":\"\"}]}", .emptyFolderPath)
+            ("{\"version\":1,\"name\":\"x\",\"project\":{\"path\":\"x\",\"branch\":\"trunk\"},\"extra\":true}", .unknownProperty("extra")),
+            ("{\"version\":2,\"name\":\"x\",\"project\":{\"path\":\"x\",\"branch\":\"trunk\"}}", .unsupportedVersion(2)),
+            ("{\"version\":1,\"name\":\"\",\"project\":{\"path\":\"x\",\"branch\":\"trunk\"}}", .emptyName),
+            ("{\"version\":1,\"project\":{\"path\":\"x\",\"branch\":\"trunk\"}}", .missingName),
+            ("{\"version\":1,\"name\":\"x\"}", .missingProject),
+            ("{\"version\":1,\"name\":\"x\",\"project\":{\"path\":\"\",\"branch\":\"trunk\"}}", .emptyProjectPath),
+            ("{\"version\":1,\"name\":\"x\",\"project\":{\"path\":\"x\",\"branch\":\"\"}}", .emptyBranch)
         ]
 
         for (json, expected) in cases {
@@ -59,16 +61,17 @@ final class WorkspaceDescriptorTests: XCTestCase {
     func testWritesRelativeDescriptorWithoutOverwritingExistingFile() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let folder = root.appendingPathComponent("repo", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         let descriptorURL = root.appendingPathComponent("nested/project.gabcode-workspace")
 
-        try WorkspaceDescriptor.write(name: "Created", folder: folder, to: descriptorURL)
-        XCTAssertThrowsError(try WorkspaceDescriptor.write(name: "Other", folder: folder, to: descriptorURL)) { error in
+        try WorkspaceDescriptor.write(name: "Created", projectRoot: project, branch: "trunk", to: descriptorURL)
+        XCTAssertThrowsError(try WorkspaceDescriptor.write(name: "Other", projectRoot: project, branch: "trunk", to: descriptorURL)) { error in
             XCTAssertEqual(error as? WorkspaceDescriptorError, .destinationExists)
         }
         let written = try WorkspaceDescriptor.decode(data: Data(contentsOf: descriptorURL), from: descriptorURL)
-        XCTAssertEqual(written.originalFolderPath, "../repo")
+        XCTAssertEqual(written.originalProjectPath, "../project")
+        XCTAssertEqual(written.branch, "trunk")
     }
 
     private func temporaryDirectory() throws -> URL {

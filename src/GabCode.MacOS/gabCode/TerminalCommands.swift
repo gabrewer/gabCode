@@ -69,7 +69,7 @@ struct TerminalWorkspaceCommands: Commands {
                 openWindow(id: "main")
             }
             .keyboardShortcut("o", modifiers: .command)
-            Button("Create Workspace from Git Folder…") {
+            Button("Create Workspace from Project Folder…") {
                 WorkspaceWindowIntentStore.shared.enqueue(.create)
                 openWindow(id: "main")
             }
