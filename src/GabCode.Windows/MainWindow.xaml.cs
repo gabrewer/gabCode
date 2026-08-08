@@ -124,18 +124,29 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) await OpenWorkspaceAsync(dialog.FileName);
     }
 
-    internal async Task OpenWorkspaceAsync(string workspacePath)
+    internal async Task<bool> OpenWorkspaceAsync(string workspacePath)
     {
         try
         {
             var nextProject = await projectLoader.LoadAsync(workspacePath);
-            if (!await ReplaceProjectAsync(nextProject)) return;
+            if (!await ReplaceProjectAsync(nextProject)) return false;
             await new LastWorkspacePreference().WriteAsync(workspacePath);
+            return true;
         }
         catch (Exception exception)
         {
-            WorktreeFailureMessage.Text = exception.Message;
-            WorktreeFailureSurface.Visibility = Visibility.Visible;
+            if (project is null)
+            {
+                EmptyProjectMessage.Text = $"The last workspace could not be reopened: {exception.Message} Choose another workspace or create one for an existing Git folder.";
+                EmptyProjectSurface.Visibility = Visibility.Visible;
+                WorktreeFailureSurface.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                WorktreeFailureMessage.Text = exception.Message;
+                WorktreeFailureSurface.Visibility = Visibility.Visible;
+            }
+            return false;
         }
     }
 

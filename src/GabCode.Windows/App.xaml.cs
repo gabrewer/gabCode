@@ -19,6 +19,9 @@ public partial class App : Application
         var workspacePath = arguments.Length == 1
             ? arguments[0]
             : await new LastWorkspacePreference().ReadAsync();
-        if (workspacePath is not null) await window.OpenWorkspaceAsync(workspacePath);
+        if (workspacePath is not null && !await window.OpenWorkspaceAsync(workspacePath) && arguments.Length == 0)
+        {
+            new LastWorkspacePreference().Forget();
+        }
     }
 }
