@@ -34,6 +34,31 @@ final class WorkspaceProjectTests: XCTestCase {
         XCTAssertEqual(controller.preference.lastWorkspaceURL, descriptorURL.standardizedFileURL)
     }
 
+    func testCreateWorkspaceWritesDescriptorAndActivatesIt() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("created repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        try runGit(in: repository, arguments: ["init", "--quiet"])
+        let descriptorURL = root.appendingPathComponent("saved/project.gabcode-workspace")
+        let suite = "gabCode.project.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let controller = WorkspaceProjectController(defaults: defaults)
+        let created = await controller.createWorkspace(
+            name: "Created Project",
+            folder: repository,
+            descriptorURL: descriptorURL
+        )
+
+        XCTAssertTrue(created)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: descriptorURL.path))
+        XCTAssertEqual(controller.state, .ready)
+        XCTAssertEqual(controller.activeDescriptor?.name, "Created Project")
+        XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, repository.standardizedFileURL)
+    }
+
     func testInvalidOpenPreservesCurrentActiveProjectAndProducesRecoveryState() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

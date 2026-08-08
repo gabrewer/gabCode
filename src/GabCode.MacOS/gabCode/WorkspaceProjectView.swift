@@ -107,21 +107,23 @@ struct WorkspaceProjectView: View {
                 isPresentingPanel = false
                 return
             }
-            guard let name = requestWorkspaceName() else {
-                isPresentingPanel = false
-                return
-            }
-            let save = NSSavePanel()
-            save.title = "Save Workspace"
-            save.prompt = "Save Workspace"
-            save.nameFieldStringValue = "\(name).gabcode-workspace"
-            save.allowedFileTypes = ["gabcode-workspace"]
-            present(save) { descriptorURL in
-                isPresentingPanel = false
-                guard let descriptorURL else { return }
-                Task {
-                    await openAfterReplacement {
-                        await controller.createWorkspace(name: name, folder: url, descriptorURL: descriptorURL)
+            requestWorkspaceName { [self] name in
+                guard let name else {
+                    isPresentingPanel = false
+                    return
+                }
+                let save = NSSavePanel()
+                save.title = "Save Workspace"
+                save.prompt = "Save Workspace"
+                save.nameFieldStringValue = "\(name).gabcode-workspace"
+                save.allowedFileTypes = ["gabcode-workspace"]
+                present(save) { descriptorURL in
+                    isPresentingPanel = false
+                    guard let descriptorURL else { return }
+                    Task {
+                        await openAfterReplacement {
+                            await controller.createWorkspace(name: name, folder: url, descriptorURL: descriptorURL)
+                        }
                     }
                 }
             }
@@ -159,7 +161,11 @@ struct WorkspaceProjectView: View {
         _ = await action()
     }
 
-    private func requestWorkspaceName() -> String? {
+    private func requestWorkspaceName(completion: @escaping (String?) -> Void) {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else {
+            completion(nil)
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "Name this workspace"
         alert.informativeText = "A workspace name is required."
@@ -170,9 +176,14 @@ struct WorkspaceProjectView: View {
         alert.accessoryView = field
         alert.addButton(withTitle: "Continue")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? nil : name
+        alert.beginSheetModal(for: window) { response in
+            guard response == .alertFirstButtonReturn else {
+                completion(nil)
+                return
+            }
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            completion(name.isEmpty ? nil : name)
+        }
     }
 
     private func present(_ panel: NSOpenPanel, completion: @escaping (URL?) -> Void) {
