@@ -16,10 +16,20 @@ public partial class App : Application
 
     private static async Task OpenInitialWorkspaceAsync(MainWindow window, string[] arguments)
     {
-        var workspacePath = arguments.Length == 1
-            ? arguments[0]
-            : await new LastWorkspacePreference().ReadAsync();
-        if (workspacePath is not null && !await window.OpenWorkspaceAsync(workspacePath) && arguments.Length == 0)
+        StartupWorkspaceSelection selection;
+        try
+        {
+            selection = StartupWorkspaceSelection.Resolve(arguments);
+        }
+        catch (ArgumentException)
+        {
+            _ = await window.OpenWorkspaceAsync(string.Empty);
+            return;
+        }
+
+        if (selection.IsExplicitEmpty) return;
+        var workspacePath = selection.WorkspacePath ?? await new LastWorkspacePreference().ReadAsync();
+        if (workspacePath is not null && !await window.OpenWorkspaceAsync(workspacePath) && selection.WorkspacePath is null)
         {
             new LastWorkspacePreference().Forget();
         }
