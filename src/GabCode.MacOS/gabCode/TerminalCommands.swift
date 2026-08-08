@@ -63,6 +63,16 @@ struct TerminalWorkspaceCommands: Commands {
                 .keyboardShortcut("n", modifiers: .command)
         }
 
+        CommandGroup(after: .newItem) {
+            Button("Open Workspace…") {
+                NotificationCenter.default.post(name: .gabCodeOpenWorkspace, object: nil)
+            }
+            .keyboardShortcut("o", modifiers: .command)
+            Button("Create Workspace from Git Folder…") {
+                NotificationCenter.default.post(name: .gabCodeCreateWorkspace, object: nil)
+            }
+        }
+
         CommandMenu("Terminal") {
             Button("Swap Terminals") { router.swapTerminals() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
