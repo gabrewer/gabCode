@@ -7,9 +7,23 @@ extension Notification.Name {
 }
 
 @MainActor
+final class WorkspaceWindowIntentStore {
+    enum Action { case open, create }
+    static let shared = WorkspaceWindowIntentStore()
+    private var pendingAction: Action?
+
+    func enqueue(_ action: Action) { pendingAction = action }
+    func take() -> Action? {
+        defer { pendingAction = nil }
+        return pendingAction
+    }
+}
+
+@MainActor
 struct WorkspaceProjectView: View {
     @ObservedObject var controller: WorkspaceProjectController
     @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
+    @Environment(\.openWindow) private var openWindow
     @State private var isPresentingPanel = false
 
     var body: some View {
@@ -29,6 +43,15 @@ struct WorkspaceProjectView: View {
             chooseGitFolderAndCreateWorkspace()
         }
         .onAppear {
+            if let action = WorkspaceWindowIntentStore.shared.take() {
+                DispatchQueue.main.async { [self] in
+                    switch action {
+                    case .open: chooseWorkspace()
+                    case .create: chooseGitFolderAndCreateWorkspace()
+                    }
+                }
+                return
+            }
             guard controller.state == .empty, controller.activeDescriptor == nil else { return }
             Task { _ = await controller.reopenRememberedWorkspace() }
         }
@@ -46,10 +69,10 @@ struct WorkspaceProjectView: View {
                 Text(recoveryDescription)
             }
             HStack(spacing: 12) {
-                Button("Open Workspace…", action: chooseWorkspace)
+                Button("Open Workspace…") { openNewWindow(.open) }
                     .keyboardShortcut("o", modifiers: .command)
                     .accessibilityIdentifier("open-workspace")
-                Button("Create Workspace from Git Folder…", action: chooseGitFolderAndCreateWorkspace)
+                Button("Create Workspace from Git Folder…") { openNewWindow(.create) }
                     .accessibilityIdentifier("create-workspace")
             }
             if case let .recovery(error) = controller.state {
@@ -74,6 +97,11 @@ struct WorkspaceProjectView: View {
         case .recovery: "The workspace could not be opened. Choose another workspace or retry."
         case .empty, .ready: "Open an existing workspace descriptor or create one for an existing Git folder."
         }
+    }
+
+    private func openNewWindow(_ action: WorkspaceWindowIntentStore.Action) {
+        WorkspaceWindowIntentStore.shared.enqueue(action)
+        openWindow(id: "main")
     }
 
     private func chooseWorkspace() {
@@ -118,7 +146,8 @@ struct WorkspaceProjectView: View {
                     let save = NSSavePanel()
                     save.title = "Save Workspace"
                     save.prompt = "Save Workspace"
-                    save.nameFieldStringValue = "\(name).gabcode-workspace"
+                    save.directoryURL = url
+                    save.nameFieldStringValue = name
                     save.allowedFileTypes = ["gabcode-workspace"]
                     // The name alert is also a sheet; defer the save panel until
                     // AppKit has removed it from the window.
