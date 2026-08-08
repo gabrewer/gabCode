@@ -152,30 +152,32 @@ public partial class MainWindow : Window
 
     private async void CreateWorkspaceButton_Click(object sender, RoutedEventArgs e)
     {
-        var nameDialog = new WorkspaceNameDialog("New Workspace") { Owner = this };
-        if (nameDialog.ShowDialog() != true) return;
-
-        string? gitFolder = null;
-        while (gitFolder is null)
+        var projectFolderDialog = new OpenFolderDialog { Title = "Select Project Folder" };
+        if (projectFolderDialog.ShowDialog(this) != true) return;
+        var workspaceName = WorkspaceCreationDefaults.GetWorkspaceName(projectFolderDialog.FolderName);
+        var gitFolder = projectFolderDialog.FolderName;
+        try
         {
-            var folderDialog = new OpenFolderDialog { Title = $"Select Git Folder for {nameDialog.WorkspaceName}" };
-            if (folderDialog.ShowDialog(this) != true) return;
+            _ = await projectCreator.ValidateGitFolderAsync(gitFolder);
+        }
+        catch (Exception)
+        {
+            var gitFolderDialog = new OpenFolderDialog { Title = $"Select Git Folder for {workspaceName}" };
+            if (gitFolderDialog.ShowDialog(this) != true) return;
             try
             {
-                _ = await projectCreator.ValidateGitFolderAsync(folderDialog.FolderName);
-                gitFolder = folderDialog.FolderName;
+                _ = await projectCreator.ValidateGitFolderAsync(gitFolderDialog.FolderName);
+                gitFolder = gitFolderDialog.FolderName;
             }
             catch (Exception exception)
             {
-                _ = MessageBox.Show(
-                    this,
-                    $"The workspace Git folder must be inside an existing Git repository. {exception.Message}",
-                    "Git folder required",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                _ = MessageBox.Show(this, $"The Git folder associated with this workspace must be inside an existing Git repository. {exception.Message}", "Git folder required", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
             }
         }
 
+        var nameDialog = new WorkspaceNameDialog(workspaceName) { Owner = this };
+        if (nameDialog.ShowDialog() != true) return;
         var saveDialog = new SaveFileDialog
         {
             Filter = "gabCode workspace (*.gabcode-workspace)|*.gabcode-workspace",
