@@ -57,6 +57,7 @@ project/
 - Resolve the selected branch to its current Git worktree using read-only Git queries before starting terminals.
 - If the project root, repository discovery, or selected branch cannot be resolved, show actionable recovery and start no terminals.
 - Keep the descriptor independent of terminal state, output, Git status, and local preferences.
+- Opening or creating a workspace launches a separate native project window; it never stops or replaces another window's project or terminals. Existing terminal cleanup remains authoritative for close and quit.
 
 ### 3. Guarded Worktree Creation and Removal — Must-have
 

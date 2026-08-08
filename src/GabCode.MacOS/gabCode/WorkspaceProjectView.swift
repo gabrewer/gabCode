@@ -40,14 +40,14 @@ struct WorkspaceProjectView: View {
             chooseWorkspace()
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeCreateWorkspace)) { _ in
-            chooseGitFolderAndCreateWorkspace()
+            chooseProjectFolderAndCreateWorkspace()
         }
         .onAppear {
             if let action = WorkspaceWindowIntentStore.shared.take() {
                 DispatchQueue.main.async { [self] in
                     switch action {
                     case .open: chooseWorkspace()
-                    case .create: chooseGitFolderAndCreateWorkspace()
+                    case .create: chooseProjectFolderAndCreateWorkspace()
                     }
                 }
                 return
@@ -72,7 +72,7 @@ struct WorkspaceProjectView: View {
                 Button("Open Workspace…") { openNewWindow(.open) }
                     .keyboardShortcut("o", modifiers: .command)
                     .accessibilityIdentifier("open-workspace")
-                Button("Create Workspace from Git Folder…") { openNewWindow(.create) }
+                Button("Create Workspace from Project Folder…") { openNewWindow(.create) }
                     .accessibilityIdentifier("create-workspace")
             }
             if case let .recovery(error) = controller.state {
@@ -95,7 +95,7 @@ struct WorkspaceProjectView: View {
         switch controller.state {
         case .loading: "Validating the workspace. No terminal will start until validation succeeds."
         case .recovery: "The workspace could not be opened. Choose another workspace or retry."
-        case .empty, .ready: "Open an existing workspace descriptor or create one for an existing Git folder."
+        case .empty, .ready: "Open an existing workspace descriptor or create one for a project folder and selected branch."
         }
     }
 
@@ -121,11 +121,11 @@ struct WorkspaceProjectView: View {
         }
     }
 
-    private func chooseGitFolderAndCreateWorkspace() {
+    private func chooseProjectFolderAndCreateWorkspace() {
         guard !isPresentingPanel else { return }
         isPresentingPanel = true
         let panel = NSOpenPanel()
-        panel.title = "Choose Git Folder"
+        panel.title = "Choose Project Folder"
         panel.prompt = "Choose Folder"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -135,29 +135,46 @@ struct WorkspaceProjectView: View {
                 isPresentingPanel = false
                 return
             }
-            // Wait for the folder sheet to finish dismissing before presenting
-            // another sheet on the same window.
             DispatchQueue.main.async { [self] in
                 requestWorkspaceName { [self] name in
                     guard let name else {
                         isPresentingPanel = false
                         return
                     }
-                    let save = NSSavePanel()
-                    save.title = "Save Workspace"
-                    save.prompt = "Save Workspace"
-                    save.directoryURL = url
-                    save.nameFieldStringValue = name
-                    save.allowedFileTypes = ["gabcode-workspace"]
-                    // The name alert is also a sheet; defer the save panel until
-                    // AppKit has removed it from the window.
-                    DispatchQueue.main.async { [self] in
-                        present(save) { descriptorURL in
+                    Task { @MainActor in
+                        let branchResult = await controller.availableBranches(in: url)
+                        guard case let .success(branches) = branchResult, !branches.isEmpty else {
                             isPresentingPanel = false
-                            guard let descriptorURL else { return }
-                            Task {
-                                await openAfterReplacement {
-                                    await controller.createWorkspace(name: name, folder: url, descriptorURL: descriptorURL)
+                            let message = (try? branchResult.get()).map { _ in "No branches were found beneath the selected project folder." }
+                                ?? "Git worktree discovery could not resolve this project folder."
+                            showAlert(title: "Choose Another Project Folder", message: message)
+                            return
+                        }
+                        DispatchQueue.main.async { [self] in
+                            requestBranch(branches) { [self] branch in
+                                guard let branch else {
+                                    isPresentingPanel = false
+                                    return
+                                }
+                                let save = NSSavePanel()
+                                save.title = "Save Workspace"
+                                save.prompt = "Save Workspace"
+                                save.directoryURL = url
+                                save.nameFieldStringValue = name
+                                save.allowedFileTypes = ["gabcode-workspace"]
+                                DispatchQueue.main.async { [self] in
+                                    present(save) { descriptorURL in
+                                        isPresentingPanel = false
+                                        guard let descriptorURL else { return }
+                                        Task {
+                                            _ = await controller.createWorkspace(
+                                                name: name,
+                                                projectRoot: url,
+                                                branch: branch,
+                                                descriptorURL: descriptorURL
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -196,6 +213,33 @@ struct WorkspaceProjectView: View {
             return
         }
         _ = await action()
+    }
+
+    private func requestBranch(_ branches: [String], completion: @escaping (String?) -> Void) {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else {
+            completion(nil)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Choose a branch"
+        alert.informativeText = "Select the worktree to use for this workspace."
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
+        popup.addItems(withTitles: branches)
+        popup.setAccessibilityLabel("Workspace branch")
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { response in
+            completion(response == .alertFirstButtonReturn ? popup.titleOfSelectedItem : nil)
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func requestWorkspaceName(completion: @escaping (String?) -> Void) {

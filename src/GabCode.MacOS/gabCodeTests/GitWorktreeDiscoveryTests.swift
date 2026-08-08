@@ -1,0 +1,60 @@
+import Foundation
+@testable import gabCode
+import XCTest
+
+final class GitWorktreeDiscoveryTests: XCTestCase {
+    func testDiscoversBranchesAndResolvesWorktreeFromNonGitProjectRoot() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let feature = project.appendingPathComponent("wt/feature ünicode", isDirectory: true)
+        try FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try Data("content".utf8).write(to: main.appendingPathComponent("README.md"))
+        try runGit(in: main, arguments: ["add", "."])
+        try runGit(in: main, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "initial"])
+        try runGit(in: main, arguments: ["branch", "feature/demo"])
+        try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["worktree", "add", "--quiet", feature.path, "feature/demo"])
+
+        let discovery = GitWorktreeDiscovery()
+        let branches = try await discovery.branches(in: project)
+        let resolved = try await discovery.resolve(branch: "feature/demo", in: project)
+
+        XCTAssertEqual(branches, ["feature/demo", "trunk"])
+        XCTAssertEqual(resolved, feature.standardizedFileURL)
+    }
+
+    func testRejectsProjectRootWithNoRepository() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            _ = try await GitWorktreeDiscovery().branches(in: root)
+            XCTFail("Expected repository discovery to reject a project with no Git repository.")
+        } catch let error as GitWorktreeDiscoveryError {
+            XCTAssertEqual(error, .repositoryNotFound(root.standardizedFileURL))
+        }
+    }
+
+    private func runGit(in directory: URL, arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + arguments
+        process.currentDirectoryURL = directory
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("gabCode worktree discovery ünicode", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+}

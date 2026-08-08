@@ -2,7 +2,7 @@ import Combine
 import Darwin
 import Foundation
 
-struct WorkspaceProjectTitle {
+enum WorkspaceProjectTitle {
     static func value(name: String, folder: URL) -> String {
         "\(name) — \(folder.lastPathComponent) — gabCode"
     }
@@ -13,7 +13,9 @@ enum WorkspaceOpenError: Error, Equatable {
     case unreadableDescriptor(URL)
     case malformedDescriptor(URL)
     case invalidFolder(URL)
-    case notGitRepository(URL, reason: String)
+    case repositoryNotFound(URL)
+    case multipleRepositories(URL)
+    case branchNotFound(String, URL)
     case gitUnavailable(URL)
     case gitFailed(URL, reason: String)
     case descriptorWriteFailed(URL)
@@ -23,8 +25,10 @@ enum WorkspaceOpenError: Error, Equatable {
         case .cancelled: "Workspace opening was cancelled."
         case let .unreadableDescriptor(url): "Could not read workspace file: \(url.path)"
         case let .malformedDescriptor(url): "The workspace file is malformed or unsupported: \(url.path)"
-        case let .invalidFolder(url): "The workspace folder is missing or inaccessible: \(url.path)"
-        case let .notGitRepository(url, reason): "This folder is not in a Git repository: \(url.path)\n\(reason)"
+        case let .invalidFolder(url): "The project folder is missing or inaccessible: \(url.path)"
+        case let .repositoryNotFound(url): "No Git worktree set was found beneath: \(url.path)"
+        case let .multipleRepositories(url): "More than one Git repository was found beneath: \(url.path)"
+        case let .branchNotFound(branch, url): "Branch \"\(branch)\" could not be resolved beneath: \(url.path)"
         case let .gitUnavailable(url): "Git could not be found at \(url.path)."
         case let .gitFailed(url, reason): "Git validation failed for \(url.path).\n\(reason)"
         case let .descriptorWriteFailed(url): "Could not write workspace file: \(url.path)"
@@ -46,18 +50,29 @@ final class WorkspaceProjectController: ObservableObject {
 
     let preference: WorkspacePreference
     private let gitValidator: GitRepositoryValidator
+    private let worktreeDiscovery: GitWorktreeDiscovery
 
     init(
         defaults: UserDefaults = .standard,
-        gitValidator: GitRepositoryValidator = GitRepositoryValidator()
+        gitValidator: GitRepositoryValidator = GitRepositoryValidator(),
+        worktreeDiscovery: GitWorktreeDiscovery = GitWorktreeDiscovery()
     ) {
         preference = WorkspacePreference(defaults: defaults)
         self.gitValidator = gitValidator
+        self.worktreeDiscovery = worktreeDiscovery
     }
 
     var windowTitle: String {
         guard let activeDescriptor else { return "gabCode" }
         return WorkspaceProjectTitle.value(name: activeDescriptor.name, folder: activeDescriptor.resolvedFolder)
+    }
+
+    func availableBranches(in projectRoot: URL) async -> Result<[String], WorkspaceOpenError> {
+        do {
+            return .success(try await worktreeDiscovery.branches(in: projectRoot))
+        } catch {
+            return .failure(map(error, projectRoot: projectRoot))
+        }
     }
 
     func reopenRememberedWorkspace() async -> Bool {
@@ -66,9 +81,7 @@ final class WorkspaceProjectController: ObservableObject {
             return false
         }
         let opened = await openWorkspace(at: url)
-        if !opened {
-            preference.lastWorkspaceURL = nil
-        }
+        if !opened { preference.lastWorkspaceURL = nil }
         return opened
     }
 
@@ -76,33 +89,38 @@ final class WorkspaceProjectController: ObservableObject {
         state = .loading
         do {
             let descriptor = try loadDescriptor(at: url)
-            try validateFolder(descriptor.resolvedFolder)
-            let validation = await gitValidator.validate(folder: descriptor.resolvedFolder)
-            try validateGitResult(validation, folder: descriptor.resolvedFolder)
-            activeDescriptor = descriptor
-            preference.lastWorkspaceURL = url
+            try validateFolder(descriptor.projectRoot)
+            let resolved = try await worktreeDiscovery.resolve(branch: descriptor.branch, in: descriptor.projectRoot)
+            try validateFolder(resolved)
+            let validation = await gitValidator.validate(folder: resolved)
+            try validateGitResult(validation, folder: resolved)
+            activeDescriptor = descriptor.resolved(to: resolved)
+            preference.lastWorkspaceURL = url.standardizedFileURL
             state = .ready
             return true
         } catch let error as WorkspaceOpenError {
             state = .recovery(error)
             return false
         } catch {
-            state = .recovery(.unreadableDescriptor(url))
+            state = .recovery(map(error, projectRoot: url))
             return false
         }
     }
 
     func createWorkspace(
         name: String,
-        folder: URL,
+        projectRoot: URL,
+        branch: String,
         descriptorURL: URL
     ) async -> Bool {
         state = .loading
         do {
-            try validateFolder(folder)
-            let validation = await gitValidator.validate(folder: folder)
-            try validateGitResult(validation, folder: folder)
-            try WorkspaceDescriptor.write(name: name, folder: folder, to: descriptorURL)
+            try validateFolder(projectRoot)
+            let resolved = try await worktreeDiscovery.resolve(branch: branch, in: projectRoot)
+            try validateFolder(resolved)
+            let validation = await gitValidator.validate(folder: resolved)
+            try validateGitResult(validation, folder: resolved)
+            try WorkspaceDescriptor.write(name: name, projectRoot: projectRoot, branch: branch, to: descriptorURL)
             return await openWorkspace(at: descriptorURL)
         } catch let error as WorkspaceOpenError {
             state = .recovery(error)
@@ -115,16 +133,9 @@ final class WorkspaceProjectController: ObservableObject {
 
     private func loadDescriptor(at url: URL) throws -> WorkspaceDescriptor {
         let data: Data
-        do {
-            data = try Data(contentsOf: url)
-        } catch {
-            throw WorkspaceOpenError.unreadableDescriptor(url)
-        }
-        do {
-            return try WorkspaceDescriptor.decode(data: data, from: url)
-        } catch {
-            throw WorkspaceOpenError.malformedDescriptor(url)
-        }
+        do { data = try Data(contentsOf: url) } catch { throw WorkspaceOpenError.unreadableDescriptor(url) }
+        do { return try WorkspaceDescriptor.decode(data: data, from: url) }
+        catch { throw WorkspaceOpenError.malformedDescriptor(url) }
     }
 
     private func validateFolder(_ folder: URL) throws {
@@ -132,28 +143,34 @@ final class WorkspaceProjectController: ObservableObject {
         guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
               isDirectory.boolValue,
               access(folder.path, R_OK | X_OK) == 0
-        else {
-            throw WorkspaceOpenError.invalidFolder(folder)
+        else { throw WorkspaceOpenError.invalidFolder(folder) }
+    }
+
+    private func validateGitResult(_ result: GitRepositoryValidationResult, folder: URL) throws {
+        switch result {
+        case .valid: return
+        case let .gitUnavailable(url): throw WorkspaceOpenError.gitUnavailable(url)
+        case .notRepository: throw WorkspaceOpenError.repositoryNotFound(folder)
+        case let .failed(_, _, stderr): throw WorkspaceOpenError.gitFailed(folder, reason: stderr)
+        case .timedOut: throw WorkspaceOpenError.gitFailed(folder, reason: "Git validation timed out.")
+        case .cancelled: throw WorkspaceOpenError.cancelled
         }
     }
 
-    private func validateGitResult(
-        _ result: GitRepositoryValidationResult,
-        folder: URL
-    ) throws {
-        switch result {
-        case .valid:
-            return
-        case let .gitUnavailable(url):
-            throw WorkspaceOpenError.gitUnavailable(url)
-        case let .notRepository(_, stderr):
-            throw WorkspaceOpenError.notGitRepository(folder, reason: stderr)
-        case let .failed(_, _, stderr):
-            throw WorkspaceOpenError.gitFailed(folder, reason: stderr)
-        case .timedOut:
-            throw WorkspaceOpenError.gitFailed(folder, reason: "Git validation timed out.")
-        case .cancelled:
-            throw WorkspaceOpenError.cancelled
+    private func map(_ error: Error, projectRoot: URL) -> WorkspaceOpenError {
+        switch error {
+        case let error as GitWorktreeDiscoveryError:
+            switch error {
+            case let .projectRootUnavailable(url): return .invalidFolder(url)
+            case let .repositoryNotFound(url): return .repositoryNotFound(url)
+            case let .multipleRepositories(url): return .multipleRepositories(url)
+            case let .branchNotFound(branch, url): return .branchNotFound(branch, url)
+            case let .detachedWorktree(url): return .gitFailed(url, reason: "The selected worktree is detached and has no branch name.")
+            case let .gitUnavailable(url): return .gitUnavailable(url)
+            case let .gitFailed(url, reason): return .gitFailed(url, reason: reason)
+            }
+        case let error as WorkspaceOpenError: return error
+        default: return .gitFailed(projectRoot, reason: error.localizedDescription)
         }
     }
 }

@@ -11,14 +11,22 @@ final class WorkspaceProjectTests: XCTestCase {
         )
     }
 
-    func testOpenExistingDescriptorActivatesOnlyAfterReadOnlyGitValidation() async throws {
+    func testOpenProjectRootResolvesSelectedBranchWorktreeBeforeActivation() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let repository = root.appendingPathComponent("repo with spaces", isDirectory: true)
-        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
-        try runGit(in: repository, arguments: ["init", "--quiet"])
-        let descriptorURL = root.appendingPathComponent("project.gabcode-workspace")
-        try WorkspaceDescriptor.write(name: "Project", folder: repository, to: descriptorURL)
+        let project = root.appendingPathComponent("project with spaces", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let feature = project.appendingPathComponent("wt/feature demo", isDirectory: true)
+        try FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try Data("initial".utf8).write(to: main.appendingPathComponent("README.md"))
+        try runGit(in: main, arguments: ["add", "."])
+        try runGit(in: main, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "initial"])
+        try runGit(in: main, arguments: ["branch", "feature/demo"])
+        try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["worktree", "add", "--quiet", feature.path, "feature/demo"])
+        let descriptorURL = project.appendingPathComponent("project.gabcode-workspace")
+        try WorkspaceDescriptor.write(name: "Project", projectRoot: project, branch: "feature/demo", to: descriptorURL)
         let suite = "gabCode.project.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -28,19 +36,23 @@ final class WorkspaceProjectTests: XCTestCase {
 
         XCTAssertTrue(result)
         XCTAssertEqual(controller.activeDescriptor?.name, "Project")
-        XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, repository.standardizedFileURL)
-        XCTAssertEqual(controller.windowTitle, "Project — repo with spaces — gabCode")
+        XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, feature.standardizedFileURL)
+        XCTAssertEqual(controller.windowTitle, "Project — feature demo — gabCode")
         XCTAssertEqual(controller.state, .ready)
         XCTAssertEqual(controller.preference.lastWorkspaceURL, descriptorURL.standardizedFileURL)
     }
 
-    func testCreateWorkspaceWritesDescriptorAndActivatesIt() async throws {
+    func testCreateWorkspaceWritesDescriptorInNonGitProjectRootAndActivatesBranch() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let repository = root.appendingPathComponent("created repo", isDirectory: true)
-        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
-        try runGit(in: repository, arguments: ["init", "--quiet"])
-        let descriptorURL = root.appendingPathComponent("saved/project.gabcode-workspace")
+        let project = root.appendingPathComponent("created project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        try FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try Data("initial".utf8).write(to: main.appendingPathComponent("README.md"))
+        try runGit(in: main, arguments: ["add", "."])
+        try runGit(in: main, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "initial"])
+        let descriptorURL = project.appendingPathComponent("Created Project.gabcode-workspace")
         let suite = "gabCode.project.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -48,7 +60,8 @@ final class WorkspaceProjectTests: XCTestCase {
         let controller = WorkspaceProjectController(defaults: defaults)
         let created = await controller.createWorkspace(
             name: "Created Project",
-            folder: repository,
+            projectRoot: project,
+            branch: "trunk",
             descriptorURL: descriptorURL
         )
 
@@ -56,7 +69,7 @@ final class WorkspaceProjectTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: descriptorURL.path))
         XCTAssertEqual(controller.state, .ready)
         XCTAssertEqual(controller.activeDescriptor?.name, "Created Project")
-        XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, repository.standardizedFileURL)
+        XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, main.standardizedFileURL)
     }
 
     func testInvalidOpenPreservesCurrentActiveProjectAndProducesRecoveryState() async throws {
@@ -64,11 +77,11 @@ final class WorkspaceProjectTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = root.appendingPathComponent("repo", isDirectory: true)
         try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
-        try runGit(in: repository, arguments: ["init", "--quiet"])
+        try runGit(in: repository, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
         let validURL = root.appendingPathComponent("valid.gabcode-workspace")
-        try WorkspaceDescriptor.write(name: "Valid", folder: repository, to: validURL)
+        try WorkspaceDescriptor.write(name: "Valid", projectRoot: repository, branch: "trunk", to: validURL)
         let invalidURL = root.appendingPathComponent("invalid.gabcode-workspace")
-        try Data("{\"version\":1,\"name\":\"Broken\",\"folders\":[]}".utf8).write(to: invalidURL)
+        try Data("{\"version\":1,\"name\":\"Broken\",\"project\":{\"path\":\"repo\",\"branch\":\"trunk\"},\"unknown\":true}".utf8).write(to: invalidURL)
         let suite = "gabCode.project.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
