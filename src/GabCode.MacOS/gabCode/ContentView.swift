@@ -1,31 +1,37 @@
 import SwiftUI
 
+@MainActor
 struct ContentView: View {
     @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
+    @StateObject private var projectController: WorkspaceProjectController
 
-    @ViewBuilder
-    var body: some View {
-        if let workingDirectory = TerminalWorkspaceLaunch.workingDirectory() {
-            TerminalWorkspaceView(workingDirectory: workingDirectory, font: fontPreference.effectiveFont)
-        } else {
-            TerminalDirectoryUnavailableView()
-        }
+    init() {
+        _projectController = StateObject(
+            wrappedValue: WorkspaceProjectController(defaults: Self.workspaceDefaults())
+        )
     }
-}
 
-private struct TerminalDirectoryUnavailableView: View {
     var body: some View {
-        ContentUnavailableView {
-            Label("Terminal directory unavailable", systemImage: "folder.badge.questionmark")
-        } description: {
-            Text("gabCode could not access the requested terminal directory or your home directory. No shell was started.")
+        WorkspaceProjectView(controller: projectController)
+            .environmentObject(fontPreference)
+            .accessibilityIdentifier("workspace-project-surface")
+    }
+
+    private static func workspaceDefaults() -> UserDefaults {
+        #if DEBUG
+        if
+            let suiteName = ProcessInfo.processInfo.environment["GABCODE_UI_TEST_PREFERENCE_SUITE"],
+            !suiteName.isEmpty,
+            let isolatedDefaults = UserDefaults(suiteName: suiteName)
+        {
+            return isolatedDefaults
         }
-        .frame(minWidth: 760, minHeight: 640)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("terminal-directory-unavailable")
+        #endif
+        return .standard
     }
 }
 
 #Preview {
     ContentView()
+        .environmentObject(TerminalFontPreferenceStore())
 }
