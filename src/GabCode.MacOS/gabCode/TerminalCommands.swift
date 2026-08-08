@@ -65,11 +65,13 @@ struct TerminalWorkspaceCommands: Commands {
 
         CommandGroup(after: .newItem) {
             Button("Open Workspace…") {
-                NotificationCenter.default.post(name: .gabCodeOpenWorkspace, object: nil)
+                WorkspaceWindowIntentStore.shared.enqueue(.open)
+                openWindow(id: "main")
             }
             .keyboardShortcut("o", modifiers: .command)
             Button("Create Workspace from Git Folder…") {
-                NotificationCenter.default.post(name: .gabCodeCreateWorkspace, object: nil)
+                WorkspaceWindowIntentStore.shared.enqueue(.create)
+                openWindow(id: "main")
             }
         }
 
