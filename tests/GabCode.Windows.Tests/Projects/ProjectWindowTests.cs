@@ -35,6 +35,20 @@ public sealed class ProjectWindowTests
     }
 
     [Fact]
+    public async Task Invalid_workspace_recovery_keeps_empty_actions_and_starts_no_terminals()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var window = new MainWindow();
+            var opened = await window.OpenWorkspaceAsync(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".gabcode-workspace"));
+            Assert.False(opened);
+            Assert.Null(window.PiTerminal);
+            Assert.Equal(Visibility.Visible, window.FindName("EmptyProjectSurface") is FrameworkElement surface ? surface.Visibility : Visibility.Collapsed);
+            Assert.Contains("could not be reopened", ((System.Windows.Controls.TextBlock)window.FindName("EmptyProjectMessage")!).Text);
+        });
+    }
+
+    [Fact]
     public async Task Empty_window_has_project_actions_and_starts_no_terminals()
     {
         await RunOnStaAsync(() =>
