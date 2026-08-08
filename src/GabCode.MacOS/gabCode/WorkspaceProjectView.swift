@@ -107,22 +107,30 @@ struct WorkspaceProjectView: View {
                 isPresentingPanel = false
                 return
             }
-            requestWorkspaceName { [self] name in
-                guard let name else {
-                    isPresentingPanel = false
-                    return
-                }
-                let save = NSSavePanel()
-                save.title = "Save Workspace"
-                save.prompt = "Save Workspace"
-                save.nameFieldStringValue = "\(name).gabcode-workspace"
-                save.allowedFileTypes = ["gabcode-workspace"]
-                present(save) { descriptorURL in
-                    isPresentingPanel = false
-                    guard let descriptorURL else { return }
-                    Task {
-                        await openAfterReplacement {
-                            await controller.createWorkspace(name: name, folder: url, descriptorURL: descriptorURL)
+            // Wait for the folder sheet to finish dismissing before presenting
+            // another sheet on the same window.
+            DispatchQueue.main.async { [self] in
+                requestWorkspaceName { [self] name in
+                    guard let name else {
+                        isPresentingPanel = false
+                        return
+                    }
+                    let save = NSSavePanel()
+                    save.title = "Save Workspace"
+                    save.prompt = "Save Workspace"
+                    save.nameFieldStringValue = "\(name).gabcode-workspace"
+                    save.allowedFileTypes = ["gabcode-workspace"]
+                    // The name alert is also a sheet; defer the save panel until
+                    // AppKit has removed it from the window.
+                    DispatchQueue.main.async { [self] in
+                        present(save) { descriptorURL in
+                            isPresentingPanel = false
+                            guard let descriptorURL else { return }
+                            Task {
+                                await openAfterReplacement {
+                                    await controller.createWorkspace(name: name, folder: url, descriptorURL: descriptorURL)
+                                }
+                            }
                         }
                     }
                 }
