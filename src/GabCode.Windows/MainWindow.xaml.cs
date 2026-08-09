@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private readonly WorkspaceProjectLoader projectLoader = new();
     private readonly WorkspaceProjectCreator projectCreator = new();
     private readonly GitWorktreeDiscovery worktreeDiscovery = new();
+    private readonly IGabCodeInstanceLauncher instanceLauncher = new GabCodeInstanceLauncher();
     private readonly TerminalProfileResolver profileResolver;
     private readonly ITerminalExitConfirmationService exitConfirmation;
     private RetainedTerminalLayout? terminalLayout;
@@ -130,7 +131,12 @@ public partial class MainWindow : Window
         try
         {
             var nextProject = await projectLoader.LoadAsync(workspacePath);
-            if (!await ReplaceProjectAsync(nextProject)) return false;
+            if (ProjectWindowRouting.ShouldLaunchNewWindow(project is not null))
+            {
+                instanceLauncher.Launch(workspacePath);
+                return true;
+            }
+            ActivateProject(nextProject);
             await new LastWorkspacePreference().WriteAsync(workspacePath);
             return true;
         }
@@ -182,7 +188,8 @@ public partial class MainWindow : Window
         if (saveDialog.ShowDialog(this) != true) return;
         try
         {
-            _ = await projectCreator.CreateAsync(saveDialog.FileName, nameDialog.WorkspaceName, projectRoot, branchDialog.Branch);
+            var created = await projectCreator.CreateAsync(saveDialog.FileName, nameDialog.WorkspaceName, projectRoot, branchDialog.Branch, ProjectWindowRouting.ShouldLaunchNewWindow(project is not null));
+            if (project is null) ActivateProject(await projectLoader.LoadAsync(saveDialog.FileName));
         }
         catch (Exception exception)
         {

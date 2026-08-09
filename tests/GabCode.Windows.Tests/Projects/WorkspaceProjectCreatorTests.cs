@@ -20,7 +20,7 @@ public sealed class WorkspaceProjectCreatorTests
             var launcher = new RecordingLauncher();
             var creator = new WorkspaceProjectCreator(new GitRepositoryValidator(), new WorkspaceFileStore(), launcher);
 
-            var project = await creator.CreateAsync(descriptor, "Demo", repository, "main");
+            var project = await creator.CreateAsync(descriptor, "Demo", repository, "main", launchNewWindow: true);
 
             Assert.Equal(repository, project.ProjectFolder);
             Assert.Single(launcher.Paths);
