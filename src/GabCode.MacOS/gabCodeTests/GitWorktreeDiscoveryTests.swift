@@ -26,6 +26,26 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         XCTAssertEqual(resolved, feature.standardizedFileURL)
     }
 
+    func testDrainsLargeGitOutputWithoutDeadlockingOnPipeCapacity() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        try runGit(in: repository, arguments: ["init", "--quiet"])
+
+        let fakeGit = root.appendingPathComponent("fake git")
+        let output = "#!/bin/sh\nprintf 'worktree %s\\nbranch refs/heads/main\\n\\n' '\(repository.path)'\nhead -c 200000 /dev/zero\n"
+        try Data(output.utf8).write(to: fakeGit)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+
+        let branches = try await GitWorktreeDiscovery(
+            gitExecutable: fakeGit,
+            timeout: .seconds(1)
+        ).branches(in: repository)
+
+        XCTAssertEqual(branches, ["main"])
+    }
+
     func testRejectsProjectRootWithNoRepository() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
