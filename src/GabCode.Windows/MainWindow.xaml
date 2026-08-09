@@ -48,6 +48,7 @@
                 <StackPanel Orientation="Horizontal">
                     <Button x:Name="OpenWorkspaceButton" Padding="12,6" Content="Open Workspace…" Click="OpenWorkspaceButton_Click" AutomationProperties.Name="Open workspace" />
                     <Button x:Name="CreateWorkspaceButton" Margin="8,0,0,0" Padding="12,6" Content="Create Workspace from Git Folder…" Click="CreateWorkspaceButton_Click" AutomationProperties.Name="Create workspace from Git folder" />
+                    <Button x:Name="CancelDiscoveryButton" Margin="8,0,0,0" Padding="12,6" Content="Cancel" Click="CancelDiscoveryButton_Click" Visibility="Collapsed" AutomationProperties.Name="Cancel Git repository discovery" />
                 </StackPanel>
             </StackPanel>
         </Border>

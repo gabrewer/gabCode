@@ -17,7 +17,7 @@ internal sealed class WorkspaceProjectLoader
         var fullWorkspacePath = Path.GetFullPath(workspacePath);
         var workspace = WorkspaceDocument.Parse(await File.ReadAllTextAsync(fullWorkspacePath, cancellationToken));
         var projectPath = workspace.ResolveProjectPath(fullWorkspacePath);
-        var worktree = await worktreeDiscovery.ResolveAsync(projectPath, workspace.Project.Branch, cancellationToken);
+        var worktree = await worktreeDiscovery.ResolveAsync(projectPath, workspace.Project.Branch, cancellationToken: cancellationToken);
         return new ProjectContext(workspace.Name, worktree);
     }
 }
