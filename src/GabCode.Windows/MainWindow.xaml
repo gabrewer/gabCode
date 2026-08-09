@@ -30,7 +30,7 @@
                                             <Border x:Name="MenuItemBorder" Padding="10,4" Background="{TemplateBinding Background}">
                                                 <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" />
                                             </Border>
-                                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsSubmenuOpen}" Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade">
+                                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsSubmenuOpen}" Placement="Bottom" PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" AllowsTransparency="True" PopupAnimation="Fade">
                                                 <Border Background="White" BorderBrush="#707070" BorderThickness="1">
                                                     <ItemsPresenter />
                                                 </Border>
