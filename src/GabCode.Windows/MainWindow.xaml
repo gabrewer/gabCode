@@ -22,23 +22,15 @@
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                 <Menu Background="Transparent" AutomationProperties.Name="Application menu">
                     <Menu.Resources>
-                        <Style TargetType="MenuItem">
+                        <Style x:Key="CompactMenuCommand" TargetType="MenuItem">
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate TargetType="MenuItem">
-                                        <Grid>
-                                            <Border x:Name="MenuItemBorder" Padding="10,4" Background="{TemplateBinding Background}">
-                                                <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" />
-                                            </Border>
-                                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsSubmenuOpen}" Placement="Bottom" PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" AllowsTransparency="True" PopupAnimation="Fade">
-                                                <Border Background="White" BorderBrush="#707070" BorderThickness="1">
-                                                    <ItemsPresenter />
-                                                </Border>
-                                            </Popup>
-                                        </Grid>
+                                        <Border x:Name="MenuItemBorder" Padding="10,4" Background="{TemplateBinding Background}">
+                                            <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" />
+                                        </Border>
                                         <ControlTemplate.Triggers>
-                                            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="MenuItemBorder" Property="Background" Value="#3A3A3A" /></Trigger>
-                                            <Trigger Property="Role" Value="TopLevelHeader"><Setter Property="Foreground" Value="White" /></Trigger>
+                                            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="MenuItemBorder" Property="Background" Value="#E5E5E5" /></Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
                                 </Setter.Value>
@@ -46,8 +38,8 @@
                         </Style>
                     </Menu.Resources>
                     <MenuItem Header="_File" Foreground="White" AutomationProperties.Name="File">
-                        <MenuItem Header="_Open Workspace…" Foreground="Black" Click="OpenWorkspaceButton_Click" AutomationProperties.Name="Open workspace" />
-                        <MenuItem Header="_Create Workspace…" Foreground="Black" Click="CreateWorkspaceButton_Click" AutomationProperties.Name="Create workspace" />
+                        <MenuItem Header="_Open Workspace…" Style="{StaticResource CompactMenuCommand}" Foreground="Black" Click="OpenWorkspaceButton_Click" AutomationProperties.Name="Open workspace" />
+                        <MenuItem Header="_Create Workspace…" Style="{StaticResource CompactMenuCommand}" Foreground="Black" Click="CreateWorkspaceButton_Click" AutomationProperties.Name="Create workspace" />
                     </MenuItem>
                 </Menu>
                 <Grid Grid.Row="1">
