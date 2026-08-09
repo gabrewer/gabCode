@@ -104,6 +104,40 @@ private enum GitProcessResult: Sendable {
     case cancelled
 }
 
+private final class BoundedPipeCapture: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private var retained = Data()
+
+    init(handle: FileHandle) {
+        self.handle = handle
+        handle.readabilityHandler = { [weak self] handle in
+            self?.drain(handle)
+        }
+    }
+
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return retained
+    }
+
+    func stop() {
+        handle.readabilityHandler = nil
+        drain(handle)
+    }
+
+    private func drain(_ handle: FileHandle) {
+        let chunk = handle.readData(ofLength: 4096)
+        guard !chunk.isEmpty else { return }
+        lock.lock()
+        if retained.count < 64 * 1024 {
+            retained.append(chunk.prefix(64 * 1024 - retained.count))
+        }
+        lock.unlock()
+    }
+}
+
 private final class GitProcessOperation: @unchecked Sendable {
     private let process: Process
     private let lock = NSLock()
@@ -135,19 +169,21 @@ private final class GitProcessOperation: @unchecked Sendable {
             let stderr = Pipe()
             process.standardOutput = stdout
             process.standardError = stderr
+            let stdoutCapture = BoundedPipeCapture(handle: stdout.fileHandleForReading)
+            let stderrCapture = BoundedPipeCapture(handle: stderr.fileHandleForReading)
             do {
                 try process.run()
             } catch {
                 return .launchFailed(error.localizedDescription)
             }
             process.waitUntilExit()
+            stdoutCapture.stop()
+            stderrCapture.stop()
             if Task.isCancelled { return .cancelled }
-            let output = stdout.fileHandleForReading.readData(ofLength: 64 * 1024)
-            let errorOutput = stderr.fileHandleForReading.readData(ofLength: 64 * 1024)
             return .finished(
                 status: process.terminationStatus,
-                stdout: String(data: output, encoding: .utf8) ?? "",
-                stderr: String(data: errorOutput, encoding: .utf8) ?? ""
+                stdout: String(data: stdoutCapture.data, encoding: .utf8) ?? "",
+                stderr: String(data: stderrCapture.data, encoding: .utf8) ?? ""
             )
         }.value
     }

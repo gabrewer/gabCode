@@ -134,6 +134,12 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
+        let stdoutReader = Task.detached(priority: .utility) {
+            Self.readBounded(from: stdout.fileHandleForReading)
+        }
+        let stderrReader = Task.detached(priority: .utility) {
+            Self.readBounded(from: stderr.fileHandleForReading)
+        }
 
         let completed = await withTaskGroup(of: Bool.self) { group in
             group.addTask {
@@ -158,11 +164,23 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
             throw GitWorktreeDiscoveryError.gitFailed(currentDirectory, reason: "Git worktree discovery timed out.")
         }
 
-        let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let output = String(data: await stdoutReader.value, encoding: .utf8) ?? ""
+        let errorOutput = String(data: await stderrReader.value, encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
             throw GitWorktreeDiscoveryError.gitFailed(currentDirectory, reason: String(errorOutput.prefix(64 * 1024)))
         }
         return output
+    }
+
+    private static func readBounded(from handle: FileHandle) -> Data {
+        let limit = 64 * 1024
+        var retained = Data()
+        while true {
+            let chunk = handle.readData(ofLength: 4096)
+            guard !chunk.isEmpty else { return retained }
+            if retained.count < limit {
+                retained.append(chunk.prefix(limit - retained.count))
+            }
+        }
     }
 }

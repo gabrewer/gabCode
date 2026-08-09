@@ -41,6 +41,20 @@ final class GitRepositoryValidatorTests: XCTestCase {
         XCTAssertEqual(result, .gitUnavailable(URL(fileURLWithPath: "/does/not/exist/git")))
     }
 
+    func testDrainsLargeGitOutputWithoutDeadlockingOnPipeCapacity() async throws {
+        let folder = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runner = GitRepositoryValidator(
+            gitExecutable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "head -c 200000 /dev/zero"],
+            timeout: .seconds(1)
+        )
+
+        let result = await runner.validate(folder: folder)
+
+        XCTAssertEqual(result, .valid(repository: folder.standardizedFileURL))
+    }
+
     func testCancellationStopsTheOwnedGitProcess() async throws {
         let folder = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: folder) }
