@@ -29,7 +29,8 @@ export default function (pi: ExtensionAPI) {
     if (result.code !== 0) return;
     try {
       const [title, body] = JSON.parse(result.stdout) as [string, string];
-      const incomplete = /- \[ \] /u.test(body);
+      const taskBoard = body.match(/## 🧩 Task Board[\s\S]*?(?=\n## |$)/u)?.[0] ?? body.match(/## 🧩 [^\n]*[\s\S]*?(?=\n## |$)/u)?.[0] ?? body;
+      const incomplete = /- \[ \] /u.test(taskBoard);
       const blocked = /^✋/u.test(title);
       if (!incomplete || blocked) return;
       queuedContinuation = true;
