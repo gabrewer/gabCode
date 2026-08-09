@@ -13,8 +13,9 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("Header=\"_Open Workspace…\"", xaml);
         Assert.Contains("Header=\"_Create Workspace…\"", xaml);
         Assert.Contains("OpenWorkspaceButton_Click", xaml);
-        Assert.Contains("<Setter Property=\"Foreground\" Value=\"White\" />", xaml);
-        Assert.Contains("Property=\"IsHighlighted\" Value=\"True\"", xaml);
+        Assert.DoesNotContain("<Style TargetType=\"MenuItem\">", xaml);
+        Assert.Contains("Header=\"_File\" Foreground=\"White\"", xaml);
+        Assert.Contains("Header=\"_Open Workspace…\" Foreground=\"Black\"", xaml);
         Assert.Contains("CreateWorkspaceButton_Click", xaml);
     }
 }
