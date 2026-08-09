@@ -4,35 +4,56 @@ using System.IO;
 
 namespace GabCode.Windows.Projects;
 
+internal sealed record GitDiscoveryProgress(string Phase, int FoldersScanned, int RepositoriesFound);
+
 internal sealed class GitWorktreeDiscovery
 {
     private const int MaximumCandidates = 2_000;
 
-    internal async Task<IReadOnlyDictionary<string, string>> DiscoverAsync(string projectRoot, CancellationToken cancellationToken = default)
+    internal async Task<IReadOnlyDictionary<string, string>> DiscoverAsync(string projectRoot, IProgress<GitDiscoveryProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         var root = Path.GetFullPath(projectRoot);
         var repositories = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        var candidateCount = 0;
-        foreach (var candidate in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories).Prepend(root))
+        var coveredWorktrees = new List<string>();
+        var foldersScanned = 0;
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.TryPop(out var candidate))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (++candidateCount > MaximumCandidates) throw new InvalidOperationException($"Project root contains more than {MaximumCandidates} directories to inspect.");
-            var output = await RunAsync(candidate, cancellationToken);
-            if (output is null) continue;
-            var branches = Parse(output);
-            if (branches.Count != 0) repositories.TryAdd(branches.Values.First(), branches);
+            if (++foldersScanned > MaximumCandidates) throw new InvalidOperationException($"Project root contains more than {MaximumCandidates} directories to inspect.");
+            progress?.Report(new GitDiscoveryProgress("Searching for Git repositories", foldersScanned, repositories.Count));
+            if (coveredWorktrees.Any(path => candidate.StartsWith(path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase))) continue;
+            if (HasGitMarker(candidate))
+            {
+                var output = await RunAsync(candidate, cancellationToken);
+                if (output is null) continue;
+                var branches = Parse(output);
+                if (branches.Count == 0) continue;
+                var identity = branches.Values.First();
+                if (repositories.TryAdd(identity, branches))
+                {
+                    coveredWorktrees.AddRange(branches.Values.Distinct(StringComparer.OrdinalIgnoreCase));
+                    progress?.Report(new GitDiscoveryProgress("Resolving Git worktrees", foldersScanned, repositories.Count));
+                }
+                continue;
+            }
+            foreach (var child in Directory.EnumerateDirectories(candidate)) pending.Push(child);
         }
         if (repositories.Count != 1) throw new InvalidOperationException(repositories.Count == 0 ? $"No Git repository was found beneath '{root}'." : $"More than one Git repository was found beneath '{root}'.");
+        progress?.Report(new GitDiscoveryProgress("Git worktrees resolved", foldersScanned, repositories.Count));
         return repositories.Values.Single();
     }
 
-    internal async Task<string> ResolveAsync(string projectRoot, string branch, CancellationToken cancellationToken = default)
+    internal async Task<string> ResolveAsync(string projectRoot, string branch, IProgress<GitDiscoveryProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        var branches = await DiscoverAsync(projectRoot, cancellationToken);
+        var branches = await DiscoverAsync(projectRoot, progress, cancellationToken);
         if (!branches.TryGetValue(branch, out var worktree)) throw new InvalidOperationException($"No registered worktree exists for branch '{branch}'.");
         return worktree;
     }
+
+    private static bool HasGitMarker(string directory) => Directory.Exists(Path.Combine(directory, ".git")) || File.Exists(Path.Combine(directory, ".git"));
 
     private static IReadOnlyDictionary<string, string> Parse(string output)
     {

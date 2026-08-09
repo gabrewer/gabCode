@@ -25,7 +25,7 @@ internal sealed class WorkspaceProjectCreator
 
     internal async Task<ProjectContext> CreateAsync(string workspacePath, string workspaceName, string projectRoot, string branch, bool launchNewWindow, CancellationToken cancellationToken = default)
     {
-        _ = await worktreeDiscovery.ResolveAsync(projectRoot, branch, cancellationToken);
+        _ = await worktreeDiscovery.ResolveAsync(projectRoot, branch, cancellationToken: cancellationToken);
         var document = new WorkspaceDocument(1, workspaceName, new WorkspaceProject(projectRoot, branch));
         await store.SaveNewAsync(workspacePath, document, projectRoot, cancellationToken);
         await preference.WriteAsync(workspacePath, cancellationToken);

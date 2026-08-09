@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private TerminalSessionView? commandsTerminal;
     private bool closeInProgress;
     private bool allowClose;
+    private CancellationTokenSource? discoveryCancellation;
 
     public MainWindow()
         : this(null, TerminalProfileResolver.CreateDefault(), new TerminalExitConfirmationService(), isProjectInitialization: true)
@@ -164,15 +165,34 @@ public partial class MainWindow : Window
         var workspaceName = WorkspaceCreationDefaults.GetWorkspaceName(projectFolderDialog.FolderName);
         var projectRoot = projectFolderDialog.FolderName;
         IReadOnlyDictionary<string, string> branches;
+        discoveryCancellation = new CancellationTokenSource();
+        CancelDiscoveryButton.Visibility = Visibility.Visible;
+        OpenWorkspaceButton.IsEnabled = false;
+        CreateWorkspaceButton.IsEnabled = false;
+        var discoveryProgress = new Progress<GitDiscoveryProgress>(status =>
+            EmptyProjectMessage.Text = $"{status.Phase}: {status.FoldersScanned} folders scanned; {status.RepositoriesFound} repositories found.");
         try
         {
-            branches = await worktreeDiscovery.DiscoverAsync(projectRoot);
+            branches = await worktreeDiscovery.DiscoverAsync(projectRoot, discoveryProgress, discoveryCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            EmptyProjectMessage.Text = "Git repository discovery was cancelled. Choose a project folder to try again.";
+            return;
         }
         catch (Exception exception)
         {
             WorktreeFailureMessage.Text = exception.Message;
             WorktreeFailureSurface.Visibility = Visibility.Visible;
             return;
+        }
+        finally
+        {
+            discoveryCancellation.Dispose();
+            discoveryCancellation = null;
+            CancelDiscoveryButton.Visibility = Visibility.Collapsed;
+            OpenWorkspaceButton.IsEnabled = true;
+            CreateWorkspaceButton.IsEnabled = true;
         }
         var branchDialog = new WorkspaceBranchDialog(branches.Keys.Order().ToArray()) { Owner = this };
         if (branchDialog.ShowDialog() != true) return;
@@ -197,6 +217,8 @@ public partial class MainWindow : Window
             WorktreeFailureSurface.Visibility = Visibility.Visible;
         }
     }
+
+    private void CancelDiscoveryButton_Click(object sender, RoutedEventArgs e) => discoveryCancellation?.Cancel();
 
     private async Task<bool> ReplaceProjectAsync(ProjectContext nextProject)
     {
