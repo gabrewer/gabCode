@@ -20,7 +20,7 @@ The initial audience is an individual developer using Git repositories, VS Code,
 
 ## Core Features
 
-1. **Workspace-backed project entry** — A gabCode project is represented by a user-chosen `*.gabcode-workspace` file containing a required human-readable workspace name and one project-folder reference. The reference may be relative to the workspace file or absolute, matching VS Code workspace path behavior. The folder must belong to one Git repository. Creating a project from a new folder initializes Git; creating one from an existing non-Git folder offers to initialize Git. Creating a workspace from an already running gabCode project opens the new workspace in a separate gabCode instance; it does not replace or stop the current instance's terminals.
+1. **Workspace-backed project entry** — A gabCode project is represented by a user-chosen `*.gabcode-workspace` file containing a required human-readable workspace name, one project-root reference, and one selected branch. The project root may be relative to the workspace file or absolute and need not itself be a Git repository; read-only Git worktree discovery beneath it resolves the selected branch to an accessible worktree. Creating new folders, repositories, or running `git init` remains a later increment. Open/Create reuses an empty invoking window; if it is already bound to a project, gabCode opens the new project in a separate native window/instance without stopping or replacing the occupied window's terminals.
    *Must-have*
 
 2. **Direct return to the active project** — gabCode opens directly to the last project. Project selection remains available through application navigation rather than requiring a project-library home screen.
@@ -61,26 +61,29 @@ This language-neutral artifact is shared requirements only. Windows and macOS ea
 {
   "version": 1,
   "name": "gabCode Development",
-  "folders": [
-    { "path": "../repository" }
-  ]
+  "project": {
+    "path": "../project",
+    "branch": "trunk"
+  }
 }
 ```
 
-- The file is UTF-8 JSON with exactly the properties `version`, `name`, and `folders`; unknown properties are rejected in v1.
+- The file is UTF-8 JSON with exactly the properties `version`, `name`, and `project`; unknown properties are rejected in v1.
 - `version` is the integer `1`; unsupported versions are rejected.
 - `name` is a required, non-empty human-readable string. It is workspace identity, not inferred from a filename or path.
-- `folders` contains exactly one object with exactly one required, non-empty string property, `path`.
-- `path` may be relative to the workspace file's directory or native-absolute. Runtime behavior resolves it to an absolute directory without rewriting a manually opened relative value.
-- When creating a workspace file, gabCode writes a relative path if it is representable from the file location on the same filesystem root; otherwise it writes an absolute path.
-- A successful Project Foundation open requires the resolved path to be an accessible directory inside an existing Git repository, established through a bounded, direct invocation of installed Git. This increment never runs `git init`. During new workspace creation, that path is the workspace's required **Git folder** value: a non-Git selection keeps creation in progress and asks the user to select the Git folder for that workspace again; it does not repair an existing workspace or offer initialization.
-- Malformed JSON, missing/unknown properties, wrong value types, empty name/path, multiple/empty folders, unsupported versions, inaccessible/non-directory paths, missing/unusable Git, and non-repository folders fail without starting a terminal.
-- Worktree discovery/state, terminal state/output, selected worktree, Git status, PR data, and local preferences are not workspace-file fields. The user may keep the file local or commit/share it; gabCode does not edit `.gitignore`.
+- `project` is an object with exactly the required non-empty string properties `path` and `branch`.
+- `project.path` is the project root. It may be relative to the workspace file's directory or native-absolute. Runtime behavior resolves it to an absolute accessible directory without rewriting a manually opened relative value. Creation writes a relative path when representable on the same filesystem root, otherwise an absolute path.
+- `project.branch` is the selected branch/worktree identity. It is not inferred from a folder name; exact `main` is a default selection only when a registered worktree reports it, not a reserved branch.
+- Git discovery starts at the resolved project root and directly invokes installed Git read-only. It discovers exactly one Git repository/worktree set beneath the root and resolves `project.branch` only through registered `git worktree list --porcelain` entries, including the normal repository checkout. Branch refs without registered worktrees are not selectable. The project root itself may be non-Git.
+- Creation first selects a project root, then resolves the associated repository/worktree set and selected branch before it asks for the workspace name and descriptor location. It never runs `git init` or creates a repository in this increment.
+- Malformed JSON, missing/unknown properties, wrong value types, empty name/path/branch, unsupported versions, inaccessible/non-directory project roots, missing/unusable Git, zero/multiple repositories beneath the root, and missing/unregistered branch worktrees fail without starting a terminal.
+- Terminal state/output, Git status, PR data, and local preferences are not workspace-file fields. The user may keep the file local or commit/share it; gabCode does not edit `.gitignore`.
+- Existing folder-only descriptors are not compatible with this v1 contract; there is no automatic migration or silent reinterpretation. They fail as unsupported/malformed until a later explicit migration decision.
 - The local last-workspace preference stores only a path hint and is revalidated with these same rules on every startup/open.
 
-On successful activation, the native and accessible title is `<workspace name> — <selected context> — gabCode`. The initial selected context is the resolved project folder's final path component; a later worktree-navigation increment changes it to the selected worktree directory name, falling back to its folder name. The full resolved path belongs in project chrome/help, not the title. Title and terminal state change only after complete activation succeeds; a failed open or replacement preserves the existing title and terminal pair. Both terminals are then created with the exact normalized resolved folder as their starting directory.
+On successful activation, the native and accessible title is `<workspace name> — <selected branch/worktree context> — gabCode`; context is the resolved selected worktree folder's final path component. The full resolved path belongs in project chrome/help, not the title. Title and terminal state change only after complete activation succeeds; a failed open preserves the existing title and terminal pair. Both terminals are then created with the exact normalized resolved selected-worktree folder as their starting directory.
 
-**Create versus open:** Creating a workspace descriptor is a separate-instance flow. After Git validation and atomic descriptor publication, gabCode launches a new instance for that descriptor and leaves the current instance, project, title, and terminals untouched. Opening an existing workspace into the current instance is the distinct replacement flow; only that flow may confirm and stop the current instance's terminals before activation.
+**Open and create routing:** Open Workspace and Create Workspace activate the invoking window when it has no selected project and no terminal pair. When the invoking window is occupied, Windows launches a separate gabCode process/window and macOS opens a separate native project window. The occupied window's identity, title, focus, terminal sessions/PIDs, and descendants remain untouched. Cancellation or validation/launch failure creates no partial project window. Terminal cleanup remains a close/quit responsibility, not a project-entry action.
 
 ## Non-Goals
 
