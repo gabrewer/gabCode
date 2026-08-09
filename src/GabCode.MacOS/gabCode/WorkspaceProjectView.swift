@@ -25,6 +25,7 @@ struct WorkspaceProjectView: View {
     @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
     @Environment(\.openWindow) private var openWindow
     @State private var isPresentingPanel = false
+    @State private var windowNumber: Int?
 
     var body: some View {
         Group {
@@ -36,10 +37,15 @@ struct WorkspaceProjectView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 640)
-        .onReceive(NotificationCenter.default.publisher(for: .gabCodeOpenWorkspace)) { _ in
+        .background(WindowIdentityReader { number in
+            windowNumber = number
+        })
+        .onReceive(NotificationCenter.default.publisher(for: .gabCodeOpenWorkspace)) { notification in
+            guard handles(notification) else { return }
             chooseWorkspace()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .gabCodeCreateWorkspace)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .gabCodeCreateWorkspace)) { notification in
+            guard handles(notification) else { return }
             chooseProjectFolderAndCreateWorkspace()
         }
         .onAppear {
@@ -69,10 +75,10 @@ struct WorkspaceProjectView: View {
                 Text(recoveryDescription)
             }
             HStack(spacing: 12) {
-                Button("Open Workspace…") { openNewWindow(.open) }
+                Button("Open Workspace…") { route(.open) }
                     .keyboardShortcut("o", modifiers: .command)
                     .accessibilityIdentifier("open-workspace")
-                Button("Create Workspace from Project Folder…") { openNewWindow(.create) }
+                Button("Create Workspace from Project Folder…") { route(.create) }
                     .accessibilityIdentifier("create-workspace")
             }
             if case let .recovery(error) = controller.state {
@@ -99,9 +105,23 @@ struct WorkspaceProjectView: View {
         }
     }
 
-    private func openNewWindow(_ action: WorkspaceWindowIntentStore.Action) {
-        WorkspaceWindowIntentStore.shared.enqueue(action)
-        openWindow(id: "main")
+    private func route(_ action: WorkspaceWindowIntentStore.Action) {
+        if WorkspaceWindowRouting.opensSeparateWindow(hasActiveProject: controller.activeDescriptor != nil) {
+            WorkspaceWindowIntentStore.shared.enqueue(action)
+            openWindow(id: "main")
+        } else {
+            switch action {
+            case .open: chooseWorkspace()
+            case .create: chooseProjectFolderAndCreateWorkspace()
+            }
+        }
+    }
+
+    private func handles(_ notification: Notification) -> Bool {
+        guard let target = notification.userInfo?["windowNumber"] as? Int else {
+            return true
+        }
+        return target == windowNumber
     }
 
     private func chooseWorkspace() {
@@ -286,6 +306,28 @@ struct WorkspaceProjectView: View {
         }
         panel.beginSheetModal(for: window) { response in
             completion(response == .OK ? panel.url : nil)
+        }
+    }
+}
+
+@MainActor
+private struct WindowIdentityReader: NSViewRepresentable {
+    let onWindowNumber: (Int) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            if let number = view.window?.windowNumber {
+                onWindowNumber(number)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard let number = view.window?.windowNumber else { return }
+        DispatchQueue.main.async {
+            onWindowNumber(number)
         }
     }
 }

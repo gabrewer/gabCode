@@ -34,6 +34,11 @@ final class WindowWorkspaceRegistryTests: XCTestCase {
         XCTAssertEqual(registry.activeTerminalCount, 2)
     }
 
+    func testWorkspaceActionsStayInCurrentWindowOnlyWhenItIsEmpty() {
+        XCTAssertFalse(WorkspaceWindowRouting.opensSeparateWindow(hasActiveProject: false))
+        XCTAssertTrue(WorkspaceWindowRouting.opensSeparateWindow(hasActiveProject: true))
+    }
+
     private func presentation() throws -> TerminalWorkspacePresentation {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
