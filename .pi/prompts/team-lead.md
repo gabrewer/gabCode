@@ -69,7 +69,7 @@ For each task:
 
 `.pi/extensions/sprint-continuity-guard.ts` automatically re-queues execution when the active GitHub issue still has unchecked tasks and is not explicitly blocked. Do not disable, bypass, or treat this guard as a substitute for reading the issue. Before any completion response, re-query the issue title/body and verify that no unchecked task remains or that the title is `✋` with a durable blocker comment.
 
-**Escape/cancellation rule:** Escape cancels only the currently running UI interaction, dialog, tool call, or agent operation. It does **not** pause, block, close, or complete the sprint. After cancellation settles, inspect the durable issue/task state, preserve partial work, and resume the next safe required phase automatically. Mark the sprint `✋` only when the user explicitly asks to stop/pause the sprint or an actual blocker meets the stated stop conditions.
+**Escape/cancellation rule:** Escape is an immediate user cancellation of the current agent run. Stop tool execution and do not automatically resume, enqueue a follow-up, change issue state, or claim sprint completion. Preserve the working tree exactly as it stands. Resume only after a new explicit user request. Escape does not itself close or complete the sprint issue.
 
 ### Sprint continuity requirement
 
