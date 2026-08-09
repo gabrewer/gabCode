@@ -65,13 +65,11 @@ struct TerminalWorkspaceCommands: Commands {
 
         CommandGroup(after: .newItem) {
             Button("Open Workspace…") {
-                WorkspaceWindowIntentStore.shared.enqueue(.open)
-                openWindow(id: "main")
+                route(.open)
             }
             .keyboardShortcut("o", modifiers: .command)
             Button("Create Workspace from Project Folder…") {
-                WorkspaceWindowIntentStore.shared.enqueue(.create)
-                openWindow(id: "main")
+                route(.create)
             }
         }
 
@@ -87,5 +85,29 @@ struct TerminalWorkspaceCommands: Commands {
                 .keyboardShortcut("2", modifiers: .command)
                 .disabled(!router.isAvailable)
         }
+    }
+
+    private func route(_ action: WorkspaceWindowIntentStore.Action) {
+        guard WorkspaceWindowRouting.opensSeparateWindow(
+            hasActiveProject: WindowWorkspaceRegistry.shared.currentFocusedPresentation() != nil
+        ) else {
+            guard let windowNumber = NSApp.keyWindow?.windowNumber else {
+                WorkspaceWindowIntentStore.shared.enqueue(action)
+                openWindow(id: "main")
+                return
+            }
+            let notification: Notification.Name = action == .open
+                ? .gabCodeOpenWorkspace
+                : .gabCodeCreateWorkspace
+            NotificationCenter.default.post(
+                name: notification,
+                object: nil,
+                userInfo: ["windowNumber": windowNumber]
+            )
+            return
+        }
+
+        WorkspaceWindowIntentStore.shared.enqueue(action)
+        openWindow(id: "main")
     }
 }

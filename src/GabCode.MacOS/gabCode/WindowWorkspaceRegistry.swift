@@ -1,6 +1,12 @@
 import AppKit
 import Combine
 
+enum WorkspaceWindowRouting {
+    static func opensSeparateWindow(hasActiveProject: Bool) -> Bool {
+        hasActiveProject
+    }
+}
+
 @MainActor
 final class WindowWorkspaceRegistry {
     static let shared = WindowWorkspaceRegistry()
