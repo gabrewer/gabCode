@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private ProjectContext? project;
     private readonly WorkspaceProjectLoader projectLoader = new();
     private readonly WorkspaceProjectCreator projectCreator = new();
+    private readonly GitWorktreeDiscovery worktreeDiscovery = new();
     private readonly TerminalProfileResolver profileResolver;
     private readonly ITerminalExitConfirmationService exitConfirmation;
     private RetainedTerminalLayout? terminalLayout;
@@ -155,27 +156,20 @@ public partial class MainWindow : Window
         var projectFolderDialog = new OpenFolderDialog { Title = "Select Project Folder" };
         if (projectFolderDialog.ShowDialog(this) != true) return;
         var workspaceName = WorkspaceCreationDefaults.GetWorkspaceName(projectFolderDialog.FolderName);
-        var gitFolder = projectFolderDialog.FolderName;
+        var projectRoot = projectFolderDialog.FolderName;
+        IReadOnlyDictionary<string, string> branches;
         try
         {
-            _ = await projectCreator.ValidateGitFolderAsync(gitFolder);
+            branches = await worktreeDiscovery.DiscoverAsync(projectRoot);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            var gitFolderDialog = new OpenFolderDialog { Title = $"Select Git Folder for {workspaceName}" };
-            if (gitFolderDialog.ShowDialog(this) != true) return;
-            try
-            {
-                _ = await projectCreator.ValidateGitFolderAsync(gitFolderDialog.FolderName);
-                gitFolder = gitFolderDialog.FolderName;
-            }
-            catch (Exception exception)
-            {
-                _ = MessageBox.Show(this, $"The Git folder associated with this workspace must be inside an existing Git repository. {exception.Message}", "Git folder required", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
+            WorktreeFailureMessage.Text = exception.Message;
+            WorktreeFailureSurface.Visibility = Visibility.Visible;
+            return;
         }
-
+        var branchDialog = new WorkspaceBranchDialog(branches.Keys.Order().ToArray()) { Owner = this };
+        if (branchDialog.ShowDialog() != true) return;
         var nameDialog = new WorkspaceNameDialog(workspaceName) { Owner = this };
         if (nameDialog.ShowDialog() != true) return;
         var saveDialog = new SaveFileDialog
@@ -188,7 +182,7 @@ public partial class MainWindow : Window
         if (saveDialog.ShowDialog(this) != true) return;
         try
         {
-            _ = await projectCreator.CreateAsync(saveDialog.FileName, nameDialog.WorkspaceName, gitFolder);
+            _ = await projectCreator.CreateAsync(saveDialog.FileName, nameDialog.WorkspaceName, projectRoot, branchDialog.Branch);
         }
         catch (Exception exception)
         {

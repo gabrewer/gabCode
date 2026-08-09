@@ -6,6 +6,7 @@ internal sealed class WorkspaceProjectCreator
     private readonly WorkspaceFileStore store;
     private readonly IGabCodeInstanceLauncher instanceLauncher;
     private readonly LastWorkspacePreference preference;
+    private readonly GitWorktreeDiscovery worktreeDiscovery = new();
 
     internal WorkspaceProjectCreator(
         GitRepositoryValidator? validator = null,
@@ -22,13 +23,13 @@ internal sealed class WorkspaceProjectCreator
     internal Task<string> ValidateGitFolderAsync(string folder, CancellationToken cancellationToken = default) =>
         validator.FindRepositoryAsync(folder, cancellationToken);
 
-    internal async Task<ProjectContext> CreateAsync(string workspacePath, string workspaceName, string folder, CancellationToken cancellationToken = default)
+    internal async Task<ProjectContext> CreateAsync(string workspacePath, string workspaceName, string projectRoot, string branch, CancellationToken cancellationToken = default)
     {
-        _ = await ValidateGitFolderAsync(folder, cancellationToken);
-        var document = new WorkspaceDocument(1, workspaceName, new WorkspaceFolder(folder));
-        await store.SaveNewAsync(workspacePath, document, folder, cancellationToken);
+        _ = await worktreeDiscovery.ResolveAsync(projectRoot, branch, cancellationToken);
+        var document = new WorkspaceDocument(1, workspaceName, new WorkspaceProject(projectRoot, branch));
+        await store.SaveNewAsync(workspacePath, document, projectRoot, cancellationToken);
         await preference.WriteAsync(workspacePath, cancellationToken);
         instanceLauncher.Launch(workspacePath);
-        return new ProjectContext(workspaceName, folder);
+        return new ProjectContext(workspaceName, projectRoot);
     }
 }
