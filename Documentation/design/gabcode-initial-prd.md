@@ -42,8 +42,9 @@ project/
     └── wt-feature-two/
 ```
 
-- Discover registered worktrees through `git worktree list --porcelain`; Git is authoritative for branch-to-worktree resolution.
-- Let the user select the branch/worktree to activate; `main` is an ordinary branch name, not a special case.
+- Discover the repository by searching the selected project root and supported descendants for exactly one `.git` repository, then discover its registered worktrees through `git worktree list --porcelain`; Git is authoritative for branch-to-worktree resolution.
+- The repository's primary checkout is itself a worktree even when the project does not use additional worktrees. Only branches currently represented by registered worktrees are selectable in v1; ordinary local branches without worktrees are not silently treated as folders.
+- Let the user select the branch/worktree to activate. List every branch returned by Git's worktree data, and default the picker to `main` when that exact branch is present; `main` otherwise has no special behavior.
 - Present worktrees as the primary sections in the application sidebar.
 - Allow the sidebar to move between the left and right sides.
 - Show factual status such as branch, clean or dirty state, ahead or behind state, last commit, changed-file count, and running terminals.
@@ -54,7 +55,7 @@ project/
 
 - Create or open a `*.gabcode-workspace` descriptor at the project root, including when that root is not itself a Git repository.
 - A workspace records the project-root path and the user-selected branch/worktree identity; it does not infer identity from a folder named `main`.
-- Resolve the selected branch to its current Git worktree using read-only Git queries before starting terminals.
+- Resolve the selected branch to its current Git worktree using read-only Git queries before starting terminals. A normal repository checkout is a valid primary worktree; additional worktrees appear only when registered with Git.
 - If the project root, repository discovery, or selected branch cannot be resolved, show actionable recovery and start no terminals.
 - Keep the descriptor independent of terminal state, output, Git status, and local preferences.
 - Opening or creating a workspace launches a separate native project window; it never stops or replaces another window's project or terminals. Existing terminal cleanup remains authoritative for close and quit.

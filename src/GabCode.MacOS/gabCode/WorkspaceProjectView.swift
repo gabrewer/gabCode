@@ -245,6 +245,9 @@ struct WorkspaceProjectView: View {
         alert.informativeText = "Select the worktree to use for this workspace."
         let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
         popup.addItems(withTitles: branches)
+        if branches.contains("main") {
+            popup.selectItem(withTitle: "main")
+        }
         popup.setAccessibilityLabel("Workspace branch")
         alert.accessoryView = popup
         alert.addButton(withTitle: "Continue")

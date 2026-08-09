@@ -2,74 +2,74 @@
   "prompts": {
     "pm-agent": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-5.6-luna",
       "thinking": "high"
     },
     "team-lead": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "build-preview-dmg": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "build-preview-msi": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "release-preview": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     }
   },
   "skills": {
     "product-designer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-5.6-luna",
       "thinking": "high"
     },
     "pm": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-5.6-luna",
       "thinking": "high"
     },
     "domain-modeler": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "api-developer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "test-writer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "backend-builder": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "frontend-builder": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "destroyer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "high"
     },
     "review-agent": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "high"
     },
     "git-committer": {
@@ -94,22 +94,22 @@
     },
     "gabcode-protocol-contracts": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "gabcode-windows-desktop": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "gabcode-macos-desktop": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     },
     "gabcode-native-testing": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-luna",
       "thinking": "medium"
     }
   }
