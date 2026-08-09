@@ -20,7 +20,7 @@ public sealed class WorkspaceProjectCreatorTests
             var launcher = new RecordingLauncher();
             var creator = new WorkspaceProjectCreator(new GitRepositoryValidator(), new WorkspaceFileStore(), launcher);
 
-            var project = await creator.CreateAsync(descriptor, "Demo", repository);
+            var project = await creator.CreateAsync(descriptor, "Demo", repository, "main");
 
             Assert.Equal(repository, project.ProjectFolder);
             Assert.Single(launcher.Paths);
@@ -28,6 +28,7 @@ public sealed class WorkspaceProjectCreatorTests
             Assert.True(File.Exists(descriptor));
             using var json = JsonDocument.Parse(await File.ReadAllTextAsync(descriptor));
             Assert.Equal("Demo", json.RootElement.GetProperty("name").GetString());
+            Assert.Equal("main", json.RootElement.GetProperty("project").GetProperty("branch").GetString());
         }
         finally
         {

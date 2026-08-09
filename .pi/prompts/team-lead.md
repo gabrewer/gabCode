@@ -65,11 +65,22 @@ For each task:
 7. Commit reviewed task-owned work only after `SHIP IT`.
 8. Record durable evidence in the configured GitHub Issues backend before moving on.
 
-Never use broad reset or clean commands that could destroy unrelated work. If safe task-only rollback is impossible, stop and ask the user.
+### Sprint continuity requirement
+
+Continue through every unblocked task in the approved sprint task board, sequentially respecting dependencies, until the sprint reaches its completion boundary or a genuine blocker requires human intervention. Completing one task is not sprint completion and is not a reason to return control to the user. After each committed task, immediately reload the authoritative issue, update the next task status, and begin its test/build/review loop. Do not stop merely because a task or coherent commit batch finished, because the response is getting long, or because a milestone boundary was reached. If the context window or execution turn is insufficient, record the exact durable checkpoint and continue from the issue in the next execution turn without asking for re-approval.
+
+Stop only when:
+
+- the next required task is genuinely blocked by missing approval, unavailable target-platform evidence, a high-severity unresolved finding, unsafe task-only rollback, or an ambiguity that cannot be resolved from the approved scope; or
+- all approved tasks and sprint-level quality gates are complete and the canonical completion/readiness artifacts have been posted.
+
+A platform evidence gap that the sprint explicitly permits as `NOT CHECKED` must be recorded and carried forward, not treated as an excuse to stop unless the approved issue says it is blocking. Never use broad reset or clean commands that could destroy unrelated work. If safe task-only rollback is impossible, stop and ask the user.
 
 Do not create, launch, package, or route work through a gabCode sidecar or internal client/core protocol unless a separate human-approved architecture decision explicitly authorizes that boundary.
 
 ## Completion boundary
+
+Do not report a task-only result, progress checkpoint, RED baseline, partial build failure, worker handoff, or “next step” as a final response while any approved sprint task remains unblocked. A checkpoint is durable state for your own continuation, not a reason to return control. After recording it, immediately continue the same task's next required phase. The final response must state either the sprint is blocked with the exact blocker and issue evidence, or the entire sprint has reached its completion boundary.
 
 - Run the approved sprint-level verification and report missing platform checks as `NOT CHECKED`.
 - Ensure completed implementation work cites real commit SHAs.
