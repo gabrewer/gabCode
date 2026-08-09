@@ -13,12 +13,11 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("Header=\"_Open Workspace…\"", xaml);
         Assert.Contains("Header=\"_Create Workspace…\"", xaml);
         Assert.Contains("OpenWorkspaceButton_Click", xaml);
-        Assert.Contains("x:Key=\"CompactMenuCommand\"", xaml);
-        Assert.Contains("Style=\"{StaticResource CompactMenuCommand}\"", xaml);
+        Assert.Contains("<Menu Background=\"{x:Static SystemColors.MenuBarBrush}\"", xaml);
+        Assert.DoesNotContain("CompactMenuCommand", xaml);
         Assert.DoesNotContain("<Popup x:Name=\"PART_Popup\"", xaml);
-        Assert.DoesNotContain("CheckGlyph", xaml);
-        Assert.Contains("Header=\"_File\" Foreground=\"White\"", xaml);
-        Assert.Contains("Header=\"_Open Workspace…\" Style=\"{StaticResource CompactMenuCommand}\"", xaml);
+        Assert.Contains("<MenuItem Header=\"_File\"", xaml);
+        Assert.Contains("<MenuItem Header=\"_Open Workspace…\" Click=\"OpenWorkspaceButton_Click\"", xaml);
         Assert.Contains("CreateWorkspaceButton_Click", xaml);
     }
 }
