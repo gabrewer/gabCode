@@ -20,5 +20,12 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("<MenuItem x:Name=\"FileMenuItem\" Header=\"_File\" Background=\"#242424\" Foreground=\"White\" Loaded=\"FileMenuItem_Loaded\"", xaml);
         Assert.Contains("<MenuItem Header=\"_Open Workspace…\" Background=\"#242424\" Foreground=\"White\" Click=\"OpenWorkspaceButton_Click\"", xaml);
         Assert.Contains("CreateWorkspaceButton_Click", xaml);
+        Assert.Contains("Header=\"_View\"", xaml);
+        Assert.Contains("Move Sidebar _Right", xaml);
+        Assert.Contains("Move Sidebar _Left", xaml);
+        Assert.Contains("Refresh Worktrees", xaml);
+        Assert.Contains("InputGestureText=\"Ctrl+R\"", xaml);
+        Assert.Contains("WorktreeSidebar", xaml);
+        Assert.Contains("WorktreeList", xaml);
     }
 }

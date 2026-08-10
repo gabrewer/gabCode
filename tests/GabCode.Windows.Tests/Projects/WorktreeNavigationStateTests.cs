@@ -29,6 +29,22 @@ public sealed class WorktreeNavigationStateTests
     }
 
     [Fact]
+    public void Explicit_orphan_close_removes_only_the_orphan_entry()
+    {
+        var primary = new RegisteredWorktree("C:\\repo\\main", "trunk", true);
+        var feature = new RegisteredWorktree("C:\\repo\\wt\\feature", "feature/demo", false);
+        var state = new WorktreeNavigationState([primary, feature]);
+        state.MarkTerminalPairCreated(feature.Path);
+        state.Reconcile([primary]);
+        state.Reconcile([primary]);
+
+        state.RemoveOrphan("C:\\REPO\\WT\\FEATURE");
+
+        Assert.Empty(state.Orphaned);
+        Assert.Single(state.Entries);
+    }
+
+    [Fact]
     public void Orders_primary_then_available_folder_name_then_unavailable()
     {
         var entries = new WorktreeNavigationState([
