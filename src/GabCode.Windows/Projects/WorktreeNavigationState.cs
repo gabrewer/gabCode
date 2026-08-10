@@ -55,6 +55,11 @@ internal sealed class WorktreeNavigationState
         }
     }
 
+    internal void RemoveOrphan(string path)
+    {
+        orphaned.Remove(WorktreePath.Normalize(path));
+    }
+
     internal void Reconcile(IEnumerable<RegisteredWorktree> discovered)
     {
         var current = discovered

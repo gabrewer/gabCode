@@ -35,6 +35,11 @@
                         <MenuItem Header="_Open Workspace…" Background="#242424" Foreground="White" Click="OpenWorkspaceButton_Click" AutomationProperties.Name="Open workspace" />
                         <MenuItem Header="_Create Workspace…" Background="#242424" Foreground="White" Click="CreateWorkspaceButton_Click" AutomationProperties.Name="Create workspace" />
                     </MenuItem>
+                    <MenuItem Header="_View" Background="#242424" Foreground="White" AutomationProperties.Name="View">
+                        <MenuItem Header="Move Sidebar _Right" Click="MoveSidebarRight_Click" AutomationProperties.Name="Move sidebar right" />
+                        <MenuItem Header="Move Sidebar _Left" Click="MoveSidebarLeft_Click" AutomationProperties.Name="Move sidebar left" />
+                        <MenuItem Header="_Refresh Worktrees" InputGestureText="Ctrl+R" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" />
+                    </MenuItem>
                 </Menu>
                 <Grid Grid.Row="1">
                 <Grid.ColumnDefinitions>
@@ -50,14 +55,16 @@
         </Border>
 
         <Grid x:Name="TerminalWorkspace" Grid.Row="1" Visibility="Collapsed">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="2*" MinHeight="250" />
-                <RowDefinition Height="5" />
-                <RowDefinition Height="*" MinHeight="190" />
-            </Grid.RowDefinitions>
-            <Border Margin="12,12,12,3" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="3"><ContentControl x:Name="MainTerminalRegion" AutomationProperties.Name="Main terminal region" /></Border>
-            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#555555" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="Resize main and bottom terminal regions" />
-            <Border Grid.Row="2" Margin="12,3,12,12" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="3"><ContentControl x:Name="BottomTerminalRegion" AutomationProperties.Name="Bottom terminal region" /></Border>
+            <Grid.ColumnDefinitions><ColumnDefinition x:Name="SidebarColumn" Width="250" /><ColumnDefinition x:Name="TerminalColumn" Width="*" /></Grid.ColumnDefinitions>
+            <Border x:Name="WorktreeSidebar" Background="#202020" BorderBrush="#4A4A4A" BorderThickness="0,0,1,0" Padding="8" AutomationProperties.Name="Worktrees sidebar">
+                <DockPanel><StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8"><Button x:Name="RefreshWorktreesButton" Content="Refresh Worktrees" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" /><Button x:Name="CancelRefreshButton" Margin="8,0,0,0" Content="Cancel" Click="CancelRefresh_Click" Visibility="Collapsed" AutomationProperties.Name="Cancel worktree refresh" /></StackPanel><TextBlock x:Name="RefreshStatusText" DockPanel.Dock="Top" Foreground="#D0D0D0" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /><ListBox x:Name="WorktreeList" SelectionChanged="WorktreeList_SelectionChanged" AutomationProperties.Name="Worktrees and orphaned terminals" /></DockPanel>
+            </Border>
+            <Grid x:Name="TerminalGrid" Grid.Column="1">
+                <Grid.RowDefinitions><RowDefinition Height="2*" MinHeight="250" /><RowDefinition Height="5" /><RowDefinition Height="*" MinHeight="190" /></Grid.RowDefinitions>
+                <Border Margin="12,12,12,3" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="3"><ContentControl x:Name="MainTerminalRegion" AutomationProperties.Name="Main terminal region" /></Border>
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#555555" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="Resize main and bottom terminal regions" />
+                <Border Grid.Row="2" Margin="12,3,12,12" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="3"><ContentControl x:Name="BottomTerminalRegion" AutomationProperties.Name="Bottom terminal region" /></Border>
+            </Grid>
         </Grid>
 
         <Border x:Name="EmptyProjectSurface" Grid.Row="1" Margin="24" Padding="28" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="680" Background="#242424" BorderBrush="#5A5A5A" BorderThickness="1">

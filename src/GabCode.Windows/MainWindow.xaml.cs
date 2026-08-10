@@ -30,6 +30,10 @@ public partial class MainWindow : Window
     private bool closeInProgress;
     private bool allowClose;
     private CancellationTokenSource? discoveryCancellation;
+    private readonly SidebarSidePreference sidebarPreference = new();
+    private WorktreeNavigationState? worktreeState;
+    private WorktreeRefreshCoordinator? refreshCoordinator;
+    private bool applyingWorktreeSelection;
 
     public MainWindow()
         : this(null, TerminalProfileResolver.CreateDefault(), new TerminalExitConfirmationService(), isProjectInitialization: true)
@@ -104,6 +108,8 @@ public partial class MainWindow : Window
         TerminalWorkspace.Visibility = Visibility.Visible;
         SwapTerminalsButton.IsEnabled = true;
         CreateTerminalWorkspace();
+        ApplySidebarSide(sidebarPreference.Read());
+        _ = RefreshWorktreesAsync();
     }
 
     private void CreateTerminalWorkspace()
@@ -256,6 +262,98 @@ public partial class MainWindow : Window
     private void SwapTerminalsButton_Click(object sender, RoutedEventArgs e)
     {
         if (IsPiInMain) ShowCommandsInMain(); else ShowPiInMain();
+    }
+
+    private async void RefreshWorktrees_Click(object sender, RoutedEventArgs e) => await RefreshWorktreesAsync();
+
+    private async Task RefreshWorktreesAsync()
+    {
+        if (project is null || discoveryCancellation is not null) return;
+        discoveryCancellation = new CancellationTokenSource();
+        var generation = refreshCoordinator?.BeginRefresh() ?? 0;
+        RefreshWorktreesButton.IsEnabled = false;
+        CancelRefreshButton.Visibility = Visibility.Visible;
+        RefreshStatusText.Text = "Refreshing worktrees…";
+        try
+        {
+            var entries = await worktreeDiscovery.DiscoverEntriesAsync(project.ProjectFolder, cancellationToken: discoveryCancellation.Token);
+            var registered = entries.Where(entry => entry.Branch is not null).Select(entry => new RegisteredWorktree(entry.Path, entry.Branch!, entry.IsPrimary));
+            worktreeState ??= new WorktreeNavigationState(registered);
+            refreshCoordinator ??= new WorktreeRefreshCoordinator(worktreeState);
+            if (generation == 0) generation = refreshCoordinator.BeginRefresh();
+            if (!refreshCoordinator.TryReconcile(generation, registered)) return;
+            PopulateWorktrees();
+            RefreshStatusText.Text = string.Empty;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            RefreshStatusText.Text = $"Could not refresh worktrees: {exception.Message}";
+        }
+        finally { discoveryCancellation.Dispose(); discoveryCancellation = null; RefreshWorktreesButton.IsEnabled = true; CancelRefreshButton.Visibility = Visibility.Collapsed; }
+    }
+
+    private void CancelRefresh_Click(object sender, RoutedEventArgs e) => discoveryCancellation?.Cancel();
+
+    private void PopulateWorktrees()
+    {
+        if (worktreeState is null) return;
+        applyingWorktreeSelection = true;
+        WorktreeList.Items.Clear();
+        foreach (var entry in worktreeState.Entries)
+        {
+            var running = terminalRegistry?.Pairs.Any(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path) && pair.ActiveTerminalCount > 0) is true ? " • terminals running" : string.Empty;
+            var item = new ListBoxItem { Tag = entry, Content = new StackPanel { Children = { new TextBlock { Text = entry.FolderName, FontWeight = FontWeights.SemiBold }, new TextBlock { Text = entry.Branch + (entry.Availability == WorktreeAvailability.Unavailable ? " — unavailable" : running), Foreground = System.Windows.Media.Brushes.LightGray } } } };
+            AutomationProperties.SetName(item, $"{entry.FolderName}, {entry.Branch}, {entry.Availability}");
+            WorktreeList.Items.Add(item);
+            if (WorktreePath.Comparer.Equals(entry.Path, project?.ProjectFolder)) WorktreeList.SelectedItem = item;
+        }
+        if (worktreeState.Orphaned.Count != 0)
+        {
+            WorktreeList.Items.Add(new TextBlock { Text = "Orphaned terminals", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 4) });
+            foreach (var entry in worktreeState.Orphaned)
+            {
+                var close = new Button { Content = "Close Terminals", Tag = entry, Margin = new Thickness(4, 0, 0, 0) };
+                close.Click += CloseOrphanTerminals_Click;
+                var panel = new StackPanel(); panel.Children.Add(new TextBlock { Text = entry.FolderName, FontWeight = FontWeights.SemiBold });
+                panel.Children.Add(new TextBlock { Text = $"{entry.Branch} — unavailable", Foreground = System.Windows.Media.Brushes.LightGray }); panel.Children.Add(close);
+                var item = new ListBoxItem { Tag = entry, Content = panel };
+                AutomationProperties.SetName(item, $"Orphaned terminals: {entry.FolderName}, {entry.Branch}, unavailable"); WorktreeList.Items.Add(item);
+            }
+        }
+        applyingWorktreeSelection = false;
+    }
+
+    private async void CloseOrphanTerminals_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: WorktreeNavigationEntry entry } || terminalRegistry is null) return;
+        var activeCount = terminalRegistry.GetActiveTerminalCount(entry.Path);
+        if (activeCount != 0 && exitConfirmation.Confirm(this, activeCount) == TerminalExitDecision.Cancel) return;
+        try { await terminalRegistry.CloseAndRemoveAsync(entry.Path); worktreeState?.RemoveOrphan(entry.Path); PopulateWorktrees(); }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not close orphaned terminals: {exception.Message}"; }
+    }
+
+    private void WorktreeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (applyingWorktreeSelection || WorktreeList.SelectedItem is not ListBoxItem { Tag: WorktreeNavigationEntry entry }) return;
+        if (entry.Availability != WorktreeAvailability.Available)
+        {
+            var pair = terminalRegistry?.GetOrCreate(entry.Path);
+            if (pair is not null) { pair.Attach(MainTerminalRegion, BottomTerminalRegion); piTerminal = pair.First; commandsTerminal = pair.Second; terminalLayout = pair.Layout; }
+            RefreshStatusText.Text = "This worktree is unavailable; worktree-scoped Git actions are unavailable.";
+            return;
+        }
+        project = new ProjectContext(project!.WorkspaceName, entry.Path);
+        Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
+        CreateTerminalWorkspace();
+    }
+
+    private void MoveSidebarRight_Click(object sender, RoutedEventArgs e) => ApplySidebarSide(SidebarSide.Right);
+    private void MoveSidebarLeft_Click(object sender, RoutedEventArgs e) => ApplySidebarSide(SidebarSide.Left);
+    private void ApplySidebarSide(SidebarSide side)
+    {
+        if (side == SidebarSide.Right) { Grid.SetColumn(WorktreeSidebar, 1); Grid.SetColumn(TerminalGrid, 0); SidebarColumn.Width = new GridLength(1, GridUnitType.Star); TerminalColumn.Width = new GridLength(250); }
+        else { Grid.SetColumn(WorktreeSidebar, 0); Grid.SetColumn(TerminalGrid, 1); SidebarColumn.Width = new GridLength(250); TerminalColumn.Width = new GridLength(1, GridUnitType.Star); }
+        sidebarPreference.Write(side);
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
