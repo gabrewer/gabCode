@@ -1,20 +1,40 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 
 namespace GabCode.Windows.Projects;
 
 internal sealed record GitDiscoveryProgress(string Phase, int FoldersScanned, int RepositoriesFound);
 
+internal sealed record GitWorktreeEntry(string Path, string? Branch, bool IsPrimary);
+
 internal sealed class GitWorktreeDiscovery
 {
     private const int MaximumCandidates = 2_000;
+    private const int MaximumGitOutputCharacters = 64 * 1024;
+    private readonly string executablePath;
+    private readonly TimeSpan timeout;
+
+    internal GitWorktreeDiscovery(string executablePath = "git", TimeSpan? timeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        this.executablePath = executablePath;
+        this.timeout = timeout ?? TimeSpan.FromSeconds(10);
+    }
 
     internal async Task<IReadOnlyDictionary<string, string>> DiscoverAsync(string projectRoot, IProgress<GitDiscoveryProgress>? progress = null, CancellationToken cancellationToken = default)
     {
+        var entries = await DiscoverEntriesAsync(projectRoot, progress, cancellationToken);
+        return entries.Where(entry => entry.Branch is not null)
+            .ToDictionary(entry => entry.Branch!, entry => entry.Path, StringComparer.Ordinal);
+    }
+
+    internal async Task<IReadOnlyList<GitWorktreeEntry>> DiscoverEntriesAsync(string projectRoot, IProgress<GitDiscoveryProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         var root = Path.GetFullPath(projectRoot);
-        var repositories = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        var repositories = new Dictionary<string, IReadOnlyList<GitWorktreeEntry>>(StringComparer.OrdinalIgnoreCase);
         var coveredWorktrees = new List<string>();
         var foldersScanned = 0;
         var pending = new Stack<string>();
@@ -29,12 +49,12 @@ internal sealed class GitWorktreeDiscovery
             {
                 var output = await RunAsync(candidate, cancellationToken);
                 if (output is null) continue;
-                var branches = Parse(output);
-                if (branches.Count == 0) continue;
-                var identity = branches.Values.First();
-                if (repositories.TryAdd(identity, branches))
+                var entries = ParseEntries(output);
+                if (entries.Count == 0) continue;
+                var identity = entries[0].Path;
+                if (repositories.TryAdd(identity, entries))
                 {
-                    coveredWorktrees.AddRange(branches.Values.Distinct(StringComparer.OrdinalIgnoreCase));
+                    coveredWorktrees.AddRange(entries.Select(entry => entry.Path));
                     progress?.Report(new GitDiscoveryProgress("Resolving Git worktrees", foldersScanned, repositories.Count));
                 }
                 continue;
@@ -48,30 +68,106 @@ internal sealed class GitWorktreeDiscovery
 
     internal async Task<string> ResolveAsync(string projectRoot, string branch, IProgress<GitDiscoveryProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        var branches = await DiscoverAsync(projectRoot, progress, cancellationToken);
-        if (!branches.TryGetValue(branch, out var worktree)) throw new InvalidOperationException($"No registered worktree exists for branch '{branch}'.");
-        return worktree;
+        var entries = await DiscoverEntriesAsync(projectRoot, progress, cancellationToken);
+        var matches = entries.Where(entry => string.Equals(entry.Branch, branch, StringComparison.Ordinal)).ToArray();
+        if (matches.Length != 1) throw new InvalidOperationException(matches.Length == 0 ? $"No registered worktree exists for branch '{branch}'." : $"Multiple registered worktrees exist for branch '{branch}'.");
+        return matches[0].Path;
     }
 
-    private static bool HasGitMarker(string directory) => Directory.Exists(Path.Combine(directory, ".git")) || File.Exists(Path.Combine(directory, ".git"));
-
-    private static IReadOnlyDictionary<string, string> Parse(string output)
+    internal static IReadOnlyList<GitWorktreeEntry> ParseEntries(string output)
     {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        string? worktree = null;
-        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var result = new List<GitWorktreeEntry>();
+        var worktreeOrdinal = 0;
+        foreach (var block in output.Split(["\n\n", "\r\n\r\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (line.StartsWith("worktree ", StringComparison.Ordinal)) worktree = Path.GetFullPath(line[9..]);
-            else if (worktree is not null && line.StartsWith("branch refs/heads/", StringComparison.Ordinal)) result[line[18..]] = worktree;
+            string? worktree = null;
+            string? branch = null;
+            foreach (var line in block.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (line.StartsWith("worktree ", StringComparison.Ordinal)) worktree = WorktreePath.Normalize(line[9..]);
+                else if (line.StartsWith("branch refs/heads/", StringComparison.Ordinal)) branch = line[18..];
+            }
+            if (worktree is not null && branch is not null)
+            {
+                result.Add(new GitWorktreeEntry(worktree, branch, worktreeOrdinal == 0));
+            }
+            worktreeOrdinal++;
         }
         return result;
     }
 
-    private static async Task<string?> RunAsync(string directory, CancellationToken token)
+    private static bool HasGitMarker(string directory) => Directory.Exists(Path.Combine(directory, ".git")) || File.Exists(Path.Combine(directory, ".git"));
+
+    private async Task<string?> RunAsync(string directory, CancellationToken cancellationToken)
     {
-        var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true };
+        using var timeoutCancellation = new CancellationTokenSource(timeout);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCancellation.Token);
+        var info = new ProcessStartInfo(executablePath)
+        {
+            WorkingDirectory = directory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            CreateNoWindow = true,
+        };
         info.ArgumentList.Add("worktree"); info.ArgumentList.Add("list"); info.ArgumentList.Add("--porcelain");
-        try { using var process = Process.Start(info) ?? throw new InvalidOperationException(); var output = await process.StandardOutput.ReadToEndAsync(token); await process.WaitForExitAsync(token); return process.ExitCode == 0 ? output : null; }
-        catch (Win32Exception) { throw new InvalidOperationException("Git could not be started."); }
+        try
+        {
+            using var process = Process.Start(info) ?? throw new InvalidOperationException("Git could not be started.");
+            var outputTask = ReadBoundedAsync(process.StandardOutput);
+            var errorTask = ReadBoundedAsync(process.StandardError);
+            try
+            {
+                await process.WaitForExitAsync(cancellation.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCancellation.IsCancellationRequested)
+            {
+                TryStop(process);
+                await Task.WhenAll(outputTask, errorTask);
+                throw new TimeoutException("Git worktree discovery timed out.");
+            }
+            catch
+            {
+                TryStop(process);
+                await Task.WhenAll(outputTask, errorTask);
+                throw;
+            }
+
+            var output = await outputTask;
+            _ = await errorTask;
+            return process.ExitCode == 0 ? output : null;
+        }
+        catch (Win32Exception)
+        {
+            throw new InvalidOperationException("Git could not be started.");
+        }
+    }
+
+    private static async Task<string> ReadBoundedAsync(StreamReader reader)
+    {
+        var buffer = new char[4096];
+        var output = new StringBuilder();
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory());
+            if (read == 0) return output.ToString();
+            if (output.Length < MaximumGitOutputCharacters)
+            {
+                output.Append(buffer, 0, Math.Min(read, MaximumGitOutputCharacters - output.Length));
+            }
+        }
+    }
+
+    private static void TryStop(Process process)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 }
