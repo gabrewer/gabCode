@@ -302,7 +302,7 @@ public partial class MainWindow : Window
         foreach (var entry in worktreeState.Entries)
         {
             var running = terminalRegistry?.Pairs.Any(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path) && pair.ActiveTerminalCount > 0) is true ? " • terminals running" : string.Empty;
-            var item = new ListBoxItem { Tag = entry, Content = new StackPanel { Children = { new TextBlock { Text = entry.FolderName, FontWeight = FontWeights.SemiBold }, new TextBlock { Text = entry.Branch + (entry.Availability == WorktreeAvailability.Unavailable ? " — unavailable" : running), Foreground = System.Windows.Media.Brushes.LightGray } } } };
+            var item = new ListBoxItem { Tag = entry, Content = new StackPanel { Children = { new TextBlock { Text = entry.FolderName, FontWeight = FontWeights.SemiBold }, new TextBlock { Text = entry.Branch + (entry.Availability == WorktreeAvailability.Unavailable ? " — unavailable" : running), Foreground = System.Windows.Media.Brushes.White } } } };
             AutomationProperties.SetName(item, $"{entry.FolderName}, {entry.Branch}, {entry.Availability}");
             WorktreeList.Items.Add(item);
             if (WorktreePath.Comparer.Equals(entry.Path, project?.ProjectFolder)) WorktreeList.SelectedItem = item;
@@ -315,7 +315,7 @@ public partial class MainWindow : Window
                 var close = new Button { Content = "Close Terminals", Tag = entry, Margin = new Thickness(4, 0, 0, 0) };
                 close.Click += CloseOrphanTerminals_Click;
                 var panel = new StackPanel(); panel.Children.Add(new TextBlock { Text = entry.FolderName, FontWeight = FontWeights.SemiBold });
-                panel.Children.Add(new TextBlock { Text = $"{entry.Branch} — unavailable", Foreground = System.Windows.Media.Brushes.LightGray }); panel.Children.Add(close);
+                panel.Children.Add(new TextBlock { Text = $"{entry.Branch} — unavailable", Foreground = System.Windows.Media.Brushes.White }); panel.Children.Add(close);
                 var item = new ListBoxItem { Tag = entry, Content = panel };
                 AutomationProperties.SetName(item, $"Orphaned terminals: {entry.FolderName}, {entry.Branch}, unavailable"); WorktreeList.Items.Add(item);
             }
