@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private readonly TerminalProfileResolver profileResolver;
     private readonly ITerminalExitConfirmationService exitConfirmation;
     private RetainedTerminalLayout? terminalLayout;
+    private WorktreeTerminalRegistry? terminalRegistry;
     private TerminalSessionView? piTerminal;
     private TerminalSessionView? commandsTerminal;
     private bool closeInProgress;
@@ -77,7 +78,7 @@ public partial class MainWindow : Window
     internal TerminalSessionView? CommandsTerminal => commandsTerminal;
     internal string? ProjectFolder => project?.ProjectFolder;
     internal bool IsPiInMain => terminalLayout?.IsPiInMain is true;
-    internal int ActiveTerminalCount => (piTerminal?.IsActive is true ? 1 : 0) + (commandsTerminal?.IsActive is true ? 1 : 0);
+    internal int ActiveTerminalCount => terminalRegistry?.ActiveTerminalCount ?? 0;
 
     internal void ShowPiInMain()
     {
@@ -107,10 +108,11 @@ public partial class MainWindow : Window
 
     private void CreateTerminalWorkspace()
     {
-        var directory = project!.ProjectFolder;
-        piTerminal = new TerminalSessionView(TerminalSessionKind.First, directory, profileResolver.Resolve);
-        commandsTerminal = new TerminalSessionView(TerminalSessionKind.Second, directory, profileResolver.Resolve);
-        terminalLayout = new RetainedTerminalLayout(MainTerminalRegion, BottomTerminalRegion, piTerminal, commandsTerminal);
+        var pair = (terminalRegistry ??= new WorktreeTerminalRegistry(profileResolver.Resolve)).GetOrCreate(project!.ProjectFolder);
+        pair.Attach(MainTerminalRegion, BottomTerminalRegion);
+        piTerminal = pair.First;
+        commandsTerminal = pair.Second;
+        terminalLayout = pair.Layout;
         ShowPiInMain();
     }
 
@@ -242,7 +244,7 @@ public partial class MainWindow : Window
         if (piTerminal is not null || commandsTerminal is not null)
         {
             if (ActiveTerminalCount != 0 && exitConfirmation.Confirm(this, ActiveTerminalCount) == TerminalExitDecision.Cancel) return false;
-            await Task.WhenAll(piTerminal?.CloseAsync() ?? Task.CompletedTask, commandsTerminal?.CloseAsync() ?? Task.CompletedTask);
+            await (terminalRegistry?.CloseAllAsync() ?? Task.CompletedTask);
             piTerminal = null;
             commandsTerminal = null;
             terminalLayout = null;
@@ -279,7 +281,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            await Task.WhenAll(piTerminal?.CloseAsync() ?? Task.CompletedTask, commandsTerminal?.CloseAsync() ?? Task.CompletedTask);
+            await (terminalRegistry?.CloseAllAsync() ?? Task.CompletedTask);
             allowClose = true;
             Close();
         }
