@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Approved for Project Foundation; later milestones remain proposed |
+| Status | Project Foundation implemented; project creation deferred; later milestones remain proposed |
 | Date | 2026-08-06 |
 | Related baseline | `Documentation/design/gabcode-initial-prd.md` |
 
@@ -20,7 +20,7 @@ The initial audience is an individual developer using Git repositories, VS Code,
 
 ## Core Features
 
-1. **Workspace-backed project entry** — A gabCode project is represented by a user-chosen `*.gabcode-workspace` file containing a required human-readable workspace name, one project-root reference, and one selected branch. The project root may be relative to the workspace file or absolute and need not itself be a Git repository; read-only Git worktree discovery beneath it resolves the selected branch to an accessible worktree. Creating new folders, repositories, or running `git init` remains a later increment. Open/Create reuses an empty invoking window; if it is already bound to a project, gabCode opens the new project in a separate native window/instance without stopping or replacing the occupied window's terminals.
+1. **Workspace-backed project entry** — A gabCode project is represented by a user-chosen `*.gabcode-workspace` file containing a required human-readable workspace name, one project-root reference, and one selected branch. The project root may be relative to the workspace file or absolute and need not itself be a Git repository; read-only Git worktree discovery beneath it resolves the selected branch to an accessible worktree. **Create Workspace** remains the non-mutating descriptor flow for an existing registered Git worktree set. Creating project folders, choosing a repository layout, and running `git init` are deferred so the developer can establish any Git/worktree structure before creating the workspace descriptor. Open/Create reuses an empty invoking window; if it is already bound to a project, gabCode opens the new project in a separate native window/instance without stopping or replacing the occupied window's terminals.
    *Must-have*
 
 2. **Direct return to the active project** — gabCode opens directly to the last project. Project selection remains available through application navigation rather than requiring a project-library home screen.
@@ -75,7 +75,7 @@ This language-neutral artifact is shared requirements only. Windows and macOS ea
 - `project.path` is the project root. It may be relative to the workspace file's directory or native-absolute. Runtime behavior resolves it to an absolute accessible directory without rewriting a manually opened relative value. Creation writes a relative path when representable on the same filesystem root, otherwise an absolute path.
 - `project.branch` is the selected branch/worktree identity. It is not inferred from a folder name; exact `main` is a default selection only when a registered worktree reports it, not a reserved branch.
 - Git discovery starts at the resolved project root and directly invokes installed Git read-only. It discovers exactly one Git repository/worktree set beneath the root and resolves `project.branch` only through registered `git worktree list --porcelain` entries, including the normal repository checkout. Branch refs without registered worktrees are not selectable. The project root itself may be non-Git.
-- Creation first selects a project root, then resolves the associated repository/worktree set and selected branch before it asks for the workspace name and descriptor location. It never runs `git init` or creates a repository in this increment.
+- **Create Workspace** first selects a project root, then resolves the associated repository/worktree set and selected branch before it asks for the workspace name and descriptor location. It never runs `git init`, creates a project folder, or chooses a repository/worktree layout.
 - Malformed JSON, missing/unknown properties, wrong value types, empty name/path/branch, unsupported versions, inaccessible/non-directory project roots, missing/unusable Git, zero/multiple repositories beneath the root, and missing/unregistered branch worktrees fail without starting a terminal.
 - Terminal state/output, Git status, PR data, and local preferences are not workspace-file fields. The user may keep the file local or commit/share it; gabCode does not edit `.gitignore`.
 - Existing folder-only descriptors are not compatible with this v1 contract; there is no automatic migration or silent reinterpretation. They fail as unsupported/malformed until a later explicit migration decision.
@@ -85,9 +85,17 @@ On successful activation, the native and accessible title is `<workspace name> �
 
 **Open and create routing:** Open Workspace and Create Workspace activate the invoking window when it has no selected project and no terminal pair. When the invoking window is occupied, Windows launches a separate gabCode process/window and macOS opens a separate native project window. The occupied window's identity, title, focus, terminal sessions/PIDs, and descendants remain untouched. Cancellation or validation/launch failure creates no partial project window. Terminal cleanup remains a close/quit responsibility, not a project-entry action.
 
+## Deferred Project Creation
+
+Creating a new project folder or initializing a Git repository is intentionally deferred. Developers establish their preferred layout with Git or other tools, then use **Create Workspace** on a project root containing exactly one discoverable registered Git worktree set. This supports a repository directly at the project root, a container such as `project/main` plus `project/wt`, sibling layouts included beneath one selected root, and other Git-authoritative structures without gabCode imposing folder names or initialization policy. Bare-repository and other advanced layouts remain subject to the existing discovery contract and future evidence rather than receiving a dedicated creation flow now.
+
+Issues #61, #62, and #63 preserve the deferred proposal and may be reshaped only after a future product decision selects supported creation layouts and mutation/recovery behavior.
+
 ## Non-Goals
 
 - General non-Git project types.
+- Creating a new project folder or Git repository, running `git init`, selecting a repository/worktree layout, or initializing an existing folder.
+- Creating starter content, an initial commit, `.gitignore`, license, template, package, remote, GitHub repository, or editor session.
 - Multiple project folders or repositories in one workspace file initially.
 - A multi-project workspace in one application window.
 - Automatically changing the window's project, selected worktree, or terminal ownership because terminal focus or directory changes.
@@ -105,7 +113,7 @@ On successful activation, the native and accessible title is `<workspace name> �
 - Resolve relative project-folder references from the workspace file's location and accept absolute references. Preserve the path form chosen by the user and use resolved absolute paths at runtime.
 - The workspace file is the stable project identity. It may live anywhere and may be shared or kept local; gabCode does not require it to be stored in the repository.
 - The workspace name is stored explicitly rather than inferred from the workspace filename or project folder. Before worktree navigation exists, the title's selected context is the project folder's final path component. The full resolved path remains available in project chrome/help rather than being placed in the native title.
-- Invoke installed Git directly. `git worktree list --porcelain`, Git worktree add/remove operations, and filesystem observation are authoritative. Discovered worktree paths and terminal state do not belong in the workspace file; local application state records preferences such as the last-opened workspace.
+- Invoke installed Git directly. Read-only symbolic-branch resolution, `git worktree list --porcelain`, Git worktree add/remove operations, and filesystem observation are authoritative. Discovered worktree paths and terminal state do not belong in the workspace file; local application state records preferences such as the last-opened workspace.
 - Determine the selected folder's offset within its containing worktree at runtime so the same project folder can be addressed in sibling worktrees.
 - Model terminal/process lifetime by worktree. Switching UI context must not terminate a terminal; terminal navigation must not redirect gabCode actions; removing a worktree must first establish that removal is safe and permitted.
 - Treat terminal working-directory reports as advisory metadata. Preserve and label the last valid report, expose an unknown state, and never use a stale or unavailable report as implicit authority for Git or filesystem actions.
@@ -115,12 +123,12 @@ On successful activation, the native and accessible title is `<workspace name> �
 
 ## Milestones
 
-1. **Project Foundation** — Create and open single-folder `*.gabcode-workspace` projects, support relative and absolute folder references, offer Git initialization for existing non-Git folders, start terminals in the project folder, and reopen the last workspace.
+1. **Project Foundation** — Create and open workspace-v1 descriptors for an existing registered Git worktree set, resolve relative/absolute project roots and selected branches, route by invoking-window occupancy, start terminals in the selected worktree, and reopen the last workspace.
 2. **Worktree Navigation** — Discover Git worktrees, establish the primary-worktree concept, and implement header switching plus the management panel.
 3. **Terminal Retention** — Retain terminal processes by worktree across navigation and restore their views on return.
 4. **Terminal Location Awareness** — Display supported last-reported terminal directories and add explicit same-repository switch and other-repository open actions without allowing terminal focus or navigation to redirect the window implicitly.
 5. **Branch-Based Worktree Lifecycle** — Create new-branch worktrees from the configured primary branch, add existing-branch selection, and implement guided blocker-first removal.
-6. **Follow-on Workflows** — Consider PR review worktrees and popped-out worktree windows after the core lifecycle is proven.
+6. **Follow-on Workflows** — Consider new-project creation, PR review worktrees, and popped-out worktree windows after the core lifecycle is proven.
 
 ## Project Context Decision
 
@@ -139,7 +147,8 @@ This decision prioritizes predictable retained-process ownership, safe lifecycle
 - A project is identified by a user-chosen `*.gabcode-workspace` file, not by the active terminal's current directory.
 - The initial workspace contains a required human-readable name and one project folder belonging to one Git repository.
 - The native window title is `<workspace name> — <selected context> — gabCode`; the selected context begins as the project folder name and later follows the selected worktree directory name.
-- Creating a workspace from an active project publishes the descriptor atomically and opens it in a new gabCode instance; it never replaces or stops the active project's terminals. Opening an existing workspace into the current window is the only operation that performs terminal-confirmed replacement.
+- Open Workspace and Create Workspace activate an empty invoking window and otherwise open a separate native project window/instance; project entry never replaces or stops an occupied window's terminals.
+- New-project folder/repository creation is deferred; developers choose their own Git/worktree layout and gabCode creates only the workspace descriptor after read-only discovery succeeds.
 - Workspace folder references may be relative or absolute, matching VS Code's path model; relative references resolve from the workspace file.
 - A terminal remains owned by its creating worktree when its current directory changes, and terminal navigation never changes gabCode's selected project or worktree.
 - Closing a popped-out worktree window asks for confirmation and then gracefully stops its terminals.
