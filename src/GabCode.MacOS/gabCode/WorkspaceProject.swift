@@ -47,19 +47,29 @@ enum WorkspaceProjectSurfaceState: Equatable {
 final class WorkspaceProjectController: ObservableObject {
     @Published private(set) var state: WorkspaceProjectSurfaceState = .empty
     @Published private(set) var activeDescriptor: WorkspaceDescriptor?
+    @Published private(set) var projectRoot: URL?
+    @Published private(set) var descriptorBranch: String?
+    @Published private(set) var worktrees: [WorktreeNavigationEntry] = []
+    @Published private(set) var orphanedWorktreePaths: [URL] = []
 
     let preference: WorkspacePreference
+    private var refreshGeneration = 0
     private let gitValidator: GitRepositoryValidator
     private let worktreeDiscovery: GitWorktreeDiscovery
+    private let worktreeLoader: @Sendable (URL) async throws -> [GitWorktreeEntry]
 
     init(
         defaults: UserDefaults = .standard,
         gitValidator: GitRepositoryValidator = GitRepositoryValidator(),
-        worktreeDiscovery: GitWorktreeDiscovery = GitWorktreeDiscovery()
+        worktreeDiscovery: GitWorktreeDiscovery = GitWorktreeDiscovery(),
+        worktreeLoader: (@Sendable (URL) async throws -> [GitWorktreeEntry])? = nil
     ) {
         preference = WorkspacePreference(defaults: defaults)
         self.gitValidator = gitValidator
         self.worktreeDiscovery = worktreeDiscovery
+        self.worktreeLoader = worktreeLoader ?? { root in
+            try await worktreeDiscovery.worktrees(in: root)
+        }
     }
 
     var windowTitle: String {
@@ -90,11 +100,22 @@ final class WorkspaceProjectController: ObservableObject {
         do {
             let descriptor = try loadDescriptor(at: url)
             try validateFolder(descriptor.projectRoot)
-            let resolved = try await worktreeDiscovery.resolve(branch: descriptor.branch, in: descriptor.projectRoot)
-            try validateFolder(resolved)
-            let validation = await gitValidator.validate(folder: resolved)
-            try validateGitResult(validation, folder: resolved)
-            activeDescriptor = descriptor.resolved(to: resolved)
+            let discovered = try await worktreeLoader(descriptor.projectRoot)
+            let matches = discovered.filter { $0.branch == descriptor.branch }
+            guard matches.count == 1, let selected = matches.first else {
+                throw matches.isEmpty
+                    ? WorkspaceOpenError.branchNotFound(descriptor.branch, descriptor.projectRoot)
+                    : WorkspaceOpenError.gitFailed(descriptor.projectRoot, reason: "Branch \"\(descriptor.branch)\" resolves to more than one registered worktree.")
+            }
+            try validateFolder(selected.path)
+            let validation = await gitValidator.validate(folder: selected.path)
+            try validateGitResult(validation, folder: selected.path)
+            activeDescriptor = descriptor.resolved(to: selected.path)
+            projectRoot = descriptor.projectRoot.standardizedFileURL
+            descriptorBranch = descriptor.branch
+            let reconciliation = WorktreeReconciliation.reconcile(previous: [], discovered: discovered, retainedPaths: [])
+            worktrees = reconciliation.worktrees
+            orphanedWorktreePaths = reconciliation.orphanedPaths
             preference.lastWorkspaceURL = url.standardizedFileURL
             state = .ready
             return true
@@ -104,6 +125,32 @@ final class WorkspaceProjectController: ObservableObject {
         } catch {
             state = .recovery(map(error, projectRoot: url))
             return false
+        }
+    }
+
+    func forgetOrphan(path: URL) {
+        let normalized = path.standardizedFileURL
+        orphanedWorktreePaths.removeAll { $0.standardizedFileURL == normalized }
+    }
+
+    func refreshWorktrees(retainedPaths: [URL] = []) async {
+        guard let projectRoot else { return }
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        do {
+            let discovered = try await worktreeLoader(projectRoot)
+            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            let reconciliation = WorktreeReconciliation.reconcile(
+                previous: worktrees,
+                discovered: discovered,
+                retainedPaths: retainedPaths,
+                existingOrphanedPaths: orphanedWorktreePaths
+            )
+            worktrees = reconciliation.worktrees
+            orphanedWorktreePaths = reconciliation.orphanedPaths
+        } catch {
+            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            state = .recovery(map(error, projectRoot: projectRoot))
         }
     }
 
@@ -165,6 +212,7 @@ final class WorkspaceProjectController: ObservableObject {
             case let .repositoryNotFound(url): return .repositoryNotFound(url)
             case let .multipleRepositories(url): return .multipleRepositories(url)
             case let .branchNotFound(branch, url): return .branchNotFound(branch, url)
+            case let .ambiguousBranch(branch, url): return .gitFailed(url, reason: "Branch \"\(branch)\" resolves to more than one registered worktree.")
             case let .detachedWorktree(url): return .gitFailed(url, reason: "The selected worktree is detached and has no branch name.")
             case let .gitUnavailable(url): return .gitUnavailable(url)
             case let .gitFailed(url, reason): return .gitFailed(url, reason: reason)

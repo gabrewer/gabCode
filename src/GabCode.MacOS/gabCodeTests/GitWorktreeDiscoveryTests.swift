@@ -26,6 +26,30 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         XCTAssertEqual(resolved, feature.standardizedFileURL)
     }
 
+    func testPreservesPrimaryAndBranchBearingEntriesWithoutCollapsingPaths() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let primary = project.appendingPathComponent("checkout", isDirectory: true)
+        let feature = project.appendingPathComponent("wt/feature ünicode", isDirectory: true)
+        let detached = project.appendingPathComponent("wt/detached", isDirectory: true)
+        try FileManager.default.createDirectory(at: primary, withIntermediateDirectories: true)
+        try runGit(in: primary, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try Data("content".utf8).write(to: primary.appendingPathComponent("README.md"))
+        try runGit(in: primary, arguments: ["add", "."])
+        try runGit(in: primary, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "initial"])
+        try runGit(in: primary, arguments: ["branch", "feature/demo"])
+        try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runGit(in: primary, arguments: ["worktree", "add", "--quiet", feature.path, "feature/demo"])
+        try runGit(in: primary, arguments: ["worktree", "add", "--quiet", "--detach", detached.path])
+
+        let entries = try await GitWorktreeDiscovery().worktrees(in: project)
+
+        XCTAssertEqual(entries.map(\.branch), ["trunk", "feature/demo"])
+        XCTAssertEqual(entries.map(\.path), [primary.standardizedFileURL, feature.standardizedFileURL])
+        XCTAssertEqual(entries.map(\.isPrimary), [true, false])
+    }
+
     func testDrainsLargeGitOutputWithoutDeadlockingOnPipeCapacity() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

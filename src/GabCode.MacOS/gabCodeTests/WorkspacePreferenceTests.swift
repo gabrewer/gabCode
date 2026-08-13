@@ -14,7 +14,19 @@ final class WorkspacePreferenceTests: XCTestCase {
         preference.lastWorkspaceURL = descriptor
 
         XCTAssertEqual(preference.lastWorkspaceURL, descriptor)
-        XCTAssertNil(UserDefaults.standard.string(forKey: WorkspacePreference.lastWorkspaceKey))
+        XCTAssertEqual(defaults.string(forKey: WorkspacePreference.lastWorkspaceKey), descriptor.path)
+    }
+
+    func testSidebarSideRoundTripsThroughInjectedDefaultsOnly() throws {
+        let suite = "gabCode.workspace.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preference = WorkspacePreference(defaults: defaults)
+
+        XCTAssertFalse(preference.sidebarOnRight)
+        preference.sidebarOnRight = true
+        XCTAssertTrue(preference.sidebarOnRight)
+        XCTAssertNil(UserDefaults.standard.object(forKey: WorkspacePreference.sidebarOnRightKey))
     }
 
     func testInvalidRememberedWorkspaceIsClearedWhenRevalidated() throws {
