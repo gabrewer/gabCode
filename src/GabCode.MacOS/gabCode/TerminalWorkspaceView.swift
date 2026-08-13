@@ -7,12 +7,11 @@ struct TerminalWorkspaceView: View {
     @StateObject private var presentation: TerminalWorkspacePresentation
 
     init(workingDirectory: URL, font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular)) {
-        _presentation = StateObject(
-            wrappedValue: TerminalWorkspacePresentation(
-                workspace: TerminalWorkspace(workingDirectory: workingDirectory, font: font),
-                workingDirectory: workingDirectory
-            )
-        )
+        _presentation = StateObject(wrappedValue: TerminalWorkspacePresentation(workspace: TerminalWorkspace(workingDirectory: workingDirectory, font: font), workingDirectory: workingDirectory))
+    }
+
+    init(presentation: TerminalWorkspacePresentation) {
+        _presentation = StateObject(wrappedValue: presentation)
     }
 
     var body: some View {

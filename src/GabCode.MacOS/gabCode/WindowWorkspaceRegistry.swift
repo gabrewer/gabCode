@@ -13,7 +13,7 @@ final class WindowWorkspaceRegistry {
 
     private struct Entry {
         weak var window: NSWindow?
-        let presentation: TerminalWorkspacePresentation
+        var presentations: [TerminalWorkspacePresentation]
     }
 
     private var entries: [Entry] = []
@@ -40,17 +40,28 @@ final class WindowWorkspaceRegistry {
 
     var presentations: [TerminalWorkspacePresentation] {
         prune()
-        return entries.map(\.presentation)
+        return entries.flatMap(\.presentations)
     }
 
     var activeTerminalCount: Int {
         presentations.reduce(0) { $0 + $1.activeTerminalCount }
     }
 
+    func presentations(for window: NSWindow?) -> [TerminalWorkspacePresentation] {
+        prune()
+        guard let window else { return [] }
+        return entries.first { $0.window === window }?.presentations ?? []
+    }
+
     func register(_ presentation: TerminalWorkspacePresentation, for window: NSWindow) {
         prune()
-        entries.removeAll { $0.window === window || $0.presentation === presentation }
-        entries.append(Entry(window: window, presentation: presentation))
+        if let index = entries.firstIndex(where: { $0.window === window }) {
+            if !entries[index].presentations.contains(where: { $0 === presentation }) {
+                entries[index].presentations.append(presentation)
+            }
+        } else {
+            entries.append(Entry(window: window, presentations: [presentation]))
+        }
         if window.isKeyWindow { focusedPresentation = presentation }
     }
 
@@ -70,7 +81,7 @@ final class WindowWorkspaceRegistry {
     func presentation(for window: NSWindow?) -> TerminalWorkspacePresentation? {
         prune()
         guard let window else { return nil }
-        return entries.first { $0.window === window }?.presentation
+        return entries.first { $0.window === window }?.presentations.last
     }
 
     func currentFocusedPresentation() -> TerminalWorkspacePresentation? {

@@ -37,6 +37,9 @@ final class WorkspaceProjectTests: XCTestCase {
         XCTAssertTrue(result)
         XCTAssertEqual(controller.activeDescriptor?.name, "Project")
         XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, feature.standardizedFileURL)
+        XCTAssertEqual(controller.projectRoot, project.standardizedFileURL)
+        XCTAssertEqual(controller.descriptorBranch, "feature/demo")
+        XCTAssertEqual(controller.worktrees.map(\.path), [main.standardizedFileURL, feature.standardizedFileURL])
         XCTAssertEqual(controller.windowTitle, "Project — feature demo — gabCode")
         XCTAssertEqual(controller.state, .ready)
         XCTAssertEqual(controller.preference.lastWorkspaceURL, descriptorURL.standardizedFileURL)
@@ -97,6 +100,23 @@ final class WorkspaceProjectTests: XCTestCase {
         guard case .recovery = controller.state else {
             return XCTFail("Expected actionable recovery state")
         }
+    }
+
+    func testRefreshUsesInjectedDiscoverySeam() async throws {
+        let suite = "gabCode.project.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let expected = GitWorktreeEntry(
+            path: URL(fileURLWithPath: "/tmp/refresh worktree", isDirectory: true),
+            branch: "trunk",
+            isPrimary: true
+        )
+        let controller = WorkspaceProjectController(
+            defaults: defaults,
+            worktreeLoader: { _ in [expected] }
+        )
+
+        XCTAssertEqual(controller.worktrees, [])
     }
 
     private func runGit(in directory: URL, arguments: [String]) throws {

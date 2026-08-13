@@ -2,7 +2,8 @@ import Foundation
 
 struct GitWorktreeEntry: Equatable, Sendable {
     let path: URL
-    let branch: String?
+    let branch: String
+    let isPrimary: Bool
 }
 
 enum GitWorktreeDiscoveryError: Error, Equatable {
@@ -10,6 +11,7 @@ enum GitWorktreeDiscoveryError: Error, Equatable {
     case repositoryNotFound(URL)
     case multipleRepositories(URL)
     case branchNotFound(String, URL)
+    case ambiguousBranch(String, URL)
     case detachedWorktree(URL)
     case gitUnavailable(URL)
     case gitFailed(URL, reason: String)
@@ -29,14 +31,17 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
 
     func branches(in projectRoot: URL) async throws -> [String] {
         let entries = try await worktrees(in: projectRoot)
-        return entries.compactMap(\.branch).sorted()
+        return entries.map(\.branch).sorted()
     }
 
     func resolve(branch: String, in projectRoot: URL) async throws -> URL {
         let entries = try await worktrees(in: projectRoot)
         let matches = entries.filter { $0.branch == branch }
-        guard let match = matches.first else {
-            throw GitWorktreeDiscoveryError.branchNotFound(branch, projectRoot.standardizedFileURL)
+        guard matches.count == 1, let match = matches.first else {
+            if matches.isEmpty {
+                throw GitWorktreeDiscoveryError.branchNotFound(branch, projectRoot.standardizedFileURL)
+            }
+            throw GitWorktreeDiscoveryError.ambiguousBranch(branch, projectRoot.standardizedFileURL)
         }
         return match.path
     }
@@ -100,16 +105,18 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
     }
 
     private func parse(output: String) -> [GitWorktreeEntry] {
-        output.components(separatedBy: "\n\n").compactMap { block in
+        output.components(separatedBy: "\n\n").enumerated().compactMap { index, block in
             let lines = block.split(separator: "\n", omittingEmptySubsequences: true)
-            guard let worktreeLine = lines.first(where: { $0.hasPrefix("worktree ") }) else {
+            guard let worktreeLine = lines.first(where: { $0.hasPrefix("worktree ") }),
+                  let branchLine = lines.first(where: { $0.hasPrefix("branch refs/heads/") })
+            else {
+                // Detached worktrees have no branch-bearing workspace identity in v1.
                 return nil
             }
             let path = URL(fileURLWithPath: String(worktreeLine.dropFirst("worktree ".count)), isDirectory: true)
                 .standardizedFileURL
-            let branch = lines.first(where: { $0.hasPrefix("branch refs/heads/") })
-                .map { String($0.dropFirst("branch refs/heads/".count)) }
-            return GitWorktreeEntry(path: path, branch: branch)
+            let branch = String(branchLine.dropFirst("branch refs/heads/".count))
+            return GitWorktreeEntry(path: path, branch: branch, isPrimary: index == 0)
         }
     }
 

@@ -73,6 +73,19 @@ struct TerminalWorkspaceCommands: Commands {
             }
         }
 
+        CommandGroup(after: .newItem) {
+            Button("Refresh Worktrees") {
+                guard let windowNumber = NSApp.keyWindow?.windowNumber else { return }
+                NotificationCenter.default.post(name: .gabCodeRefreshWorktrees, object: nil, userInfo: ["windowNumber": windowNumber])
+            }
+            .keyboardShortcut("r", modifiers: .command)
+        }
+
+        CommandMenu("View") {
+            Button("Move Sidebar Right") { postSidebarMove(right: true) }
+            Button("Move Sidebar Left") { postSidebarMove(right: false) }
+        }
+
         CommandMenu("Terminal") {
             Button("Swap Terminals") { router.swapTerminals() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
@@ -85,6 +98,15 @@ struct TerminalWorkspaceCommands: Commands {
                 .keyboardShortcut("2", modifiers: .command)
                 .disabled(!router.isAvailable)
         }
+    }
+
+    private func postSidebarMove(right: Bool) {
+        guard let windowNumber = NSApp.keyWindow?.windowNumber else { return }
+        NotificationCenter.default.post(
+            name: .gabCodeMoveSidebar,
+            object: nil,
+            userInfo: ["windowNumber": windowNumber, "right": right]
+        )
     }
 
     private func route(_ action: WorkspaceWindowIntentStore.Action) {

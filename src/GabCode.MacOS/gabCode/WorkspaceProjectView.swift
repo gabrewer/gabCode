@@ -4,6 +4,8 @@ import SwiftUI
 extension Notification.Name {
     static let gabCodeOpenWorkspace = Notification.Name("gabCode.openWorkspace")
     static let gabCodeCreateWorkspace = Notification.Name("gabCode.createWorkspace")
+    static let gabCodeRefreshWorktrees = Notification.Name("gabCode.refreshWorktrees")
+    static let gabCodeMoveSidebar = Notification.Name("gabCode.moveSidebar")
 }
 
 @MainActor
@@ -26,12 +28,31 @@ struct WorkspaceProjectView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var isPresentingPanel = false
     @State private var windowNumber: Int?
+    @State private var selectedWorktreePath: URL?
+    @State private var terminalPresentations: [URL: TerminalWorkspacePresentation] = [:]
 
     var body: some View {
         Group {
             if controller.state == .ready, let descriptor = controller.activeDescriptor {
-                TerminalWorkspaceView(workingDirectory: descriptor.resolvedFolder)
-                    .background(WindowTitleBridge(title: controller.windowTitle))
+                HStack(spacing: 0) {
+                    if !controller.preference.sidebarOnRight { worktreeSidebar }
+                    VStack(spacing: 0) {
+                        if let selectedWorktreePath, controller.orphanedWorktreePaths.contains(selectedWorktreePath.standardizedFileURL) {
+                            Text("Orphaned terminal — Git worktree unavailable")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                                .background(.yellow.opacity(0.2))
+                                .accessibilityLabel("Orphaned terminal. Git worktree unavailable.")
+                        }
+                        TerminalWorkspaceView(presentation: presentation(for: selectedWorktreePath ?? descriptor.resolvedFolder))
+                    }
+                    if controller.preference.sidebarOnRight { worktreeSidebar }
+                }
+                .onAppear { selectedWorktreePath = descriptor.resolvedFolder }
+                .onChange(of: selectedWorktreePath) { _, path in
+                    if let path { presentation(for: path).focusMainTerminal() }
+                }
+                .background(WindowTitleBridge(title: selectedWorktreePath.map { "\(controller.activeDescriptor?.name ?? "gabCode") — \($0.lastPathComponent) — gabCode" } ?? controller.windowTitle))
             } else {
                 emptyOrRecoverySurface
             }
@@ -47,6 +68,18 @@ struct WorkspaceProjectView: View {
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeCreateWorkspace)) { notification in
             guard handles(notification) else { return }
             chooseProjectFolderAndCreateWorkspace()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gabCodeRefreshWorktrees)) { notification in
+            guard handles(notification) else { return }
+            Task { await controller.refreshWorktrees(retainedPaths: Array(terminalPresentations.keys)) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gabCodeMoveSidebar)) { notification in
+            guard handles(notification) else { return }
+            if let right = notification.userInfo?["right"] as? Bool {
+                controller.preference.sidebarOnRight = right
+            } else {
+                controller.preference.sidebarOnRight.toggle()
+            }
         }
         .onAppear {
             if let action = WorkspaceWindowIntentStore.shared.take() {
@@ -95,6 +128,79 @@ struct WorkspaceProjectView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspace-empty-surface")
+    }
+
+    @ViewBuilder
+    private var worktreeSidebar: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Worktrees").font(.headline)
+                Spacer()
+                Button { Task { await controller.refreshWorktrees(retainedPaths: Array(terminalPresentations.keys)) } } label: { Image(systemName: "arrow.clockwise") }
+                    .accessibilityLabel("Refresh Worktrees")
+                    .accessibilityIdentifier("refresh-worktrees")
+            }.padding(10)
+            List(selection: $selectedWorktreePath) {
+                Section("Worktrees") {
+                    ForEach(controller.worktrees, id: \.path) { worktree in
+                        VStack(alignment: .leading) {
+                            Text(worktree.path.lastPathComponent)
+                            Text(worktree.branch).font(.caption).foregroundStyle(.secondary)
+                            if worktree.availability == .unavailable { Text("Unavailable").font(.caption2) }
+                        }
+                        .accessibilityLabel("\(worktree.path.lastPathComponent), \(worktree.branch)\(worktree.availability == .unavailable ? ", unavailable" : "")")
+                        .tag(worktree.path)
+                    }
+                }
+                if !controller.orphanedWorktreePaths.isEmpty {
+                    Section("Orphaned terminals") {
+                        ForEach(controller.orphanedWorktreePaths, id: \.self) { path in
+                            HStack {
+                                Text(path.lastPathComponent)
+                                Spacer()
+                                Button("Close Terminals") { closeOrphan(path) }
+                                    .controlSize(.small)
+                            }
+                            .tag(path)
+                            .accessibilityLabel("\(path.lastPathComponent), orphaned terminal")
+                        }
+                    }
+                }
+            }
+        }
+        .frame(minWidth: 190, idealWidth: 240, maxWidth: 300)
+        .accessibilityIdentifier("worktree-sidebar")
+        Divider()
+    }
+
+    private func closeOrphan(_ path: URL) {
+        guard let presentation = terminalPresentations[path.standardizedFileURL], let window = NSApp.keyWindow else { return }
+        let alert = NSAlert()
+        alert.messageText = "Close orphaned terminals?"
+        alert.informativeText = "This stops the retained terminal processes for \(path.lastPathComponent)."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Close Terminals")
+        alert.beginSheetModal(for: window) { response in
+            guard response == .alertSecondButtonReturn else { return }
+            Task { @MainActor in
+                let results = await presentation.workspace.stopResults(gracePeriod: .milliseconds(500))
+                guard results.allSatisfy({ $0 != .failed }) else { return }
+                terminalPresentations.removeValue(forKey: path.standardizedFileURL)
+                controller.forgetOrphan(path: path)
+                if selectedWorktreePath == path.standardizedFileURL { selectedWorktreePath = nil }
+            }
+        }
+    }
+
+    private func presentation(for path: URL) -> TerminalWorkspacePresentation {
+        let normalized = path.standardizedFileURL
+        if let presentation = terminalPresentations[normalized] { return presentation }
+        let presentation = TerminalWorkspacePresentation(
+            workspace: TerminalWorkspace(workingDirectory: normalized, font: fontPreference.effectiveFont),
+            workingDirectory: normalized
+        )
+        terminalPresentations[normalized] = presentation
+        return presentation
     }
 
     private var recoveryDescription: String {

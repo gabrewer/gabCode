@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class WorkspacePreference {
     static let lastWorkspaceKey = "lastWorkspaceDescriptorPath"
+    static let sidebarOnRightKey = "worktreeSidebarOnRight"
 
     private let defaults: UserDefaults
 
@@ -24,6 +25,11 @@ final class WorkspacePreference {
                 defaults.removeObject(forKey: Self.lastWorkspaceKey)
             }
         }
+    }
+
+    var sidebarOnRight: Bool {
+        get { defaults.bool(forKey: Self.sidebarOnRightKey) }
+        set { defaults.set(newValue, forKey: Self.sidebarOnRightKey) }
     }
 
     func revalidateLastWorkspace(

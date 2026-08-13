@@ -14,11 +14,12 @@ final class TerminalShutdownCoordinator: ObservableObject {
 
     func requestWindowClose(_ window: NSWindow) -> Bool {
         if permitsWindowClose { return true }
-        guard let presentation = WindowWorkspaceRegistry.shared.presentation(for: window), presentation.activeTerminalCount > 0 else {
+        let presentations = WindowWorkspaceRegistry.shared.presentations(for: window)
+        guard presentations.contains(where: { $0.activeTerminalCount > 0 }) else {
             WindowWorkspaceRegistry.shared.unregister(window)
             return true
         }
-        requestConfirmation(for: window, presentations: [presentation]) { [weak self, weak window] cleanedUp in
+        requestConfirmation(for: window, presentations: presentations) { [weak self, weak window] cleanedUp in
             guard cleanedUp, let self, let window else { return }
             self.permitsWindowClose = true
             window.performClose(nil)
