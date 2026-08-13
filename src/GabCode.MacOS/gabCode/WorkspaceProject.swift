@@ -54,6 +54,7 @@ final class WorkspaceProjectController: ObservableObject {
 
     let preference: WorkspacePreference
     private var refreshGeneration = 0
+    private var operationGeneration = 0
     private let gitValidator: GitRepositoryValidator
     private let worktreeDiscovery: GitWorktreeDiscovery
     private let worktreeLoader: @Sendable (URL) async throws -> [GitWorktreeEntry]
@@ -96,11 +97,14 @@ final class WorkspaceProjectController: ObservableObject {
     }
 
     func openWorkspace(at url: URL) async -> Bool {
+        operationGeneration += 1
+        let generation = operationGeneration
         state = .loading
         do {
             let descriptor = try loadDescriptor(at: url)
             try validateFolder(descriptor.projectRoot)
             let discovered = try await worktreeLoader(descriptor.projectRoot)
+            guard !Task.isCancelled, generation == operationGeneration else { return false }
             let matches = discovered.filter { $0.branch == descriptor.branch }
             guard matches.count == 1, let selected = matches.first else {
                 throw matches.isEmpty
@@ -109,6 +113,7 @@ final class WorkspaceProjectController: ObservableObject {
             }
             try validateFolder(selected.path)
             let validation = await gitValidator.validate(folder: selected.path)
+            guard !Task.isCancelled, generation == operationGeneration else { return false }
             try validateGitResult(validation, folder: selected.path)
             activeDescriptor = descriptor.resolved(to: selected.path)
             projectRoot = descriptor.projectRoot.standardizedFileURL
@@ -136,6 +141,7 @@ final class WorkspaceProjectController: ObservableObject {
     func refreshWorktrees(retainedPaths: [URL] = []) async {
         guard let projectRoot else { return }
         refreshGeneration += 1
+        operationGeneration += 1
         let generation = refreshGeneration
         do {
             let discovered = try await worktreeLoader(projectRoot)
