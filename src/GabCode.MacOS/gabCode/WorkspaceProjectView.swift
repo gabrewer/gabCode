@@ -45,6 +45,7 @@ struct WorkspaceProjectView: View {
                                 .accessibilityLabel("Orphaned terminal. Git worktree unavailable.")
                         }
                         TerminalWorkspaceView(presentation: presentation(for: selectedWorktreePath ?? descriptor.resolvedFolder))
+                            .id((selectedWorktreePath ?? descriptor.resolvedFolder).standardizedFileURL.path)
                     }
                     if controller.preference.sidebarOnRight { worktreeSidebar }
                 }
