@@ -14,6 +14,7 @@ final class WindowWorkspaceRegistry {
     private struct Entry {
         weak var window: NSWindow?
         var presentations: [TerminalWorkspacePresentation]
+        var selectedPresentation: TerminalWorkspacePresentation?
     }
 
     private var entries: [Entry] = []
@@ -54,14 +55,28 @@ final class WindowWorkspaceRegistry {
     }
 
     func register(_ presentation: TerminalWorkspacePresentation, for window: NSWindow) {
+        register([presentation], for: window)
+    }
+
+    func register(_ presentations: [TerminalWorkspacePresentation], for window: NSWindow) {
         prune()
         if let index = entries.firstIndex(where: { $0.window === window }) {
-            if !entries[index].presentations.contains(where: { $0 === presentation }) {
+            for presentation in presentations where !entries[index].presentations.contains(where: { $0 === presentation }) {
                 entries[index].presentations.append(presentation)
             }
+            if entries[index].selectedPresentation == nil {
+                entries[index].selectedPresentation = presentations.last
+            }
         } else {
-            entries.append(Entry(window: window, presentations: [presentation]))
+            entries.append(Entry(window: window, presentations: presentations, selectedPresentation: presentations.last))
         }
+        if window.isKeyWindow { focusedPresentation = presentation(for: window) }
+    }
+
+    func select(_ presentation: TerminalWorkspacePresentation, for window: NSWindow) {
+        register(presentation, for: window)
+        guard let index = entries.firstIndex(where: { $0.window === window }) else { return }
+        entries[index].selectedPresentation = presentation
         if window.isKeyWindow { focusedPresentation = presentation }
     }
 
@@ -81,7 +96,7 @@ final class WindowWorkspaceRegistry {
     func presentation(for window: NSWindow?) -> TerminalWorkspacePresentation? {
         prune()
         guard let window else { return nil }
-        return entries.first { $0.window === window }?.presentations.last
+        return entries.first { $0.window === window }?.selectedPresentation
     }
 
     func currentFocusedPresentation() -> TerminalWorkspacePresentation? {

@@ -45,9 +45,27 @@ final class WindowWorkspaceRegistryTests: XCTestCase {
 
         XCTAssertEqual(registry.presentations(for: window).count, 2)
         XCTAssertEqual(registry.presentations.count, 2)
-        XCTAssertTrue(registry.presentation(for: window) === second)
+        XCTAssertTrue(registry.presentation(for: window) === first)
         registry.unregister(window)
         XCTAssertTrue(registry.presentations(for: window).isEmpty)
+    }
+
+    func testSelectedPresentationRoutesFocusedWindowCommands() throws {
+        let registry = WindowWorkspaceRegistry()
+        let window = NSWindow()
+        let first = try presentation()
+        let second = try presentation()
+
+        registry.register([first, second], for: window)
+        registry.select(first, for: window)
+        XCTAssertTrue(registry.presentation(for: window) === first)
+        registry.focus(window)
+        XCTAssertTrue(registry.focusedPresentation === first)
+
+        registry.select(second, for: window)
+        XCTAssertTrue(registry.presentation(for: window) === second)
+        registry.focus(window)
+        XCTAssertTrue(registry.focusedPresentation === second)
     }
 
     func testWorkspaceActionsStayInCurrentWindowOnlyWhenItIsEmpty() {

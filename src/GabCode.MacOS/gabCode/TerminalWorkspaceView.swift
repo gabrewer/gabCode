@@ -2,16 +2,46 @@ import AppKit
 import SwiftUI
 
 @MainActor
+struct WorkspaceTerminalStackView: View {
+    @ObservedObject var registry: WorkspaceTerminalRegistry
+    let selectedPath: URL
+
+    var body: some View {
+        ZStack {
+            ForEach(registry.retainedPresentations, id: \.workingDirectory) { presentation in
+                TerminalWorkspaceView(
+                    presentation: presentation,
+                    isActive: presentation.workingDirectory.standardizedFileURL == selectedPath.standardizedFileURL
+                )
+                .opacity(presentation.workingDirectory.standardizedFileURL == selectedPath.standardizedFileURL ? 1 : 0)
+                .allowsHitTesting(presentation.workingDirectory.standardizedFileURL == selectedPath.standardizedFileURL)
+            }
+        }
+        .background(WindowCloseInterceptor(registry: registry, selectedPath: selectedPath))
+        .task(id: selectedPath.standardizedFileURL.path) {
+            guard let presentation = await registry.ensureStarted(for: selectedPath) else { return }
+            await Task.yield()
+            presentation.focusMainTerminal()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("terminal-workspace-stack")
+    }
+}
+
+@MainActor
 struct TerminalWorkspaceView: View {
     @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
     @ObservedObject private var presentation: TerminalWorkspacePresentation
+    private let isActive: Bool
 
-    init(workingDirectory: URL, font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular)) {
+    init(workingDirectory: URL, font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular), isActive: Bool = true) {
         _presentation = ObservedObject(wrappedValue: TerminalWorkspacePresentation(workspace: TerminalWorkspace(workingDirectory: workingDirectory, font: font), workingDirectory: workingDirectory))
+        self.isActive = isActive
     }
 
-    init(presentation: TerminalWorkspacePresentation) {
+    init(presentation: TerminalWorkspacePresentation, isActive: Bool = true) {
         _presentation = ObservedObject(wrappedValue: presentation)
+        self.isActive = isActive
     }
 
     var body: some View {
@@ -40,17 +70,19 @@ struct TerminalWorkspaceView: View {
         .frame(minWidth: 760, minHeight: 640)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("terminal-workspace")
-        .background(WindowCloseInterceptor(presentation: presentation))
-        .task {
-            await presentation.start()
-            await Task.yield()
-            presentation.focusMainTerminal()
+        .onChange(of: isActive) { _, active in
+            if active {
+                TerminalCommandRouter.shared.connect(presentation)
+                presentation.focusMainTerminal()
+            } else {
+                TerminalCommandRouter.shared.disconnect(presentation)
+            }
         }
         .onReceive(fontPreference.$effectiveSelection) { _ in
-            presentation.apply(font: fontPreference.effectiveFont)
+            if isActive { presentation.apply(font: fontPreference.effectiveFont) }
         }
         .onAppear {
-            TerminalCommandRouter.shared.connect(presentation)
+            if isActive { TerminalCommandRouter.shared.connect(presentation) }
         }
         .onDisappear {
             TerminalCommandRouter.shared.disconnect(presentation)
