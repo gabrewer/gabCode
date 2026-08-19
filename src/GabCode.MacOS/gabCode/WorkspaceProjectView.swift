@@ -29,7 +29,7 @@ struct WorkspaceProjectView: View {
     @State private var isPresentingPanel = false
     @State private var windowNumber: Int?
     @State private var selectedWorktreePath: URL?
-    @State private var terminalPresentations: [URL: TerminalWorkspacePresentation] = [:]
+    @StateObject private var terminalRegistry = WorkspaceTerminalRegistry()
 
     var body: some View {
         Group {
@@ -44,7 +44,10 @@ struct WorkspaceProjectView: View {
                                 .background(.yellow.opacity(0.2))
                                 .accessibilityLabel("Orphaned terminal. Git worktree unavailable.")
                         }
-                        TerminalWorkspaceView(presentation: presentation(for: selectedWorktreePath ?? descriptor.resolvedFolder))
+                        WorkspaceTerminalStackView(
+                            registry: terminalRegistry,
+                            selectedPath: selectedWorktreePath ?? descriptor.resolvedFolder
+                        )
                     }
                     if controller.preference.sidebarOnRight { worktreeSidebar }
                 }
@@ -71,7 +74,7 @@ struct WorkspaceProjectView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeRefreshWorktrees)) { notification in
             guard handles(notification) else { return }
-            Task { await controller.refreshWorktrees(retainedPaths: Array(terminalPresentations.keys)) }
+            Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeMoveSidebar)) { notification in
             guard handles(notification) else { return }
@@ -136,7 +139,7 @@ struct WorkspaceProjectView: View {
             HStack {
                 Text("Worktrees").font(.headline)
                 Spacer()
-                Button { Task { await controller.refreshWorktrees(retainedPaths: Array(terminalPresentations.keys)) } } label: { Image(systemName: "arrow.clockwise") }
+                Button { Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) } } label: { Image(systemName: "arrow.clockwise") }
                     .accessibilityLabel("Refresh Worktrees")
                     .accessibilityIdentifier("refresh-worktrees")
             }.padding(10)
@@ -174,7 +177,8 @@ struct WorkspaceProjectView: View {
     }
 
     private func closeOrphan(_ path: URL) {
-        guard let presentation = terminalPresentations[path.standardizedFileURL], let window = NSApp.keyWindow else { return }
+        let presentation = terminalRegistry.presentation(for: path)
+        guard let window = NSApp.keyWindow else { return }
         let alert = NSAlert()
         alert.messageText = "Close orphaned terminals?"
         alert.informativeText = "This stops the retained terminal processes for \(path.lastPathComponent)."
@@ -185,7 +189,7 @@ struct WorkspaceProjectView: View {
             Task { @MainActor in
                 let results = await presentation.workspace.stopResults(gracePeriod: .milliseconds(500))
                 guard results.allSatisfy({ $0 != .failed }) else { return }
-                terminalPresentations.removeValue(forKey: path.standardizedFileURL)
+                terminalRegistry.remove(path)
                 controller.forgetOrphan(path: path)
                 if selectedWorktreePath == path.standardizedFileURL { selectedWorktreePath = nil }
             }
@@ -193,14 +197,7 @@ struct WorkspaceProjectView: View {
     }
 
     private func presentation(for path: URL) -> TerminalWorkspacePresentation {
-        let normalized = path.standardizedFileURL
-        if let presentation = terminalPresentations[normalized] { return presentation }
-        let presentation = TerminalWorkspacePresentation(
-            workspace: TerminalWorkspace(workingDirectory: normalized, font: fontPreference.effectiveFont),
-            workingDirectory: normalized
-        )
-        terminalPresentations[normalized] = presentation
-        return presentation
+        terminalRegistry.presentation(for: path)
     }
 
     private var recoveryDescription: String {

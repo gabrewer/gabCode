@@ -100,32 +100,34 @@ final class GabCodeAppDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 struct WindowCloseInterceptor: NSViewRepresentable {
-    let presentation: TerminalWorkspacePresentation
+    let registry: WorkspaceTerminalRegistry
+    let selectedPath: URL
 
-    func makeCoordinator() -> Coordinator { Coordinator(presentation: presentation) }
+    func makeCoordinator() -> Coordinator { Coordinator(registry: registry) }
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        context.coordinator.install(on: view)
+        context.coordinator.install(on: view, selectedPath: selectedPath)
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        context.coordinator.install(on: view)
+        context.coordinator.install(on: view, selectedPath: selectedPath)
     }
 
     final class Coordinator: NSObject, NSWindowDelegate {
         private weak var window: NSWindow?
-        private let presentation: TerminalWorkspacePresentation
+        private let registry: WorkspaceTerminalRegistry
 
-        init(presentation: TerminalWorkspacePresentation) { self.presentation = presentation }
+        init(registry: WorkspaceTerminalRegistry) { self.registry = registry }
 
-        func install(on view: NSView) {
+        func install(on view: NSView, selectedPath: URL) {
             DispatchQueue.main.async { [weak self, weak view] in
                 guard let self, let window = view?.window else { return }
+                WindowWorkspaceRegistry.shared.register(self.registry.retainedPresentations, for: window)
+                WindowWorkspaceRegistry.shared.select(self.registry.presentation(for: selectedPath), for: window)
                 if self.window !== window {
                     self.window = window
-                    WindowWorkspaceRegistry.shared.register(self.presentation, for: window)
                     window.delegate = self
                 }
             }
