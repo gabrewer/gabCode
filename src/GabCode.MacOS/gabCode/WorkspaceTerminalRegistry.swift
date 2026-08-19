@@ -41,6 +41,10 @@ final class WorkspaceTerminalRegistry: ObservableObject {
         return presentation
     }
 
+    func existingPresentation(for path: URL) -> TerminalWorkspacePresentation? {
+        presentationsByPath[path.standardizedFileURL]
+    }
+
     @discardableResult
     func ensureStarted(for path: URL) async -> TerminalWorkspacePresentation? {
         let presentation = presentation(for: path)

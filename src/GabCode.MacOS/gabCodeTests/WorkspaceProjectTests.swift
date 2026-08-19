@@ -102,6 +102,37 @@ final class WorkspaceProjectTests: XCTestCase {
         }
     }
 
+    func testFailedRefreshPreservesReadyProjectAndPublishesActionableError() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        try runGit(in: repository, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        let descriptorURL = root.appendingPathComponent("project.gabcode-workspace")
+        try WorkspaceDescriptor.write(name: "Project", projectRoot: repository, branch: "trunk", to: descriptorURL)
+        let entry = GitWorktreeEntry(path: repository, branch: "trunk", isPrimary: true)
+        let loader = RefreshLoader(entries: [entry])
+        let suite = "gabCode.project.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = WorkspaceProjectController(defaults: defaults, worktreeLoader: { _ in
+            try loader.load()
+        })
+
+        let opened = await controller.openWorkspace(at: descriptorURL)
+        XCTAssertTrue(opened)
+        let activeDescriptor = controller.activeDescriptor
+        let worktrees = controller.worktrees
+        loader.fail = true
+        await controller.refreshWorktrees()
+
+        XCTAssertEqual(controller.state, .ready)
+        XCTAssertEqual(controller.activeDescriptor, activeDescriptor)
+        XCTAssertEqual(controller.worktrees, worktrees)
+        XCTAssertNotNil(controller.refreshError)
+        XCTAssertFalse(controller.isRefreshing)
+    }
+
     func testRefreshUsesInjectedDiscoverySeam() async throws {
         let suite = "gabCode.project.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -117,6 +148,26 @@ final class WorkspaceProjectTests: XCTestCase {
         )
 
         XCTAssertEqual(controller.worktrees, [])
+    }
+
+    private final class RefreshLoader: @unchecked Sendable {
+        private let lock = NSLock()
+        private let entries: [GitWorktreeEntry]
+        private var shouldFail = false
+
+        init(entries: [GitWorktreeEntry]) { self.entries = entries }
+
+        var fail: Bool {
+            get { lock.withLock { shouldFail } }
+            set { lock.withLock { shouldFail = newValue } }
+        }
+
+        func load() throws -> [GitWorktreeEntry] {
+            try lock.withLock {
+                if shouldFail { throw GitWorktreeDiscoveryError.gitFailed(URL(fileURLWithPath: "/tmp"), reason: "controlled refresh failure") }
+                return entries
+            }
+        }
     }
 
     private func runGit(in directory: URL, arguments: [String]) throws {

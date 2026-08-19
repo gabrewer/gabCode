@@ -15,6 +15,7 @@ struct WorkspaceTerminalStackView: View {
                 )
                 .opacity(presentation.workingDirectory.standardizedFileURL == selectedPath.standardizedFileURL ? 1 : 0)
                 .allowsHitTesting(presentation.workingDirectory.standardizedFileURL == selectedPath.standardizedFileURL)
+                .accessibilityHidden(presentation.workingDirectory.standardizedFileURL != selectedPath.standardizedFileURL)
             }
         }
         .background(WindowCloseInterceptor(registry: registry, selectedPath: selectedPath))

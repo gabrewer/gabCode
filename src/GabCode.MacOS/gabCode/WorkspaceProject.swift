@@ -51,6 +51,8 @@ final class WorkspaceProjectController: ObservableObject {
     @Published private(set) var descriptorBranch: String?
     @Published private(set) var worktrees: [WorktreeNavigationEntry] = []
     @Published private(set) var orphanedWorktreePaths: [URL] = []
+    @Published private(set) var isRefreshing = false
+    @Published private(set) var refreshError: WorkspaceOpenError?
 
     let preference: WorkspacePreference
     private var refreshGeneration = 0
@@ -138,11 +140,21 @@ final class WorkspaceProjectController: ObservableObject {
         orphanedWorktreePaths.removeAll { $0.standardizedFileURL == normalized }
     }
 
+    func cancelRefresh() {
+        refreshGeneration += 1
+        isRefreshing = false
+    }
+
     func refreshWorktrees(retainedPaths: [URL] = []) async {
-        guard let projectRoot else { return }
+        guard let projectRoot, !isRefreshing else { return }
+        isRefreshing = true
+        refreshError = nil
         refreshGeneration += 1
         operationGeneration += 1
         let generation = refreshGeneration
+        defer {
+            if generation == refreshGeneration { isRefreshing = false }
+        }
         do {
             let discovered = try await worktreeLoader(projectRoot)
             guard !Task.isCancelled, generation == refreshGeneration else { return }
@@ -156,7 +168,7 @@ final class WorkspaceProjectController: ObservableObject {
             orphanedWorktreePaths = reconciliation.orphanedPaths
         } catch {
             guard !Task.isCancelled, generation == refreshGeneration else { return }
-            state = .recovery(map(error, projectRoot: projectRoot))
+            refreshError = map(error, projectRoot: projectRoot)
         }
     }
 
