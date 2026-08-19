@@ -139,19 +139,53 @@ struct WorkspaceProjectView: View {
             HStack {
                 Text("Worktrees").font(.headline)
                 Spacer()
-                Button { Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) } } label: { Image(systemName: "arrow.clockwise") }
-                    .accessibilityLabel("Refresh Worktrees")
-                    .accessibilityIdentifier("refresh-worktrees")
+                if controller.isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Refreshing worktrees")
+                    Button("Cancel") { controller.cancelRefresh() }
+                        .controlSize(.small)
+                        .accessibilityIdentifier("cancel-refresh-worktrees")
+                } else {
+                    Button { Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) } } label: { Image(systemName: "arrow.clockwise") }
+                        .accessibilityLabel("Refresh Worktrees")
+                        .accessibilityIdentifier("refresh-worktrees")
+                }
             }.padding(10)
+            if let refreshError = controller.refreshError {
+                Text(refreshError.message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+                    .accessibilityLabel("Refresh worktrees failed")
+                    .accessibilityValue(refreshError.message)
+                    .accessibilityIdentifier("refresh-worktrees-error")
+            }
             List(selection: $selectedWorktreePath) {
                 Section("Worktrees") {
                     ForEach(controller.worktrees, id: \.path) { worktree in
                         VStack(alignment: .leading) {
-                            Text(worktree.path.lastPathComponent)
+                            HStack(spacing: 6) {
+                                Text(worktree.path.lastPathComponent)
+                                if selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityHidden(true)
+                                }
+                                if terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0 > 0 {
+                                    Image(systemName: "bolt.horizontal.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityHidden(true)
+                                }
+                            }
                             Text(worktree.branch).font(.caption).foregroundStyle(.secondary)
                             if worktree.availability == .unavailable { Text("Unavailable").font(.caption2) }
+                            if terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0 > 0 {
+                                Text("Running terminals").font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
-                        .accessibilityLabel("\(worktree.path.lastPathComponent), \(worktree.branch)\(worktree.availability == .unavailable ? ", unavailable" : "")")
+                        .accessibilityLabel("\(worktree.path.lastPathComponent), \(worktree.branch)\(selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL ? ", selected" : "")\((terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0) > 0 ? ", running terminals" : "")\(worktree.availability == .unavailable ? ", unavailable" : "")")
                         .tag(worktree.path)
                     }
                 }
