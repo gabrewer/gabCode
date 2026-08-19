@@ -4,14 +4,14 @@ import SwiftUI
 @MainActor
 struct TerminalWorkspaceView: View {
     @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
-    @StateObject private var presentation: TerminalWorkspacePresentation
+    @ObservedObject private var presentation: TerminalWorkspacePresentation
 
     init(workingDirectory: URL, font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular)) {
-        _presentation = StateObject(wrappedValue: TerminalWorkspacePresentation(workspace: TerminalWorkspace(workingDirectory: workingDirectory, font: font), workingDirectory: workingDirectory))
+        _presentation = ObservedObject(wrappedValue: TerminalWorkspacePresentation(workspace: TerminalWorkspace(workingDirectory: workingDirectory, font: font), workingDirectory: workingDirectory))
     }
 
     init(presentation: TerminalWorkspacePresentation) {
-        _presentation = StateObject(wrappedValue: presentation)
+        _presentation = ObservedObject(wrappedValue: presentation)
     }
 
     var body: some View {
