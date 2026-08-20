@@ -67,6 +67,44 @@ public sealed class GitWorktreeDiscoveryTests
     }
 
     [Fact]
+    public async Task Ignores_dependency_and_generated_trees_when_finding_the_project_repository()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabCode bounded discovery Ω", Guid.NewGuid().ToString("N"));
+        var main = Path.Combine(root, "main");
+        var dependencyRepository = Path.Combine(root, "node_modules", "unrelated-repository");
+        Directory.CreateDirectory(main);
+        try
+        {
+            await Git(main, ["init", "--initial-branch", "trunk"]);
+            await Git(main, ["config", "user.email", "test@example.invalid"]);
+            await Git(main, ["config", "user.name", "Test"]);
+            await File.WriteAllTextAsync(Path.Combine(main, "README.md"), "x");
+            await Git(main, ["add", "."]);
+            await Git(main, ["commit", "-m", "initial"]);
+
+            Directory.CreateDirectory(dependencyRepository);
+            await Git(dependencyRepository, ["init", "--initial-branch", "unrelated"]);
+            await Git(dependencyRepository, ["config", "user.email", "test@example.invalid"]);
+            await Git(dependencyRepository, ["config", "user.name", "Test"]);
+            await File.WriteAllTextAsync(Path.Combine(dependencyRepository, "package.json"), "{}");
+            await Git(dependencyRepository, ["add", "."]);
+            await Git(dependencyRepository, ["commit", "-m", "unrelated"]);
+
+            foreach (var directory in new[] { "bin", "obj", ".vs" })
+            {
+                Directory.CreateDirectory(Path.Combine(root, directory, "nested", "generated"));
+            }
+
+            var entries = await new GitWorktreeDiscovery().DiscoverEntriesAsync(root);
+
+            Assert.Single(entries);
+            Assert.Equal(Path.GetFullPath(main), entries[0].Path);
+            Assert.Equal("trunk", entries[0].Branch);
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public async Task Drains_noisy_stdout_and_stderr_without_retaining_unbounded_output()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabCode noisy discovery", Guid.NewGuid().ToString("N"));
