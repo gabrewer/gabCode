@@ -20,7 +20,7 @@ public partial class MainWindow : Window
     private readonly WorkspaceProjectLoader projectLoader = new();
     private readonly WorkspaceProjectCreator projectCreator = new();
     private readonly GitWorktreeDiscovery worktreeDiscovery = new();
-    private readonly IGabCodeInstanceLauncher instanceLauncher = new GabCodeInstanceLauncher();
+    private readonly IGabCodeInstanceLauncher instanceLauncher;
     private readonly TerminalProfileResolver profileResolver;
     private readonly ITerminalExitConfirmationService exitConfirmation;
     private RetainedTerminalLayout? terminalLayout;
@@ -46,8 +46,8 @@ public partial class MainWindow : Window
     {
     }
 
-    internal MainWindow(ProjectContext project, TerminalProfileResolver profileResolver, ITerminalExitConfirmationService exitConfirmation)
-        : this(project ?? throw new ArgumentNullException(nameof(project)), profileResolver, exitConfirmation, isProjectInitialization: true)
+    internal MainWindow(ProjectContext project, TerminalProfileResolver profileResolver, ITerminalExitConfirmationService exitConfirmation, IGabCodeInstanceLauncher? instanceLauncher = null)
+        : this(project ?? throw new ArgumentNullException(nameof(project)), profileResolver, exitConfirmation, isProjectInitialization: true, instanceLauncher)
     {
     }
 
@@ -56,11 +56,12 @@ public partial class MainWindow : Window
     {
     }
 
-    private MainWindow(ProjectContext? project, TerminalProfileResolver profileResolver, ITerminalExitConfirmationService exitConfirmation, bool isProjectInitialization)
+    private MainWindow(ProjectContext? project, TerminalProfileResolver profileResolver, ITerminalExitConfirmationService exitConfirmation, bool isProjectInitialization, IGabCodeInstanceLauncher? instanceLauncher = null)
     {
         this.project = project;
         this.profileResolver = profileResolver ?? throw new ArgumentNullException(nameof(profileResolver));
         this.exitConfirmation = exitConfirmation ?? throw new ArgumentNullException(nameof(exitConfirmation));
+        this.instanceLauncher = instanceLauncher ?? new GabCodeInstanceLauncher();
         InitializeComponent();
         Closing += MainWindow_Closing;
 
@@ -146,7 +147,7 @@ public partial class MainWindow : Window
             var nextProject = await projectLoader.LoadAsync(workspacePath);
             if (ProjectWindowRouting.ShouldLaunchNewWindow(project is not null))
             {
-                instanceLauncher.Launch(workspacePath);
+                instanceLauncher.Launch(Path.GetFullPath(workspacePath));
                 return true;
             }
             ActivateProject(nextProject);
