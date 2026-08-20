@@ -13,6 +13,10 @@ internal sealed class GitWorktreeDiscovery
 {
     private const int MaximumCandidates = 2_000;
     private const int MaximumGitOutputCharacters = 64 * 1024;
+    private static readonly HashSet<string> IgnoredDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git", ".vs", ".idea", "node_modules", "bin", "obj", "dist", "build", "coverage",
+    };
     private readonly string executablePath;
     private readonly TimeSpan timeout;
 
@@ -44,6 +48,7 @@ internal sealed class GitWorktreeDiscovery
             cancellationToken.ThrowIfCancellationRequested();
             if (++foldersScanned > MaximumCandidates) throw new InvalidOperationException($"Project root contains more than {MaximumCandidates} directories to inspect.");
             progress?.Report(new GitDiscoveryProgress("Searching for Git repositories", foldersScanned, repositories.Count));
+            if (ShouldSkipDirectory(candidate, root)) continue;
             if (coveredWorktrees.Any(path => candidate.StartsWith(path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase))) continue;
             if (HasGitMarker(candidate))
             {
@@ -59,7 +64,10 @@ internal sealed class GitWorktreeDiscovery
                 }
                 continue;
             }
-            foreach (var child in Directory.EnumerateDirectories(candidate)) pending.Push(child);
+            foreach (var child in Directory.EnumerateDirectories(candidate))
+            {
+                if (!ShouldSkipDirectory(child, root)) pending.Push(child);
+            }
         }
         if (repositories.Count != 1) throw new InvalidOperationException(repositories.Count == 0 ? $"No Git repository was found beneath '{root}'." : $"More than one Git repository was found beneath '{root}'.");
         progress?.Report(new GitDiscoveryProgress("Git worktrees resolved", foldersScanned, repositories.Count));
@@ -97,6 +105,20 @@ internal sealed class GitWorktreeDiscovery
     }
 
     private static bool HasGitMarker(string directory) => Directory.Exists(Path.Combine(directory, ".git")) || File.Exists(Path.Combine(directory, ".git"));
+
+    private static bool ShouldSkipDirectory(string directory, string root)
+    {
+        if (string.Equals(directory, root, StringComparison.OrdinalIgnoreCase)) return false;
+        var name = Path.GetFileName(directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (IgnoredDirectoryNames.Contains(name)) return true;
+        try
+        {
+            return (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (FileNotFoundException) { return true; }
+        catch (DirectoryNotFoundException) { return true; }
+        catch (UnauthorizedAccessException) { return true; }
+    }
 
     private async Task<string?> RunAsync(string directory, CancellationToken cancellationToken)
     {
