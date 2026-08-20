@@ -348,6 +348,7 @@ public partial class MainWindow : Window
         project = new ProjectContext(project!.WorkspaceName, entry.Path);
         Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
         CreateTerminalWorkspace();
+        PopulateWorktrees();
     }
 
     private void MoveSidebarRight_Click(object sender, RoutedEventArgs e) => ApplySidebarSide(SidebarSide.Right);
