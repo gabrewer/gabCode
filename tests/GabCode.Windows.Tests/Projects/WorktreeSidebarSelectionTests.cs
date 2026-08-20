@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using GabCode.Windows;
@@ -44,7 +45,7 @@ public sealed class WorktreeSidebarSelectionTests
                     await WaitUntilAsync(() => WorktreeItems(list).Count == 2);
 
                     var initialPrimary = FindItem(list, repository);
-                    Assert.Equal(Visibility.Visible, SidebarContent(initialPrimary).SelectedIcon.Visibility);
+                    Assert.Contains("selected", AutomationProperties.GetName(SidebarContent(initialPrimary)), StringComparison.Ordinal);
 
                     list.SelectedItem = FindItem(list, feature);
 
@@ -52,8 +53,8 @@ public sealed class WorktreeSidebarSelectionTests
                     var selectedFeature = FindItem(list, feature);
                     var deselectedPrimary = FindItem(list, repository);
                     Assert.Same(selectedFeature, list.SelectedItem);
-                    Assert.Equal(Visibility.Visible, SidebarContent(selectedFeature).SelectedIcon.Visibility);
-                    Assert.Equal(Visibility.Collapsed, SidebarContent(deselectedPrimary).SelectedIcon.Visibility);
+                    Assert.Contains("selected", AutomationProperties.GetName(SidebarContent(selectedFeature)), StringComparison.Ordinal);
+                    Assert.DoesNotContain("selected", AutomationProperties.GetName(SidebarContent(deselectedPrimary)), StringComparison.Ordinal);
                     Assert.Contains(Path.GetFileName(feature), window.Title, StringComparison.Ordinal);
                 }
                 finally
