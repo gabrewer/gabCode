@@ -13,7 +13,11 @@ internal sealed class WorktreeTerminalPair
         Path = WorktreePath.Normalize(path);
         First = new TerminalSessionView(TerminalSessionKind.First, Path, resolveProfile);
         Second = new TerminalSessionView(TerminalSessionKind.Second, Path, resolveProfile);
+        First.SessionChanged += TerminalSessionChanged;
+        Second.SessionChanged += TerminalSessionChanged;
     }
+
+    internal event EventHandler? SessionChanged;
 
     internal string Path { get; }
     internal TerminalSessionView First { get; }
@@ -29,6 +33,8 @@ internal sealed class WorktreeTerminalPair
     }
 
     internal async Task CloseAsync() => await Task.WhenAll(First.CloseAsync(), Second.CloseAsync());
+
+    private void TerminalSessionChanged(object? sender, EventArgs e) => SessionChanged?.Invoke(this, EventArgs.Empty);
 }
 
 internal sealed class WorktreeTerminalRegistry

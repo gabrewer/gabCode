@@ -31,6 +31,6 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("x:Name=\"WorktreeList\" Background=\"Black\" Foreground=\"White\"", xaml);
 
         var code = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows", "MainWindow.xaml.cs"));
-        Assert.Contains("CreateTerminalWorkspace();\n        PopulateWorktrees();", code.Replace("\r\n", "\n"));
+        Assert.Contains("CreateTerminalWorkspace();\n        UpdateSidebarIndicators();", code.Replace("\r\n", "\n"));
     }
 }
