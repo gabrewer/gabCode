@@ -180,9 +180,6 @@ struct WorkspaceProjectView: View {
                             }
                             Text(worktree.branch).font(.caption).foregroundStyle(.secondary)
                             if worktree.availability == .unavailable { Text("Unavailable").font(.caption2) }
-                            if terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0 > 0 {
-                                Text("Running terminals").font(.caption2).foregroundStyle(.secondary)
-                            }
                         }
                         .accessibilityLabel("\(worktree.path.lastPathComponent), \(worktree.branch)\(selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL ? ", selected" : "")\((terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0) > 0 ? ", running terminals" : "")\(worktree.availability == .unavailable ? ", unavailable" : "")")
                         .tag(worktree.path)
