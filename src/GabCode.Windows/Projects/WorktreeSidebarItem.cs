@@ -8,6 +8,7 @@ namespace GabCode.Windows.Projects;
 
 internal sealed class WorktreeSidebarItem : Border
 {
+    private readonly WorktreeNavigationEntry entry;
     private static readonly Geometry CheckCircleGeometry = Geometry.Parse(
         "M9,0.75 A8.25,8.25 0 1 1 9,17.25 A8.25,8.25 0 1 1 9,0.75 M5,9 L7.5,11.5 L13,6");
     private static readonly Geometry BoltCircleGeometry = Geometry.Parse(
@@ -15,6 +16,7 @@ internal sealed class WorktreeSidebarItem : Border
 
     private WorktreeSidebarItem(WorktreeNavigationEntry entry, bool isSelected, bool hasRunningTerminals)
     {
+        this.entry = entry;
         SelectedIcon = CreateIcon(CheckCircleGeometry, isSelected);
         RunningIcon = CreateIcon(BoltCircleGeometry, hasRunningTerminals);
 
@@ -49,7 +51,7 @@ internal sealed class WorktreeSidebarItem : Border
         Padding = new Thickness(4, 3, 4, 3);
         Background = Brushes.Black;
         Child = content;
-        AutomationProperties.SetName(this, BuildAccessibleName(entry, isSelected, hasRunningTerminals));
+        UpdateState(isSelected, hasRunningTerminals);
     }
 
     internal Path SelectedIcon { get; }
@@ -57,6 +59,13 @@ internal sealed class WorktreeSidebarItem : Border
 
     internal static WorktreeSidebarItem Create(WorktreeNavigationEntry entry, bool selected, bool hasRunningTerminals) =>
         new(entry, selected, hasRunningTerminals);
+
+    internal void UpdateState(bool selected, bool hasRunningTerminals)
+    {
+        SelectedIcon.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+        RunningIcon.Visibility = hasRunningTerminals ? Visibility.Visible : Visibility.Collapsed;
+        AutomationProperties.SetName(this, BuildAccessibleName(entry, selected, hasRunningTerminals));
+    }
 
     private static Path CreateIcon(Geometry geometry, bool visible) => new()
     {

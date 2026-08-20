@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private WorktreeNavigationState? worktreeState;
     private WorktreeRefreshCoordinator? refreshCoordinator;
     private bool applyingWorktreeSelection;
+    private readonly HashSet<WorktreeTerminalPair> observedTerminalPairs = [];
 
     public MainWindow()
         : this(null, TerminalProfileResolver.CreateDefault(), new TerminalExitConfirmationService(), isProjectInitialization: true)
@@ -115,6 +116,7 @@ public partial class MainWindow : Window
     private void CreateTerminalWorkspace()
     {
         var pair = (terminalRegistry ??= new WorktreeTerminalRegistry(profileResolver.Resolve)).GetOrCreate(project!.ProjectFolder);
+        ObserveTerminalPair(pair);
         pair.Attach(MainTerminalRegion, BottomTerminalRegion);
         piTerminal = pair.First;
         commandsTerminal = pair.Second;
@@ -324,6 +326,36 @@ public partial class MainWindow : Window
             }
         }
         applyingWorktreeSelection = false;
+        UpdateSidebarIndicators();
+    }
+
+    private void ObserveTerminalPair(WorktreeTerminalPair pair)
+    {
+        if (!observedTerminalPairs.Add(pair)) return;
+        pair.SessionChanged += TerminalPair_SessionChanged;
+    }
+
+    private void TerminalPair_SessionChanged(object? sender, EventArgs e)
+    {
+        if (closeInProgress || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (Dispatcher.CheckAccess()) UpdateSidebarIndicators();
+        else _ = Dispatcher.BeginInvoke(UpdateSidebarIndicators, DispatcherPriority.DataBind);
+    }
+
+    private void UpdateSidebarIndicators()
+    {
+        foreach (var item in WorktreeList.Items.OfType<ListBoxItem>())
+        {
+            if (item.Tag is not WorktreeNavigationEntry entry) continue;
+            var sidebarItem = item.Content as WorktreeSidebarItem ??
+                (item.Content as StackPanel)?.Children.OfType<WorktreeSidebarItem>().FirstOrDefault();
+            if (sidebarItem is null) continue;
+            var selected = WorktreePath.Comparer.Equals(entry.Path, project?.ProjectFolder);
+            var running = (terminalRegistry?.GetActiveTerminalCount(entry.Path) ?? 0) > 0;
+            sidebarItem.UpdateState(selected, running);
+            var name = AutomationProperties.GetName(sidebarItem);
+            AutomationProperties.SetName(item, entry.MissingRefreshes >= 2 ? $"Orphaned terminals: {name}" : name);
+        }
     }
 
     private async void CloseOrphanTerminals_Click(object sender, RoutedEventArgs e)
@@ -341,14 +373,14 @@ public partial class MainWindow : Window
         if (entry.Availability != WorktreeAvailability.Available)
         {
             var pair = terminalRegistry?.GetOrCreate(entry.Path);
-            if (pair is not null) { pair.Attach(MainTerminalRegion, BottomTerminalRegion); piTerminal = pair.First; commandsTerminal = pair.Second; terminalLayout = pair.Layout; }
+            if (pair is not null) { ObserveTerminalPair(pair); pair.Attach(MainTerminalRegion, BottomTerminalRegion); piTerminal = pair.First; commandsTerminal = pair.Second; terminalLayout = pair.Layout; }
             RefreshStatusText.Text = "This worktree is unavailable; worktree-scoped Git actions are unavailable.";
             return;
         }
         project = new ProjectContext(project!.WorkspaceName, entry.Path);
         Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
         CreateTerminalWorkspace();
-        PopulateWorktrees();
+        UpdateSidebarIndicators();
     }
 
     private void MoveSidebarRight_Click(object sender, RoutedEventArgs e) => ApplySidebarSide(SidebarSide.Right);

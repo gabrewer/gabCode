@@ -40,6 +40,11 @@ public sealed class WorktreeSidebarItemTests
             Assert.Equal("feature, feature/demo" + (selected ? ", selected" : string.Empty) + (running ? ", running terminals" : string.Empty), AutomationProperties.GetName(item));
             Assert.Empty(AutomationProperties.GetName(item.SelectedIcon));
             Assert.Empty(AutomationProperties.GetName(item.RunningIcon));
+
+            item.UpdateState(!selected, !running);
+            Assert.Equal(!selected ? Visibility.Visible : Visibility.Collapsed, item.SelectedIcon.Visibility);
+            Assert.Equal(!running ? Visibility.Visible : Visibility.Collapsed, item.RunningIcon.Visibility);
+            Assert.Equal("feature, feature/demo" + (!selected ? ", selected" : string.Empty) + (!running ? ", running terminals" : string.Empty), AutomationProperties.GetName(item));
             return Task.CompletedTask;
         });
     }
