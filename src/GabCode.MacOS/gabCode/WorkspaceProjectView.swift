@@ -172,11 +172,6 @@ struct WorkspaceProjectView: View {
                         VStack(alignment: .leading) {
                             HStack(spacing: 6) {
                                 Text(worktree.path.lastPathComponent)
-                                if selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                        .accessibilityHidden(true)
-                                }
                                 if terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0 > 0 {
                                     Image(systemName: "bolt.horizontal.circle.fill")
                                         .foregroundStyle(.secondary)
