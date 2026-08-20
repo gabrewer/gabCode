@@ -301,9 +301,10 @@ public partial class MainWindow : Window
         WorktreeList.Items.Clear();
         foreach (var entry in worktreeState.Entries)
         {
-            var running = terminalRegistry?.Pairs.Any(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path) && pair.ActiveTerminalCount > 0) is true ? " • terminals running" : string.Empty;
-            var item = new ListBoxItem { Tag = entry, Content = new StackPanel { Children = { new TextBlock { Text = entry.FolderName, FontWeight = FontWeights.SemiBold }, new TextBlock { Text = entry.Branch + (entry.Availability == WorktreeAvailability.Unavailable ? " — unavailable" : running), Foreground = System.Windows.Media.Brushes.White } } } };
-            AutomationProperties.SetName(item, $"{entry.FolderName}, {entry.Branch}, {entry.Availability}");
+            var hasRunningTerminals = terminalRegistry?.Pairs.Any(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path) && pair.ActiveTerminalCount > 0) is true;
+            var isSelected = WorktreePath.Comparer.Equals(entry.Path, project?.ProjectFolder);
+            var item = new ListBoxItem { Tag = entry, Content = WorktreeSidebarItem.Create(entry, isSelected, hasRunningTerminals) };
+            AutomationProperties.SetName(item, AutomationProperties.GetName((WorktreeSidebarItem)item.Content));
             WorktreeList.Items.Add(item);
             if (WorktreePath.Comparer.Equals(entry.Path, project?.ProjectFolder)) WorktreeList.SelectedItem = item;
         }
@@ -314,10 +315,12 @@ public partial class MainWindow : Window
             {
                 var close = new Button { Content = "Close Terminals", Tag = entry, Margin = new Thickness(4, 0, 0, 0) };
                 close.Click += CloseOrphanTerminals_Click;
-                var panel = new StackPanel(); panel.Children.Add(new TextBlock { Text = entry.FolderName, FontWeight = FontWeights.SemiBold });
-                panel.Children.Add(new TextBlock { Text = $"{entry.Branch} — unavailable", Foreground = System.Windows.Media.Brushes.White }); panel.Children.Add(close);
+                var sidebarItem = WorktreeSidebarItem.Create(entry, WorktreePath.Comparer.Equals(entry.Path, project?.ProjectFolder), (terminalRegistry?.GetActiveTerminalCount(entry.Path) ?? 0) > 0);
+                var panel = new StackPanel();
+                panel.Children.Add(sidebarItem);
+                panel.Children.Add(close);
                 var item = new ListBoxItem { Tag = entry, Content = panel };
-                AutomationProperties.SetName(item, $"Orphaned terminals: {entry.FolderName}, {entry.Branch}, unavailable"); WorktreeList.Items.Add(item);
+                AutomationProperties.SetName(item, $"Orphaned terminals: {AutomationProperties.GetName(sidebarItem)}"); WorktreeList.Items.Add(item);
             }
         }
         applyingWorktreeSelection = false;
