@@ -1,7 +1,6 @@
 using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Automation;
-using System.Windows.Shapes;
 using System.Windows.Threading;
 using GabCode.Windows.Projects;
 using GabCode.Windows.Terminal.Hosting;
@@ -17,7 +16,7 @@ public sealed class WorktreeSidebarItemTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public async Task Renders_selected_and_running_icons_without_creating_terminal_pairs(bool selected, bool running)
+    public async Task Renders_running_icon_and_keeps_selection_in_accessible_state(bool selected, bool running)
     {
         await RunOnStaAsync(() =>
         {
@@ -31,18 +30,12 @@ public sealed class WorktreeSidebarItemTests
 
             var item = WorktreeSidebarItem.Create(entry, selected, running);
 
-            Assert.Equal(selected ? Visibility.Visible : Visibility.Collapsed, item.SelectedIcon.Visibility);
             Assert.Equal(running ? Visibility.Visible : Visibility.Collapsed, item.RunningIcon.Visibility);
-            Assert.IsType<Path>(item.SelectedIcon);
-            Assert.IsType<Path>(item.RunningIcon);
-            Assert.NotNull(item.SelectedIcon.Data);
             Assert.NotNull(item.RunningIcon.Data);
             Assert.Equal("feature, feature/demo" + (selected ? ", selected" : string.Empty) + (running ? ", running terminals" : string.Empty), AutomationProperties.GetName(item));
-            Assert.Empty(AutomationProperties.GetName(item.SelectedIcon));
             Assert.Empty(AutomationProperties.GetName(item.RunningIcon));
 
             item.UpdateState(!selected, !running);
-            Assert.Equal(!selected ? Visibility.Visible : Visibility.Collapsed, item.SelectedIcon.Visibility);
             Assert.Equal(!running ? Visibility.Visible : Visibility.Collapsed, item.RunningIcon.Visibility);
             Assert.Equal("feature, feature/demo" + (!selected ? ", selected" : string.Empty) + (!running ? ", running terminals" : string.Empty), AutomationProperties.GetName(item));
             return Task.CompletedTask;
