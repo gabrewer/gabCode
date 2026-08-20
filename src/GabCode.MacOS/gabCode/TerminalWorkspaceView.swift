@@ -68,7 +68,7 @@ struct TerminalWorkspaceView: View {
                 .frame(minHeight: 140, idealHeight: 195)
             }
         }
-        .frame(minWidth: 760, minHeight: 640)
+        .frame(minWidth: WorkspaceWindowLayout.terminalMinimumWidth, minHeight: WorkspaceWindowLayout.minimumHeight)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("terminal-workspace")
         .onChange(of: isActive) { _, active in

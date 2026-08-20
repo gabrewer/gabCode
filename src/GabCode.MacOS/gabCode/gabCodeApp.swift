@@ -23,7 +23,7 @@ struct gabCodeApp: App {
             ContentView()
                 .environmentObject(fontPreference)
         }
-        .defaultSize(width: 760, height: 640)
+        .defaultSize(width: WorkspaceWindowLayout.defaultWidth, height: WorkspaceWindowLayout.defaultHeight)
         .commands {
             TerminalWorkspaceCommands()
         }

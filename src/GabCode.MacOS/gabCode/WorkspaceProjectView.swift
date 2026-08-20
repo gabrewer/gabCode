@@ -60,7 +60,11 @@ struct WorkspaceProjectView: View {
                 emptyOrRecoverySurface
             }
         }
-        .frame(minWidth: 760, minHeight: 640)
+        .frame(
+            minWidth: WorkspaceWindowLayout.minimumWidth,
+            minHeight: WorkspaceWindowLayout.minimumHeight
+        )
+        .background(WindowMinimumSizeBridge())
         .background(WindowIdentityReader { number in
             windowNumber = number
         })
@@ -205,7 +209,11 @@ struct WorkspaceProjectView: View {
                 }
             }
         }
-        .frame(minWidth: 190, idealWidth: 240, maxWidth: 300)
+        .frame(
+            minWidth: WorkspaceWindowLayout.sidebarMinimumWidth,
+            idealWidth: WorkspaceWindowLayout.sidebarIdealWidth,
+            maxWidth: WorkspaceWindowLayout.sidebarMaximumWidth
+        )
         .accessibilityIdentifier("worktree-sidebar")
         Divider()
     }
