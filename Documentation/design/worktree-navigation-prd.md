@@ -73,7 +73,7 @@ The experience should feel like switching Windows Terminal tabs, except each sel
 
 ### 5. Explicit refresh — Must-have
 
-V1 uses a user-invoked **Refresh Worktrees** button in the sidebar header rather than filesystem watchers or automatic reconciliation. The same action is available through the native command surface with `Ctrl+R` on Windows and `Command-R` on macOS.
+V1 uses a user-invoked **Refresh Worktrees** button in the sidebar header rather than filesystem watchers or automatic reconciliation. The same action is available through the native command surface with `F5` on Windows and `Command-R` on macOS.
 
 - Refresh reruns read-only Git worktree discovery.
 - Refresh is keyboard reachable and exposes progress/error state where needed.

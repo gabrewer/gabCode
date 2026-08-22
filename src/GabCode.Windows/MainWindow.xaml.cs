@@ -64,7 +64,7 @@ public partial class MainWindow : Window
         this.exitConfirmation = exitConfirmation ?? throw new ArgumentNullException(nameof(exitConfirmation));
         this.instanceLauncher = instanceLauncher ?? new GabCodeInstanceLauncher();
         InitializeComponent();
-        InputBindings.Add(new KeyBinding(RefreshWorktreesCommand, Key.R, ModifierKeys.Control) { CommandTarget = this });
+        InputBindings.Add(new KeyBinding(RefreshWorktreesCommand, Key.F5, ModifierKeys.None) { CommandTarget = this });
         CommandBindings.Add(new CommandBinding(RefreshWorktreesCommand, RefreshWorktreesCommand_Executed, RefreshWorktreesCommand_CanExecute));
         Closing += MainWindow_Closing;
 
