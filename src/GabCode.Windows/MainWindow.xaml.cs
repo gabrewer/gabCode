@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private WorktreeRefreshCoordinator? refreshCoordinator;
     private bool applyingWorktreeSelection;
     private readonly HashSet<WorktreeTerminalPair> observedTerminalPairs = [];
+    private static readonly RoutedCommand RefreshWorktreesCommand = new("Refresh Worktrees", typeof(MainWindow));
 
     public MainWindow()
         : this(null, TerminalProfileResolver.CreateDefault(), new TerminalExitConfirmationService(), isProjectInitialization: true)
@@ -63,6 +64,8 @@ public partial class MainWindow : Window
         this.exitConfirmation = exitConfirmation ?? throw new ArgumentNullException(nameof(exitConfirmation));
         this.instanceLauncher = instanceLauncher ?? new GabCodeInstanceLauncher();
         InitializeComponent();
+        InputBindings.Add(new KeyBinding(RefreshWorktreesCommand, Key.R, ModifierKeys.Control) { CommandTarget = this });
+        CommandBindings.Add(new CommandBinding(RefreshWorktreesCommand, RefreshWorktreesCommand_Executed, RefreshWorktreesCommand_CanExecute));
         Closing += MainWindow_Closing;
 
         if (project is null)
@@ -261,6 +264,14 @@ public partial class MainWindow : Window
         }
         ActivateProject(nextProject);
         return true;
+    }
+
+    private void RefreshWorktreesCommand_Executed(object sender, ExecutedRoutedEventArgs e) => _ = RefreshWorktreesAsync();
+
+    private void RefreshWorktreesCommand_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+    {
+        e.CanExecute = project is not null && discoveryCancellation is null;
+        e.Handled = true;
     }
 
     private void SwapTerminalsButton_Click(object sender, RoutedEventArgs e)
