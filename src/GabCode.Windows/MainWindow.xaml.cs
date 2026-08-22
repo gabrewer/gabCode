@@ -118,6 +118,7 @@ public partial class MainWindow : Window
     {
         var pair = (terminalRegistry ??= new WorktreeTerminalRegistry(profileResolver.Resolve)).GetOrCreate(project!.ProjectFolder);
         ObserveTerminalPair(pair);
+        MarkTerminalPairOwned(pair);
         pair.Attach(MainTerminalRegion, BottomTerminalRegion);
         piTerminal = pair.First;
         commandsTerminal = pair.Second;
@@ -282,6 +283,7 @@ public partial class MainWindow : Window
             var entries = await worktreeDiscovery.DiscoverEntriesAsync(project.ProjectFolder, cancellationToken: discoveryCancellation.Token);
             var registered = entries.Where(entry => entry.Branch is not null).Select(entry => new RegisteredWorktree(entry.Path, entry.Branch!, entry.IsPrimary));
             worktreeState ??= new WorktreeNavigationState(registered);
+            foreach (var pair in terminalRegistry?.Pairs ?? []) MarkTerminalPairOwned(pair);
             refreshCoordinator ??= new WorktreeRefreshCoordinator(worktreeState);
             if (generation == 0) generation = refreshCoordinator.BeginRefresh();
             if (!refreshCoordinator.TryReconcile(generation, registered)) return;
@@ -330,6 +332,8 @@ public partial class MainWindow : Window
         UpdateSidebarIndicators();
     }
 
+    private void MarkTerminalPairOwned(WorktreeTerminalPair pair) => worktreeState?.MarkTerminalPairCreated(pair.Path);
+
     private void ObserveTerminalPair(WorktreeTerminalPair pair)
     {
         if (!observedTerminalPairs.Add(pair)) return;
@@ -374,7 +378,7 @@ public partial class MainWindow : Window
         if (entry.Availability != WorktreeAvailability.Available)
         {
             var pair = terminalRegistry?.GetOrCreate(entry.Path);
-            if (pair is not null) { ObserveTerminalPair(pair); pair.Attach(MainTerminalRegion, BottomTerminalRegion); piTerminal = pair.First; commandsTerminal = pair.Second; terminalLayout = pair.Layout; }
+            if (pair is not null) { ObserveTerminalPair(pair); MarkTerminalPairOwned(pair); pair.Attach(MainTerminalRegion, BottomTerminalRegion); piTerminal = pair.First; commandsTerminal = pair.Second; terminalLayout = pair.Layout; }
             RefreshStatusText.Text = "This worktree is unavailable; worktree-scoped Git actions are unavailable.";
             return;
         }

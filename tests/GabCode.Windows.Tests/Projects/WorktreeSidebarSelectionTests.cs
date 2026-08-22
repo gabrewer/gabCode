@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.ExceptionServices;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -56,6 +57,62 @@ public sealed class WorktreeSidebarSelectionTests
                     Assert.Contains("selected", AutomationProperties.GetName(SidebarContent(selectedFeature)), StringComparison.Ordinal);
                     Assert.DoesNotContain("selected", AutomationProperties.GetName(SidebarContent(deselectedPrimary)), StringComparison.Ordinal);
                     Assert.Contains(Path.GetFileName(feature), window.Title, StringComparison.Ordinal);
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+        }
+        finally
+        {
+            try { if (Directory.Exists(feature)) RunGit(repository, "worktree", "remove", "--force", feature); }
+            catch { }
+            try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [Fact]
+    public async Task Selected_worktree_pair_becomes_orphaned_after_two_missing_reconciliations()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabCode orphan ownership Ω", Guid.NewGuid().ToString("N"));
+        var repository = Path.Combine(root, "primary");
+        var feature = Path.Combine(root, "feature worktree");
+        Directory.CreateDirectory(repository);
+
+        try
+        {
+            RunGit(repository, "init", "-b", "trunk");
+            RunGit(repository, "config", "user.email", "tests@gabcode.local");
+            RunGit(repository, "config", "user.name", "gabCode Tests");
+            File.WriteAllText(Path.Combine(repository, "README.md"), "fixture");
+            RunGit(repository, "add", "README.md");
+            RunGit(repository, "commit", "-m", "fixture");
+            RunGit(repository, "worktree", "add", "-b", "feature/orphan", feature);
+
+            await RunOnStaAsync(async () =>
+            {
+                var window = new MainWindow(
+                    new ProjectContext("Demo", repository),
+                    CreateCmdResolver(),
+                    new CloseTerminalsConfirmation());
+                try
+                {
+                    var list = Assert.IsType<ListBox>(window.FindName("WorktreeList"));
+                    await WaitUntilAsync(() => WorktreeItems(list).Count == 2);
+                    list.SelectedItem = FindItem(list, feature);
+                    await WaitUntilAsync(() => WorktreePath.Comparer.Equals(window.ProjectFolder, feature));
+
+                    var stateField = typeof(MainWindow).GetField("worktreeState", BindingFlags.Instance | BindingFlags.NonPublic);
+                    var state = Assert.IsType<WorktreeNavigationState>(stateField?.GetValue(window));
+                    var primary = new RegisteredWorktree(repository, "trunk", IsPrimary: true);
+
+                    state.Reconcile([primary]);
+                    state.Reconcile([primary]);
+
+                    var orphan = Assert.Single(state.Orphaned, entry => WorktreePath.Comparer.Equals(entry.Path, feature));
+                    Assert.True(orphan.HasTerminalPair);
                 }
                 finally
                 {
