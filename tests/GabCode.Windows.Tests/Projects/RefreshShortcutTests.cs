@@ -8,7 +8,7 @@ namespace GabCode.Windows.Tests.Projects;
 public sealed class RefreshShortcutTests
 {
     [Fact]
-    public async Task Main_window_registers_ctrl_r_key_binding_for_refresh()
+    public async Task Main_window_registers_f5_key_binding_for_refresh()
     {
         await RunOnStaAsync(() =>
         {
@@ -16,6 +16,9 @@ public sealed class RefreshShortcutTests
             try
             {
                 var binding = Assert.Single(
+                    window.InputBindings.OfType<KeyBinding>(),
+                    candidate => candidate.Key == Key.F5 && candidate.Modifiers == ModifierKeys.None);
+                Assert.DoesNotContain(
                     window.InputBindings.OfType<KeyBinding>(),
                     candidate => candidate.Key == Key.R && candidate.Modifiers == ModifierKeys.Control);
 

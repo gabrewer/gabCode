@@ -38,7 +38,7 @@
                     <MenuItem Header="_View" Background="#242424" Foreground="White" AutomationProperties.Name="View">
                         <MenuItem Header="Move Sidebar _Right" Click="MoveSidebarRight_Click" AutomationProperties.Name="Move sidebar right" />
                         <MenuItem Header="Move Sidebar _Left" Click="MoveSidebarLeft_Click" AutomationProperties.Name="Move sidebar left" />
-                        <MenuItem Header="_Refresh Worktrees" InputGestureText="Ctrl+R" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" />
+                        <MenuItem Header="_Refresh Worktrees" InputGestureText="F5" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" />
                     </MenuItem>
                 </Menu>
                 <Grid Grid.Row="1">

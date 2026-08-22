@@ -24,7 +24,7 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("Move Sidebar _Right", xaml);
         Assert.Contains("Move Sidebar _Left", xaml);
         Assert.Contains("Refresh Worktrees", xaml);
-        Assert.Contains("InputGestureText=\"Ctrl+R\"", xaml);
+        Assert.Contains("InputGestureText=\"F5\"", xaml);
         Assert.Contains("WorktreeSidebar", xaml);
         Assert.Contains("WorktreeList", xaml);
         Assert.Contains("x:Name=\"WorktreeSidebar\" Background=\"Black\"", xaml);
