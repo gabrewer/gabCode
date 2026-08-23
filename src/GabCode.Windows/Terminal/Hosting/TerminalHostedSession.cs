@@ -69,6 +69,13 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     internal Task ResizeAsync(uint rows, uint columns, CancellationToken cancellationToken = default) =>
         Control.ResizeAsync(rows, columns, cancellationToken);
 
+    internal void RefreshLayout()
+    {
+        Control.UpdateLayout();
+        Control.AutoResize = false;
+        Control.AutoResize = true;
+    }
+
     internal string GetSelectedText() => Control.GetSelectedText();
 
     internal void Focus() => _ = Control.Focus();
