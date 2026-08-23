@@ -54,6 +54,7 @@ final class WorkspaceProjectController: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var refreshError: WorkspaceOpenError?
     @Published private(set) var worktreeActionError: WorktreeActionError?
+    @Published private(set) var requestedSelectionPath: URL?
     private let worktreeActionService = GitWorktreeActionService()
 
     let preference: WorkspacePreference
@@ -197,6 +198,7 @@ final class WorkspaceProjectController: ObservableObject {
             )
             worktrees = reconciliation.worktrees
             orphanedWorktreePaths = reconciliation.orphanedPaths
+            requestedSelectionPath = request.location.standardizedFileURL
             return true
         } catch let error as WorktreeActionError {
             worktreeActionError = error
@@ -210,6 +212,75 @@ final class WorkspaceProjectController: ObservableObject {
     func branchChoices() async -> [WorktreeBranchChoice] {
         guard let projectRoot else { return [] }
         return (try? await worktreeActionService.branchChoices(in: projectRoot)) ?? []
+    }
+
+    func worktreeIsDirty(path: URL) async -> Bool? {
+        guard let projectRoot else { return nil }
+        do { return try await worktreeActionService.isDirty(path: path, projectRoot: projectRoot) }
+        catch let error as WorktreeActionError { worktreeActionError = error; return nil }
+        catch { worktreeActionError = .gitFailed(projectRoot, reason: error.localizedDescription); return nil }
+    }
+
+    func removeWorktree(path: URL, force: Bool, deleteLocalBranch: Bool, retainedPaths: [URL] = []) async -> Bool {
+        guard let projectRoot else {
+            worktreeActionError = .invalidLocation(URL(fileURLWithPath: "/"))
+            return false
+        }
+        worktreeActionError = nil
+        do {
+            try await worktreeActionService.remove(
+                path: path,
+                projectRoot: projectRoot,
+                force: force,
+                deleteLocalBranch: deleteLocalBranch
+            )
+            let discovered = try await worktreeDiscovery.worktrees(in: projectRoot)
+            let priorRemaining = worktrees.filter { $0.path.standardizedFileURL != path.standardizedFileURL }
+            let reconciliation = WorktreeReconciliation.reconcile(
+                previous: priorRemaining,
+                discovered: discovered,
+                retainedPaths: retainedPaths.filter { $0.standardizedFileURL != path.standardizedFileURL }
+            )
+            worktrees = reconciliation.worktrees
+            orphanedWorktreePaths = reconciliation.orphanedPaths
+            requestedSelectionPath = discovered.first?.path
+            return true
+        } catch let error as WorktreeActionError {
+            worktreeActionError = error
+            if case .localBranchDeletionFailed = error,
+               let discovered = try? await worktreeDiscovery.worktrees(in: projectRoot) {
+                let reconciliation = WorktreeReconciliation.reconcile(
+                    previous: worktrees.filter { $0.path.standardizedFileURL != path.standardizedFileURL },
+                    discovered: discovered,
+                    retainedPaths: retainedPaths.filter { $0.standardizedFileURL != path.standardizedFileURL }
+                )
+                worktrees = reconciliation.worktrees
+                orphanedWorktreePaths = reconciliation.orphanedPaths
+                requestedSelectionPath = discovered.first?.path
+            } else {
+                await refreshWorktrees(retainedPaths: retainedPaths)
+            }
+            return false
+        } catch {
+            worktreeActionError = .gitFailed(projectRoot, reason: error.localizedDescription)
+            await refreshWorktrees(retainedPaths: retainedPaths)
+            return false
+        }
+    }
+
+    func deleteLocalBranch(_ branch: String, force: Bool) async -> Bool {
+        guard let projectRoot else { return false }
+        do {
+            try await worktreeActionService.deleteLocalBranch(branch, projectRoot: projectRoot, force: force)
+            worktreeActionError = nil
+            return true
+        } catch let error as WorktreeActionError {
+            worktreeActionError = error
+            return false
+        } catch {
+            worktreeActionError = .gitFailed(projectRoot, reason: error.localizedDescription)
+            return false
+        }
     }
 
     func createWorkspace(

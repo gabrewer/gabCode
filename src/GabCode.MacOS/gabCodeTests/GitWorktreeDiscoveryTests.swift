@@ -214,6 +214,68 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: feature.path))
     }
 
+    func testForceRemovesDirtyWorktreeAndCanDeleteMergedLocalBranch() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let feature = project.appendingPathComponent("wt/dirty", isDirectory: true)
+        try makeRepository(at: main, defaultBranch: "trunk")
+        try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["worktree", "add", "--quiet", "-b", "feature/dirty", feature.path, "trunk"])
+        try Data("lost".utf8).write(to: feature.appendingPathComponent("untracked.txt"))
+
+        try await GitWorktreeActionService().remove(path: feature, projectRoot: project, force: true, deleteLocalBranch: true)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: feature.path))
+        XCTAssertEqual(try runGitOutput(in: main, arguments: ["branch", "--list", "feature/dirty"]).trimmingCharacters(in: .whitespacesAndNewlines), "")
+    }
+
+    func testClassifiesDirtyWorktreeBeforeForceRecovery() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let feature = project.appendingPathComponent("wt/dirty status", isDirectory: true)
+        try makeRepository(at: main, defaultBranch: "trunk")
+        try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["worktree", "add", "--quiet", "-b", "feature/dirty-status", feature.path, "trunk"])
+        let service = GitWorktreeActionService()
+        let initiallyDirty = try await service.isDirty(path: feature, projectRoot: project)
+        XCTAssertFalse(initiallyDirty)
+        try Data("untracked".utf8).write(to: feature.appendingPathComponent("untracked.txt"))
+        let dirtyAfterUntrackedFile = try await service.isDirty(path: feature, projectRoot: project)
+        XCTAssertTrue(dirtyAfterUntrackedFile)
+    }
+
+    func testUnmergedLocalBranchIsOnlyForceDeletedAfterWorktreeRemoval() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let feature = project.appendingPathComponent("wt/unmerged", isDirectory: true)
+        try makeRepository(at: main, defaultBranch: "trunk")
+        try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["worktree", "add", "--quiet", "-b", "feature/unmerged", feature.path, "trunk"])
+        try Data("feature".utf8).write(to: feature.appendingPathComponent("feature.txt"))
+        try runGit(in: feature, arguments: ["add", "feature.txt"])
+        try runGit(in: feature, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "feature"])
+        let service = GitWorktreeActionService()
+
+        do {
+            try await service.remove(path: feature, projectRoot: project, force: false, deleteLocalBranch: true)
+            XCTFail("Unmerged branch deletion must require a second force confirmation.")
+        } catch let error as WorktreeActionError {
+            guard case let .localBranchDeletionFailed(branch, _) = error else { return XCTFail("Unexpected error: \(error)") }
+            XCTAssertEqual(branch, "feature/unmerged")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: feature.path))
+        XCTAssertEqual(try runGitOutput(in: main, arguments: ["branch", "--list", "feature/unmerged"]).trimmingCharacters(in: .whitespacesAndNewlines), "feature/unmerged")
+
+        try await service.deleteLocalBranch("feature/unmerged", projectRoot: project, force: true)
+        XCTAssertEqual(try runGitOutput(in: main, arguments: ["branch", "--list", "feature/unmerged"]).trimmingCharacters(in: .whitespacesAndNewlines), "")
+    }
+
     func testRejectsProjectRootWithNoRepository() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
