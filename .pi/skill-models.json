@@ -2,12 +2,12 @@
   "prompts": {
     "pm-agent": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-sol",
       "thinking": "high"
     },
     "team-lead": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-sol",
       "thinking": "medium"
     },
     "build-preview-dmg": {
@@ -29,47 +29,47 @@
   "skills": {
     "product-designer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "high"
     },
     "pm": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-sol",
       "thinking": "high"
     },
     "domain-modeler": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "medium"
     },
     "api-developer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "medium"
     },
     "test-writer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "medium"
     },
     "backend-builder": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "medium"
     },
     "frontend-builder": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "medium"
     },
     "destroyer": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-sol",
       "thinking": "high"
     },
     "review-agent": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-sol",
       "thinking": "high"
     },
     "git-committer": {
@@ -84,7 +84,7 @@
     },
     "dotnet-concurrency-specialist": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "low"
     },
     "gabcode-native-accessibility": {
@@ -99,17 +99,17 @@
     },
     "gabcode-windows-desktop": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "medium"
     },
     "gabcode-macos-desktop": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "medium"
     },
     "gabcode-native-testing": {
       "provider": "openai-codex",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-5.6-terra",
       "thinking": "medium"
     }
   }
