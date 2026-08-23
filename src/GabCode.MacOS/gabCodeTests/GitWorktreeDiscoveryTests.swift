@@ -70,6 +70,20 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         XCTAssertEqual(branches, ["main"])
     }
 
+    func testCreationFormKeepsEditableBranchAndLocationPreviews() {
+        let root = URL(fileURLWithPath: "/tmp/project/wt", isDirectory: true)
+        var form = WorktreeCreationFormState(name: "billing fix", under: root, base: .workspaceSelectedBranch)
+
+        XCTAssertEqual(form.branch, "feature/billing-fix")
+        XCTAssertEqual(form.location, root.appendingPathComponent("wt-billing-fix", isDirectory: true).standardizedFileURL)
+        form.name = "bugfix/urgent"
+        form.refreshDefaults()
+
+        XCTAssertEqual(form.branch, "bugfix/urgent")
+        XCTAssertEqual(form.location, root.appendingPathComponent("wt-bugfix-urgent", isDirectory: true).standardizedFileURL)
+        XCTAssertEqual(form.base, .workspaceSelectedBranch)
+    }
+
     func testPreviewsEditableBranchAndSanitizedLocationDefaults() {
         let root = URL(fileURLWithPath: "/tmp/project/wt", isDirectory: true)
 

@@ -1,5 +1,29 @@
 import Foundation
 
+struct WorktreeCreationFormState: Equatable, Sendable {
+    var name: String
+    var branch: String
+    var location: URL
+    let base: WorktreeCreationBase
+    var useLatestRemote = false
+    var createVSCodeWorkspace = false
+    var openVSCodeAfterCreation = false
+
+    init(name: String, under root: URL, base: WorktreeCreationBase) {
+        self.name = name
+        self.base = base
+        let preview = WorktreeActionPreview.make(name: name, under: root)
+        branch = preview.branch
+        location = preview.location
+    }
+
+    mutating func refreshDefaults() {
+        let preview = WorktreeActionPreview.make(name: name, under: location.deletingLastPathComponent())
+        branch = preview.branch
+        location = preview.location
+    }
+}
+
 struct WorktreeActionPreview: Equatable, Sendable {
     let branch: String
     let location: URL
@@ -24,11 +48,14 @@ struct WorktreeActionPreview: Equatable, Sendable {
         )
     }
 
-    private static func isValidBranchName(_ branch: String) -> Bool {
-        !branch.isEmpty && !branch.contains("..") && !branch.contains("~") && !branch.contains("^") &&
+    static func isValidBranchName(_ branch: String) -> Bool {
+        let components = branch.split(separator: "/", omittingEmptySubsequences: false)
+        return !branch.isEmpty && !branch.contains("..") && !branch.contains("~") && !branch.contains("^") &&
             !branch.contains(":") && !branch.contains("?") && !branch.contains("*") &&
-            !branch.contains("[") && !branch.hasSuffix("/") && !branch.hasSuffix(".") &&
-            !branch.contains("\\") && !branch.contains(" ")
+            !branch.contains("[") && !branch.contains("\\") && !branch.contains("@{") &&
+            !branch.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) &&
+            !branch.hasSuffix("/") && !branch.hasSuffix(".") &&
+            components.allSatisfy { !$0.isEmpty && !$0.hasSuffix(".lock") && !$0.hasPrefix(".") }
     }
 }
 
@@ -55,7 +82,7 @@ struct WorktreeCreationRequest: Equatable, Sendable {
     }
 }
 
-struct WorktreeBranchChoice: Equatable, Sendable {
+struct WorktreeBranchChoice: Hashable, Sendable {
     let name: String
     let isRemote: Bool
     let remote: String?

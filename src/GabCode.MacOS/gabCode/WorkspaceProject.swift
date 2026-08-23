@@ -53,6 +53,8 @@ final class WorkspaceProjectController: ObservableObject {
     @Published private(set) var orphanedWorktreePaths: [URL] = []
     @Published private(set) var isRefreshing = false
     @Published private(set) var refreshError: WorkspaceOpenError?
+    @Published private(set) var worktreeActionError: WorktreeActionError?
+    private let worktreeActionService = GitWorktreeActionService()
 
     let preference: WorkspacePreference
     private var refreshGeneration = 0
@@ -170,6 +172,44 @@ final class WorkspaceProjectController: ObservableObject {
             guard !Task.isCancelled, generation == refreshGeneration else { return }
             refreshError = map(error, projectRoot: projectRoot)
         }
+    }
+
+    func createWorktree(
+        request: WorktreeCreationRequest,
+        selectedWorktreeBranch: String? = nil
+    ) async -> Bool {
+        guard let projectRoot, let workspaceBranch = descriptorBranch else {
+            worktreeActionError = .invalidLocation(projectRoot ?? URL(fileURLWithPath: "/"))
+            return false
+        }
+        worktreeActionError = nil
+        do {
+            let discovered = try await worktreeActionService.create(
+                request: request,
+                projectRoot: projectRoot,
+                workspaceSelectedBranch: workspaceBranch,
+                selectedWorktreeBranch: selectedWorktreeBranch
+            )
+            let reconciliation = WorktreeReconciliation.reconcile(
+                previous: worktrees,
+                discovered: discovered,
+                retainedPaths: []
+            )
+            worktrees = reconciliation.worktrees
+            orphanedWorktreePaths = reconciliation.orphanedPaths
+            return true
+        } catch let error as WorktreeActionError {
+            worktreeActionError = error
+            return false
+        } catch {
+            worktreeActionError = .gitFailed(projectRoot, reason: error.localizedDescription)
+            return false
+        }
+    }
+
+    func branchChoices() async -> [WorktreeBranchChoice] {
+        guard let projectRoot else { return [] }
+        return (try? await worktreeActionService.branchChoices(in: projectRoot)) ?? []
     }
 
     func createWorkspace(
