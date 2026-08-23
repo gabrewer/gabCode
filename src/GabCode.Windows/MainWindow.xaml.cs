@@ -388,7 +388,11 @@ public partial class MainWindow : Window
     {
         if (e.OriginalSource is not ListBoxItem { Tag: WorktreeNavigationEntry entry } item || item.ContextMenu is null) return;
         var delete = item.ContextMenu.Items.OfType<MenuItem>().FirstOrDefault(menu => string.Equals(menu.Header?.ToString(), "Delete worktree", StringComparison.Ordinal));
-        if (delete is not null) delete.IsEnabled = !entry.IsPrimary;
+        if (delete is not null)
+        {
+            delete.Visibility = entry.IsPrimary ? Visibility.Collapsed : Visibility.Visible;
+            delete.IsEnabled = !entry.IsPrimary;
+        }
     }
 
     private static WorktreeNavigationEntry? ContextEntry(object sender)
@@ -574,10 +578,55 @@ public partial class MainWindow : Window
         catch (Exception exception) { RefreshStatusText.Text = $"Could not reveal worktree in Explorer: {exception.Message}"; }
     }
 
-    private void DeleteWorktree_Click(object sender, RoutedEventArgs e)
+    private async void DeleteWorktree_Click(object sender, RoutedEventArgs e)
     {
-        if (ContextEntry(sender) is { } entry && !entry.IsPrimary)
-            RefreshStatusText.Text = "Worktree deletion is handled by the guarded deletion workflow.";
+        if (ContextEntry(sender) is not { } entry || entry.IsPrimary || project is null) return;
+        var dialog = new WorktreeDeletionDialog(entry, terminalRegistry?.GetActiveTerminalCount(entry.Path) ?? 0) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        var activeTerminals = terminalRegistry?.GetActiveTerminalCount(entry.Path) ?? 0;
+        var hasTerminalPair = terminalRegistry?.Pairs.Any(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path)) is true;
+        if (activeTerminals != 0 && exitConfirmation.Confirm(this, activeTerminals) == TerminalExitDecision.Cancel) return;
+        try
+        {
+            await RunWorktreeActionAsync("Removing worktree…", async cancellationToken =>
+            {
+                var dirty = await worktreeDiscovery.HasUncommittedOrUntrackedChangesAsync(entry.Path, cancellationToken);
+                if (activeTerminals != 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
+                IReadOnlyList<GitWorktreeEntry> entries;
+                try
+                {
+                    entries = await worktreeDiscovery.RemoveWorktreeAsync(project.ProjectFolder, entry.Path, force: false, deleteLocalBranch: false, forceBranchDelete: false, cancellationToken: cancellationToken);
+                }
+                catch (InvalidOperationException exception) when (dirty && exception.Message.Contains("modified or untracked", StringComparison.OrdinalIgnoreCase) && ConfirmForceRemoval(entry, exception.Message))
+                {
+                    entries = await worktreeDiscovery.RemoveWorktreeAsync(project.ProjectFolder, entry.Path, force: true, deleteLocalBranch: false, forceBranchDelete: false, cancellationToken: cancellationToken);
+                }
+                if (hasTerminalPair && activeTerminals == 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
+                ReconcileWorktrees(entries);
+                SelectRemainingWorktree(entries);
+                if (!dialog.DeleteLocalBranch || string.IsNullOrWhiteSpace(entry.Branch)) return;
+                try { await worktreeDiscovery.DeleteLocalBranchAsync(project.ProjectFolder, entry.Branch, force: false, cancellationToken); }
+                catch (InvalidOperationException exception) when (ConfirmForceBranchDeletion(entry, exception.Message))
+                {
+                    await worktreeDiscovery.DeleteLocalBranchAsync(project.ProjectFolder, entry.Branch, force: true, cancellationToken);
+                }
+                catch (Exception exception) { RefreshStatusText.Text = $"Worktree removed, but local branch was retained: {exception.Message}"; }
+            });
+        }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not remove worktree: {exception.Message}"; }
+    }
+
+    private bool ConfirmForceRemoval(WorktreeNavigationEntry entry, string error) =>
+        MessageBox.Show(this, $"Git could not safely remove '{entry.Branch}'.\n\n{error}\n\nForce delete this worktree may permanently lose uncommitted and untracked files.", "Force delete this worktree", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+
+    private bool ConfirmForceBranchDeletion(WorktreeNavigationEntry entry, string error) =>
+        MessageBox.Show(this, $"The worktree was removed, but local branch '{entry.Branch}' is unmerged.\n\n{error}\n\nForce deletion permanently removes that local branch.", "Force delete local branch", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+
+    private void SelectRemainingWorktree(IReadOnlyList<GitWorktreeEntry> entries)
+    {
+        if (project is null) return;
+        var selected = entries.FirstOrDefault(item => string.Equals(item.Branch, project.SelectedBranch, StringComparison.Ordinal)) ?? entries.FirstOrDefault(item => item.Branch is not null);
+        if (selected?.Branch is not null) SelectWorktree(selected.Path, selected.Branch);
     }
 
     private async void CloseOrphanTerminals_Click(object sender, RoutedEventArgs e)
