@@ -29,6 +29,9 @@ struct WorkspaceProjectView: View {
     @State private var isPresentingPanel = false
     @State private var windowNumber: Int?
     @State private var selectedWorktreePath: URL?
+    @State private var isPresentingWorktreeCreation = false
+    @State private var creationBase: WorktreeCreationBase = .workspaceSelectedBranch
+    @State private var creationSelectedBranch: String?
     @StateObject private var terminalRegistry = WorkspaceTerminalRegistry()
 
     var body: some View {
@@ -59,6 +62,14 @@ struct WorkspaceProjectView: View {
             } else {
                 emptyOrRecoverySurface
             }
+        }
+        .sheet(isPresented: $isPresentingWorktreeCreation) {
+            WorktreeCreationSheet(
+                controller: controller,
+                base: creationBase,
+                selectedWorktreeBranch: creationSelectedBranch,
+                isPresented: $isPresentingWorktreeCreation
+            )
         }
         .frame(
             minWidth: WorkspaceWindowLayout.minimumWidth,
@@ -183,6 +194,25 @@ struct WorkspaceProjectView: View {
                         }
                         .accessibilityLabel("\(worktree.path.lastPathComponent), \(worktree.branch)\(selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL ? ", selected" : "")\((terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0) > 0 ? ", running terminals" : "")\(worktree.availability == .unavailable ? ", unavailable" : "")")
                         .tag(worktree.path)
+                        .contextMenu {
+                            Button("Create Worktree from Workspace Branch") {
+                                presentCreation(.workspaceSelectedBranch, selectedBranch: nil)
+                            }
+                            Button("Create Worktree from Selected Branch") {
+                                presentCreation(.selectedWorktreeBranch, selectedBranch: worktree.branch)
+                            }
+                            Button("Create Worktree from Existing Branch…") {
+                                presentCreation(.existingLocalBranch(""), selectedBranch: nil)
+                            }
+                            Divider()
+                            Button("Open in VS Code") { openInVSCode(worktree.path) }
+                            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([worktree.path]) }
+                            Divider()
+                            Button("Delete Worktree…", role: .destructive) {
+                                showAlert(title: "Deletion Requires Confirmation", message: "Guarded worktree deletion will be available after terminal and dirty-state confirmation is implemented.")
+                            }
+                                .disabled(worktree.isPrimary)
+                        }
                     }
                 }
                 if !controller.orphanedWorktreePaths.isEmpty {
@@ -208,6 +238,20 @@ struct WorkspaceProjectView: View {
         )
         .accessibilityIdentifier("worktree-sidebar")
         Divider()
+    }
+
+    private func presentCreation(_ base: WorktreeCreationBase, selectedBranch: String?) {
+        creationBase = base
+        creationSelectedBranch = selectedBranch
+        isPresentingWorktreeCreation = true
+    }
+
+    private func openInVSCode(_ path: URL) {
+        guard let application = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode") else {
+            showAlert(title: "VS Code Unavailable", message: "Visual Studio Code could not be found.")
+            return
+        }
+        NSWorkspace.shared.open([path], withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration())
     }
 
     private func closeOrphan(_ path: URL) {
