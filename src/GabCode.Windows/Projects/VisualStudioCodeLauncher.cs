@@ -15,10 +15,19 @@ internal static class VisualStudioCodeLauncher
         _ = Process.Start(info) ?? throw new InvalidOperationException("VS Code could not be started.");
     }
 
-    internal static string FindExecutable(Func<Environment.SpecialFolder, string> folderPath, Func<string, bool> fileExists)
+    internal static string FindExecutable(Func<Environment.SpecialFolder, string> folderPath, Func<string, bool> fileExists, string? pathValue = null)
     {
         ArgumentNullException.ThrowIfNull(folderPath);
         ArgumentNullException.ThrowIfNull(fileExists);
+        foreach (var pathEntry in (pathValue ?? Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var entry = pathEntry.Trim().Trim('"');
+            var candidate = Path.Combine(entry, "Code.exe");
+            if (fileExists(candidate)) return candidate;
+            var parent = Directory.GetParent(entry)?.FullName;
+            candidate = parent is null ? string.Empty : Path.Combine(parent, "Code.exe");
+            if (candidate.Length > 0 && fileExists(candidate)) return candidate;
+        }
         var candidates = new[]
         {
             Path.Combine(folderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Microsoft VS Code", "Code.exe"),
