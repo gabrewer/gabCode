@@ -285,6 +285,29 @@ public sealed class GitWorktreeActionsTests
     }
 
     [Fact]
+    public async Task Requires_explicit_force_to_delete_an_unmerged_local_branch_after_removal()
+    {
+        var root = CreateRoot("gabCode actions unmerged branch");
+        var primary = Path.Combine(root, "primary");
+        var feature = Path.Combine(root, "wt", "unmerged");
+        Directory.CreateDirectory(primary);
+        try
+        {
+            await InitializeRepository(primary, "trunk");
+            Directory.CreateDirectory(Path.GetDirectoryName(feature)!);
+            await Git(primary, ["worktree", "add", "-b", "feature/unmerged", feature]);
+            await File.WriteAllTextAsync(Path.Combine(feature, "unmerged.txt"), "change");
+            await Git(feature, ["add", "."]); await Git(feature, ["commit", "-m", "unmerged"]);
+            await new GitWorktreeDiscovery().RemoveWorktreeAsync(root, feature, force: false, deleteLocalBranch: false, forceBranchDelete: false);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => new GitWorktreeDiscovery().DeleteLocalBranchAsync(root, "feature/unmerged", force: false));
+            await new GitWorktreeDiscovery().DeleteLocalBranchAsync(root, "feature/unmerged", force: true);
+            Assert.DoesNotContain("feature/unmerged", await GitOutput(primary, ["branch", "--list", "feature/unmerged"]), StringComparison.Ordinal);
+        }
+        finally { TryDelete(root); }
+    }
+
+    [Fact]
     public async Task Deletes_a_local_branch_only_after_successful_worktree_removal_when_requested()
     {
         var root = CreateRoot("gabCode actions branch deletion");

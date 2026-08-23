@@ -239,6 +239,14 @@ internal sealed class GitWorktreeDiscovery
         return await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
     }
 
+    internal async Task<bool> HasUncommittedOrUntrackedChangesAsync(string path, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var result = await RunGitAsync(WorktreePath.Normalize(path), ["status", "--porcelain"], cancellationToken);
+        if (result.ExitCode != 0) throw GitFailure($"Git could not inspect worktree '{path}'.", result);
+        return !string.IsNullOrWhiteSpace(result.StandardOutput);
+    }
+
     internal async Task<IReadOnlyList<GitWorktreeEntry>> RemoveWorktreeAsync(
         string projectRoot,
         string path,
@@ -267,6 +275,15 @@ internal sealed class GitWorktreeDiscovery
             if (delete.ExitCode != 0) throw GitFailure($"Worktree was removed, but local branch '{target.Branch}' could not be deleted.", delete);
         }
         return await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+    }
+
+    internal async Task DeleteLocalBranchAsync(string projectRoot, string branch, bool force, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(branch);
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var primary = entries.First().Path;
+        var result = await RunGitAsync(primary, ["branch", force ? "-D" : "-d", branch], cancellationToken);
+        if (result.ExitCode != 0) throw GitFailure($"Local branch '{branch}' could not be deleted.", result);
     }
 
     private static InvalidOperationException GitFailure(string prefix, GitProcessResult result) =>
