@@ -95,12 +95,16 @@ public partial class MainWindow : Window
     internal void ShowPiInMain()
     {
         terminalLayout?.ShowPiInMain();
+        piTerminal?.RefreshLayout();
+        commandsTerminal?.RefreshLayout();
         piTerminal?.FocusTerminal();
     }
 
     internal void ShowCommandsInMain()
     {
         terminalLayout?.ShowCommandsInMain();
+        piTerminal?.RefreshLayout();
+        commandsTerminal?.RefreshLayout();
         commandsTerminal?.FocusTerminal();
     }
 
@@ -558,12 +562,7 @@ public partial class MainWindow : Window
         catch (Exception exception) { RefreshStatusText.Text = $"Could not open worktree in VS Code: {exception.Message}"; }
     }
 
-    private static void OpenInVsCode(string target)
-    {
-        var info = new ProcessStartInfo("code") { UseShellExecute = false };
-        info.ArgumentList.Add(target);
-        _ = Process.Start(info) ?? throw new InvalidOperationException("VS Code could not be started.");
-    }
+    private static void OpenInVsCode(string target) => VisualStudioCodeLauncher.Open(target);
 
     private void RevealWorktree_Click(object sender, RoutedEventArgs e)
     {
