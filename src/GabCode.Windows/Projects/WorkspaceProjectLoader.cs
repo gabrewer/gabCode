@@ -18,6 +18,6 @@ internal sealed class WorkspaceProjectLoader
         var workspace = WorkspaceDocument.Parse(await File.ReadAllTextAsync(fullWorkspacePath, cancellationToken));
         var projectPath = workspace.ResolveProjectPath(fullWorkspacePath);
         var worktree = await worktreeDiscovery.ResolveAsync(projectPath, workspace.Project.Branch, cancellationToken: cancellationToken);
-        return new ProjectContext(workspace.Name, worktree);
+        return new ProjectContext(workspace.Name, worktree, workspace.Project.Branch);
     }
 }

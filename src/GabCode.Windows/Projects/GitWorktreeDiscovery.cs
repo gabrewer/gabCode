@@ -84,6 +84,26 @@ internal sealed class GitWorktreeDiscovery
         return matches[0].Path;
     }
 
+    internal async Task<bool> HasUsableRemoteAsync(string projectRoot, string branch, CancellationToken cancellationToken = default)
+    {
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var primary = entries.First().Path;
+        var remote = await RunGitAsync(primary, ["config", "--get", $"branch.{branch}.remote"], cancellationToken);
+        var merge = await RunGitAsync(primary, ["config", "--get", $"branch.{branch}.merge"], cancellationToken);
+        return remote.ExitCode == 0 && merge.ExitCode == 0 &&
+            !string.IsNullOrWhiteSpace(remote.StandardOutput.Trim()) && remote.StandardOutput.Trim() != "." &&
+            merge.StandardOutput.Trim().StartsWith("refs/heads/", StringComparison.Ordinal);
+    }
+
+    internal async Task<IReadOnlyList<GitBranchReference>> RefreshRemoteBranchesAsync(string projectRoot, CancellationToken cancellationToken = default)
+    {
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var primary = entries.First().Path;
+        var fetch = await RunGitAsync(primary, ["fetch", "--all", "--prune"], cancellationToken);
+        if (fetch.ExitCode != 0) throw GitFailure("Refreshing remote branches failed.", fetch);
+        return await ListBranchesAsync(projectRoot, cancellationToken);
+    }
+
     internal async Task<IReadOnlyList<GitBranchReference>> ListBranchesAsync(string projectRoot, CancellationToken cancellationToken = default)
     {
         var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
@@ -110,6 +130,23 @@ internal sealed class GitWorktreeDiscovery
             }
         }
         return branches.OrderBy(branch => branch.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    internal async Task<string?> ValidateNewWorktreeAsync(string projectRoot, string branch, string path, bool allowExistingLocalBranch = false, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(branch)) return "Enter a branch name.";
+        if (string.IsNullOrWhiteSpace(path)) return "Choose a worktree location.";
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var primary = entries.First().Path;
+        var normalizedPath = WorktreePath.Normalize(path);
+        if (entries.Any(entry => WorktreePath.Comparer.Equals(entry.Path, normalizedPath))) return $"A worktree is already registered at '{normalizedPath}'.";
+        if (Directory.Exists(normalizedPath) || File.Exists(normalizedPath)) return $"The worktree folder already exists: '{normalizedPath}'.";
+        if (entries.Any(entry => string.Equals(entry.Branch, branch, StringComparison.Ordinal))) return $"Branch '{branch}' is already attached to a worktree.";
+        var check = await RunGitAsync(primary, ["check-ref-format", "--branch", branch], cancellationToken);
+        if (check.ExitCode != 0) return $"Invalid branch name '{branch}'.";
+        if (allowExistingLocalBranch) return null;
+        var existing = await RunGitAsync(primary, ["show-ref", "--verify", "--quiet", $"refs/heads/{branch}"], cancellationToken);
+        return existing.ExitCode == 0 ? $"Branch '{branch}' already exists. Use Create worktree from existing branch." : null;
     }
 
     internal async Task<IReadOnlyList<GitWorktreeEntry>> CreateWorktreeAsync(
@@ -183,9 +220,20 @@ internal sealed class GitWorktreeDiscovery
 
         var localBranchExists = await RunGitAsync(primary, ["show-ref", "--verify", "--quiet", $"refs/heads/{localBranch}"], cancellationToken);
         var arguments = new List<string> { "worktree", "add" };
-        if (!localBranchExists.ExitCode.Equals(0)) arguments.Add("-b");
-        arguments.Add(normalizedPath);
-        arguments.Add(sourceRef);
+        if (localBranchExists.ExitCode == 0)
+        {
+            if (!string.Equals(sourceRef, localBranch, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Local branch '{localBranch}' already exists; select it directly instead of remote branch '{sourceRef}'.");
+            arguments.Add(normalizedPath);
+            arguments.Add(localBranch);
+        }
+        else
+        {
+            arguments.Add("-b");
+            arguments.Add(localBranch);
+            arguments.Add(normalizedPath);
+            arguments.Add(sourceRef);
+        }
         var add = await RunGitAsync(primary, arguments, cancellationToken);
         if (add.ExitCode != 0) throw GitFailure($"Could not attach existing branch '{localBranch}'.", add);
         return await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);

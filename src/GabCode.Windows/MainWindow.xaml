@@ -57,7 +57,23 @@
         <Grid x:Name="TerminalWorkspace" Grid.Row="1" Visibility="Collapsed">
             <Grid.ColumnDefinitions><ColumnDefinition x:Name="SidebarColumn" Width="250" /><ColumnDefinition x:Name="TerminalColumn" Width="*" /></Grid.ColumnDefinitions>
             <Border x:Name="WorktreeSidebar" Background="Black" BorderBrush="#4A4A4A" BorderThickness="0,0,1,0" Padding="8" AutomationProperties.Name="Worktrees sidebar">
-                <DockPanel><StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8"><Button x:Name="RefreshWorktreesButton" Background="Black" Foreground="White" Content="Refresh Worktrees" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" /><Button x:Name="CancelRefreshButton" Background="Black" Foreground="White" Margin="8,0,0,0" Content="Cancel" Click="CancelRefresh_Click" Visibility="Collapsed" AutomationProperties.Name="Cancel worktree refresh" /></StackPanel><TextBlock x:Name="RefreshStatusText" DockPanel.Dock="Top" Foreground="White" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /><ListBox x:Name="WorktreeList" Background="Black" Foreground="White" SelectionChanged="WorktreeList_SelectionChanged" AutomationProperties.Name="Worktrees and orphaned terminals" /></DockPanel>
+                <DockPanel><StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8"><Button x:Name="RefreshWorktreesButton" Background="Black" Foreground="White" Content="Refresh Worktrees" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" /><Button x:Name="CancelRefreshButton" Background="Black" Foreground="White" Margin="8,0,0,0" Content="Cancel" Click="CancelRefresh_Click" Visibility="Collapsed" AutomationProperties.Name="Cancel worktree refresh" /></StackPanel><TextBlock x:Name="RefreshStatusText" DockPanel.Dock="Top" Foreground="White" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /><ListBox x:Name="WorktreeList" Background="Black" Foreground="White" SelectionChanged="WorktreeList_SelectionChanged" ContextMenuOpening="WorktreeList_ContextMenuOpening" AutomationProperties.Name="Worktrees and orphaned terminals">
+                    <ListBox.Resources>
+                        <ContextMenu x:Key="WorktreeContextMenu" x:Shared="False" AutomationProperties.Name="Worktree actions">
+                            <MenuItem Header="Create worktree from main" Click="CreateWorktreeFromMain_Click" AutomationProperties.Name="Create worktree from main" />
+                            <MenuItem Header="Create worktree from selected branch" Click="CreateWorktreeFromSelectedBranch_Click" AutomationProperties.Name="Create worktree from selected branch" />
+                            <MenuItem Header="Create worktree from existing branch" Click="CreateWorktreeFromExistingBranch_Click" AutomationProperties.Name="Create worktree from existing branch" />
+                            <Separator />
+                            <MenuItem Header="Delete worktree" Click="DeleteWorktree_Click" AutomationProperties.Name="Delete worktree" />
+                            <Separator />
+                            <MenuItem Header="Open in VS Code" Click="OpenWorktreeInCode_Click" AutomationProperties.Name="Open worktree in VS Code" />
+                            <MenuItem Header="Reveal in Explorer" Click="RevealWorktree_Click" AutomationProperties.Name="Reveal worktree in Explorer" />
+                        </ContextMenu>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="ContextMenu" Value="{StaticResource WorktreeContextMenu}" />
+                        </Style>
+                    </ListBox.Resources>
+                </ListBox></DockPanel>
             </Border>
             <Grid x:Name="TerminalGrid" Grid.Column="1">
                 <Grid.RowDefinitions><RowDefinition Height="2*" MinHeight="250" /><RowDefinition Height="5" /><RowDefinition Height="*" MinHeight="190" /></Grid.RowDefinitions>

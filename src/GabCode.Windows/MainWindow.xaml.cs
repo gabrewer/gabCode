@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -30,6 +32,7 @@ public partial class MainWindow : Window
     private bool closeInProgress;
     private bool allowClose;
     private CancellationTokenSource? discoveryCancellation;
+    private CancellationTokenSource? worktreeActionCancellation;
     private readonly SidebarSidePreference sidebarPreference = new();
     private WorktreeNavigationState? worktreeState;
     private WorktreeRefreshCoordinator? refreshCoordinator;
@@ -283,7 +286,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshWorktreesAsync()
     {
-        if (project is null || discoveryCancellation is not null) return;
+        if (project is null || discoveryCancellation is not null || worktreeActionCancellation is not null) return;
         discoveryCancellation = new CancellationTokenSource();
         var generation = refreshCoordinator?.BeginRefresh() ?? 0;
         RefreshWorktreesButton.IsEnabled = false;
@@ -292,23 +295,30 @@ public partial class MainWindow : Window
         try
         {
             var entries = await worktreeDiscovery.DiscoverEntriesAsync(project.ProjectFolder, cancellationToken: discoveryCancellation.Token);
-            var registered = entries.Where(entry => entry.Branch is not null).Select(entry => new RegisteredWorktree(entry.Path, entry.Branch!, entry.IsPrimary));
-            worktreeState ??= new WorktreeNavigationState(registered);
-            foreach (var pair in terminalRegistry?.Pairs ?? []) MarkTerminalPairOwned(pair);
-            refreshCoordinator ??= new WorktreeRefreshCoordinator(worktreeState);
-            if (generation == 0) generation = refreshCoordinator.BeginRefresh();
-            if (!refreshCoordinator.TryReconcile(generation, registered)) return;
-            PopulateWorktrees();
+            ReconcileWorktrees(entries, generation);
             RefreshStatusText.Text = string.Empty;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            RefreshStatusText.Text = $"Could not refresh worktrees: {exception.Message}";
-        }
+        catch (OperationCanceledException) { RefreshStatusText.Text = "Worktree refresh cancelled."; }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not refresh worktrees: {exception.Message}"; }
         finally { discoveryCancellation.Dispose(); discoveryCancellation = null; RefreshWorktreesButton.IsEnabled = true; CancelRefreshButton.Visibility = Visibility.Collapsed; }
     }
 
-    private void CancelRefresh_Click(object sender, RoutedEventArgs e) => discoveryCancellation?.Cancel();
+    private void ReconcileWorktrees(IReadOnlyList<GitWorktreeEntry> entries, long generation = 0)
+    {
+        var registered = entries.Where(entry => entry.Branch is not null).Select(entry => new RegisteredWorktree(entry.Path, entry.Branch!, entry.IsPrimary));
+        worktreeState ??= new WorktreeNavigationState(registered);
+        foreach (var pair in terminalRegistry?.Pairs ?? []) MarkTerminalPairOwned(pair);
+        refreshCoordinator ??= new WorktreeRefreshCoordinator(worktreeState);
+        if (generation == 0) generation = refreshCoordinator.BeginRefresh();
+        if (!refreshCoordinator.TryReconcile(generation, registered)) return;
+        PopulateWorktrees();
+    }
+
+    private void CancelRefresh_Click(object sender, RoutedEventArgs e)
+    {
+        discoveryCancellation?.Cancel();
+        worktreeActionCancellation?.Cancel();
+    }
 
     private void PopulateWorktrees()
     {
@@ -374,6 +384,202 @@ public partial class MainWindow : Window
         }
     }
 
+    private void WorktreeList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (e.OriginalSource is not ListBoxItem { Tag: WorktreeNavigationEntry entry } item || item.ContextMenu is null) return;
+        var delete = item.ContextMenu.Items.OfType<MenuItem>().FirstOrDefault(menu => string.Equals(menu.Header?.ToString(), "Delete worktree", StringComparison.Ordinal));
+        if (delete is not null) delete.IsEnabled = !entry.IsPrimary;
+    }
+
+    private static WorktreeNavigationEntry? ContextEntry(object sender)
+    {
+        if (sender is not MenuItem menu || menu.Parent is not ContextMenu context || context.PlacementTarget is not ListBoxItem { Tag: WorktreeNavigationEntry entry }) return null;
+        return entry;
+    }
+
+    private async void CreateWorktreeFromMain_Click(object sender, RoutedEventArgs e)
+    {
+        var baseBranch = project?.SelectedBranch ?? ContextEntry(sender)?.Branch;
+        if (!string.IsNullOrWhiteSpace(baseBranch)) await CreateNewWorktreeAsync(baseBranch);
+    }
+
+    private async void CreateWorktreeFromSelectedBranch_Click(object sender, RoutedEventArgs e)
+    {
+        var baseBranch = ContextEntry(sender)?.Branch;
+        if (!string.IsNullOrWhiteSpace(baseBranch)) await CreateNewWorktreeAsync(baseBranch);
+    }
+
+    private async void CreateWorktreeFromExistingBranch_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null) return;
+        try
+        {
+            IReadOnlyList<GitBranchReference> branches = await worktreeDiscovery.ListBranchesAsync(project.ProjectFolder);
+            GitBranchReference selected;
+            while (true)
+            {
+                var picker = new ExistingWorktreeBranchDialog(branches) { Owner = this };
+                if (picker.ShowDialog() == true) { selected = picker.SelectedBranch; break; }
+                if (!picker.RefreshRequested) return;
+                branches = await worktreeDiscovery.RefreshRemoteBranchesAsync(project.ProjectFolder);
+            }
+            var sourceRef = selected.Name;
+            var localBranch = selected.IsRemote && selected.Name.Contains('/', StringComparison.Ordinal)
+                ? selected.Name[(selected.Name.IndexOf('/') + 1)..]
+                : selected.Name;
+            if (selected.IsRemote && branches.Any(branch => !branch.IsRemote && string.Equals(branch.Name, localBranch, StringComparison.Ordinal)))
+            {
+                RefreshStatusText.Text = $"Local branch '{localBranch}' already exists. Select that local branch or choose a different remote branch.";
+                return;
+            }
+            var defaultName = localBranch.Replace('/', '-');
+            var root = WorktreeActionRoot(project.ProjectFolder);
+            var dialog = new WorktreeCreationDialog(selected.Name, defaultName, WorktreeActionNaming.SuggestPath(defaultName, root), branchEditable: false, latestRemoteAvailable: false, validateAsync: ValidateExistingWorktreeAsync, suggestedBranch: localBranch) { Owner = this };
+            if (dialog.ShowDialog() != true) return;
+            await RunWorktreeActionAsync("Creating worktree…", async cancellationToken =>
+            {
+                var entries = await worktreeDiscovery.CreateExistingWorktreeAsync(project.ProjectFolder, localBranch, sourceRef, dialog.WorktreePath, cancellationToken);
+                await CompleteWorktreeCreationAsync(entries, localBranch, dialog);
+            });
+        }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not create worktree: {exception.Message}"; }
+    }
+
+    private async Task CreateNewWorktreeAsync(string baseBranch)
+    {
+        if (project is null) return;
+        try
+        {
+            var root = WorktreeActionRoot(project.ProjectFolder);
+            var latestRemoteAvailable = await worktreeDiscovery.HasUsableRemoteAsync(project.ProjectFolder, baseBranch);
+            var dialog = new WorktreeCreationDialog(baseBranch, "new-worktree", WorktreeActionNaming.SuggestPath("new-worktree", root), latestRemoteAvailable: latestRemoteAvailable, validateAsync: ValidateNewWorktreeAsync) { Owner = this };
+            if (dialog.ShowDialog() != true) return;
+            await RunWorktreeActionAsync("Creating worktree…", async cancellationToken =>
+            {
+                var entries = await worktreeDiscovery.CreateWorktreeAsync(project.ProjectFolder, baseBranch, dialog.BranchName, dialog.WorktreePath, dialog.FetchLatest, cancellationToken);
+                await CompleteWorktreeCreationAsync(entries, dialog.BranchName, dialog);
+            });
+        }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not create worktree: {exception.Message}"; }
+    }
+
+    private async Task RunWorktreeActionAsync(string progress, Func<CancellationToken, Task> action)
+    {
+        if (worktreeActionCancellation is not null) return;
+        worktreeActionCancellation = new CancellationTokenSource();
+        WorktreeList.IsEnabled = false;
+        RefreshWorktreesButton.IsEnabled = false;
+        CancelRefreshButton.Visibility = Visibility.Visible;
+        RefreshStatusText.Text = progress;
+        try { await action(worktreeActionCancellation.Token); }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (project is not null) ReconcileWorktrees(await worktreeDiscovery.DiscoverEntriesAsync(project.ProjectFolder));
+                RefreshStatusText.Text = "Worktree action cancelled.";
+            }
+            catch (Exception exception) { RefreshStatusText.Text = $"Worktree action cancelled; reconciliation failed: {exception.Message}"; }
+        }
+        finally
+        {
+            worktreeActionCancellation.Dispose();
+            worktreeActionCancellation = null;
+            WorktreeList.IsEnabled = true;
+            RefreshWorktreesButton.IsEnabled = true;
+            CancelRefreshButton.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private Task<string?> ValidateNewWorktreeAsync(string branch, string path, CancellationToken cancellationToken) =>
+        project is null ? Task.FromResult<string?>("No workspace is active.") : worktreeDiscovery.ValidateNewWorktreeAsync(project.ProjectFolder, branch, path, cancellationToken: cancellationToken);
+
+    private Task<string?> ValidateExistingWorktreeAsync(string branch, string path, CancellationToken cancellationToken) =>
+        project is null ? Task.FromResult<string?>("No workspace is active.") : worktreeDiscovery.ValidateNewWorktreeAsync(project.ProjectFolder, branch, path, allowExistingLocalBranch: true, cancellationToken: cancellationToken);
+
+    private async Task CompleteWorktreeCreationAsync(IReadOnlyList<GitWorktreeEntry> entries, string branch, WorktreeCreationDialog dialog)
+    {
+        var created = entries.SingleOrDefault(entry => string.Equals(entry.Branch, branch, StringComparison.Ordinal));
+        if (created is null) throw new InvalidOperationException($"Git did not report the created worktree for branch '{branch}'.");
+        var workspaceFileCreated = false;
+        string? workspaceFileError = null;
+        if (dialog.CreateVsCodeWorkspace)
+        {
+            try { await CreateVsCodeWorkspaceAsync(created.Path); workspaceFileCreated = true; }
+            catch (Exception exception) { workspaceFileError = exception.Message; }
+        }
+        ReconcileWorktrees(entries);
+        SelectWorktree(created.Path, branch);
+        if (workspaceFileError is not null)
+            RefreshStatusText.Text = $"Worktree created, but its VS Code workspace file could not be created: {workspaceFileError}";
+        else RefreshStatusText.Text = string.Empty;
+        if (!dialog.OpenInVsCode) return;
+        try
+        {
+            var target = workspaceFileCreated ? Path.Combine(created.Path, $"{Path.GetFileName(created.Path)}.code-workspace") : created.Path;
+            OpenInVsCode(target);
+        }
+        catch (Exception exception) { RefreshStatusText.Text = $"Worktree created, but VS Code could not be opened: {exception.Message}"; }
+    }
+
+    private async Task CreateVsCodeWorkspaceAsync(string worktreePath)
+    {
+        var file = Path.Combine(worktreePath, $"{Path.GetFileName(worktreePath)}.code-workspace");
+        var json = JsonSerializer.Serialize(new { folders = new[] { new { path = "." } }, settings = new { } }, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(file, json);
+    }
+
+    private void SelectWorktree(string path, string branch)
+    {
+        if (project is null) return;
+        project = new ProjectContext(project.WorkspaceName, path, project.SelectedBranch);
+        Title = project.WindowTitle;
+        WorktreePathText.Text = path;
+        WorktreePathText.ToolTip = path;
+        CreateTerminalWorkspace();
+        PopulateWorktrees();
+    }
+
+    private static string WorktreeActionRoot(string worktreePath)
+    {
+        var parent = Directory.GetParent(worktreePath)?.FullName ?? worktreePath;
+        return Path.Combine(parent, "wt");
+    }
+
+    private void OpenWorktreeInCode_Click(object sender, RoutedEventArgs e)
+    {
+        var entry = ContextEntry(sender);
+        if (entry is null) return;
+        try { OpenInVsCode(entry.Path); }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not open worktree in VS Code: {exception.Message}"; }
+    }
+
+    private static void OpenInVsCode(string target)
+    {
+        var info = new ProcessStartInfo("code") { UseShellExecute = false };
+        info.ArgumentList.Add(target);
+        _ = Process.Start(info) ?? throw new InvalidOperationException("VS Code could not be started.");
+    }
+
+    private void RevealWorktree_Click(object sender, RoutedEventArgs e)
+    {
+        var entry = ContextEntry(sender);
+        if (entry is null) return;
+        try
+        {
+            var info = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            info.ArgumentList.Add(entry.Path);
+            _ = Process.Start(info) ?? throw new InvalidOperationException("Explorer could not be started.");
+        }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not reveal worktree in Explorer: {exception.Message}"; }
+    }
+
+    private void DeleteWorktree_Click(object sender, RoutedEventArgs e)
+    {
+        if (ContextEntry(sender) is { } entry && !entry.IsPrimary)
+            RefreshStatusText.Text = "Worktree deletion is handled by the guarded deletion workflow.";
+    }
+
     private async void CloseOrphanTerminals_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: WorktreeNavigationEntry entry } || terminalRegistry is null) return;
@@ -393,7 +599,7 @@ public partial class MainWindow : Window
             RefreshStatusText.Text = "This worktree is unavailable; worktree-scoped Git actions are unavailable.";
             return;
         }
-        project = new ProjectContext(project!.WorkspaceName, entry.Path);
+        project = new ProjectContext(project!.WorkspaceName, entry.Path, project.SelectedBranch);
         Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
         CreateTerminalWorkspace();
         UpdateSidebarIndicators();

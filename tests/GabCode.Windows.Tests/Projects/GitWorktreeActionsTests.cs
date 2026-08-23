@@ -164,6 +164,57 @@ public sealed class GitWorktreeActionsTests
     }
 
     [Fact]
+    public async Task Creates_a_local_branch_worktree_from_a_remote_tracking_branch()
+    {
+        var root = CreateRoot("gabCode actions remote branch");
+        var primary = Path.Combine(root, "primary");
+        var remote = Path.Combine(root, "remote.git");
+        var target = Path.Combine(root, "wt", "remote");
+        Directory.CreateDirectory(primary);
+        try
+        {
+            await InitializeRepository(primary, "trunk");
+            await Git(root, ["init", "--bare", remote]);
+            await Git(primary, ["remote", "add", "origin", remote]);
+            await Git(primary, ["push", "-u", "origin", "trunk"]);
+            await Git(primary, ["branch", "feature/remote-source"]);
+            await Git(primary, ["push", "origin", "feature/remote-source"]);
+            await Git(primary, ["branch", "-D", "feature/remote-source"]);
+
+            var entries = await new GitWorktreeDiscovery().CreateExistingWorktreeAsync(root, "feature/remote-source", "origin/feature/remote-source", target);
+
+            Assert.Contains(entries, entry => entry.Branch == "feature/remote-source" && entry.Path == Path.GetFullPath(target));
+            Assert.Equal("origin/feature/remote-source", (await GitOutput(primary, ["for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/remote-source"])).Trim());
+        }
+        finally { TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task Rejects_remote_selection_when_its_derived_local_branch_already_exists()
+    {
+        var root = CreateRoot("gabCode actions remote collision");
+        var primary = Path.Combine(root, "primary");
+        var remote = Path.Combine(root, "remote.git");
+        var target = Path.Combine(root, "wt", "collision");
+        Directory.CreateDirectory(primary);
+        try
+        {
+            await InitializeRepository(primary, "trunk");
+            await Git(root, ["init", "--bare", remote]);
+            await Git(primary, ["remote", "add", "origin", remote]);
+            await Git(primary, ["push", "-u", "origin", "trunk"]);
+            await Git(primary, ["branch", "feature/collision"]);
+            await Git(primary, ["push", "origin", "feature/collision"]);
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => new GitWorktreeDiscovery().CreateExistingWorktreeAsync(root, "feature/collision", "origin/feature/collision", target));
+
+            Assert.Contains("already exists", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(Directory.Exists(target));
+        }
+        finally { TryDelete(root); }
+    }
+
+    [Fact]
     public async Task Fetch_latest_uses_the_workspace_branch_remote_without_changing_the_existing_worktree()
     {
         var root = CreateRoot("gabCode actions fetch latest");
