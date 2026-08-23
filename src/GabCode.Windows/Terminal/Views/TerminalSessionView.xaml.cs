@@ -36,6 +36,7 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
         SetProfileStatus("Shell profile not resolved");
         SetStateStatus("Not started");
         Loaded += TerminalSessionView_Loaded;
+        SizeChanged += TerminalSessionView_SizeChanged;
     }
 
     internal event EventHandler? SessionChanged;
@@ -121,9 +122,12 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
         ClaimTerminalFocus();
     }
 
+    internal void RefreshLayout() => session?.RefreshLayout();
+
     public async ValueTask DisposeAsync()
     {
         Loaded -= TerminalSessionView_Loaded;
+        SizeChanged -= TerminalSessionView_SizeChanged;
         if (session is not null)
         {
             session.StateChanged -= Session_StateChanged;
@@ -216,6 +220,12 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
                 },
                 System.Windows.Threading.DispatcherPriority.Input);
         }
+    }
+
+    private void TerminalSessionView_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (session is null || e.NewSize.Width <= 0 || e.NewSize.Height <= 0) return;
+        _ = Dispatcher.BeginInvoke(() => session?.RefreshLayout(), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     private void TerminalControl_GotFocus(object sender, RoutedEventArgs e) => ClaimTerminalFocus();
