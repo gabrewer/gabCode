@@ -39,6 +39,7 @@
                         <MenuItem Header="Move Sidebar _Right" Click="MoveSidebarRight_Click" AutomationProperties.Name="Move sidebar right" />
                         <MenuItem Header="Move Sidebar _Left" Click="MoveSidebarLeft_Click" AutomationProperties.Name="Move sidebar left" />
                         <MenuItem Header="_Refresh Worktrees" InputGestureText="F5" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" />
+                        <MenuItem Header="VS Code _Settings…" Click="OpenVisualStudioCodeSettings_Click" AutomationProperties.Name="Open VS Code settings" />
                     </MenuItem>
                 </Menu>
                 <Grid Grid.Row="1">
