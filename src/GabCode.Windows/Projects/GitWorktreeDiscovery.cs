@@ -9,6 +9,8 @@ internal sealed record GitDiscoveryProgress(string Phase, int FoldersScanned, in
 
 internal sealed record GitWorktreeEntry(string Path, string? Branch, bool IsPrimary);
 
+internal sealed record GitBranchReference(string Name, bool IsRemote, string? AttachedPath);
+
 internal sealed class GitWorktreeDiscovery
 {
     private const int MaximumCandidates = 2_000;
@@ -82,6 +84,146 @@ internal sealed class GitWorktreeDiscovery
         return matches[0].Path;
     }
 
+    internal async Task<IReadOnlyList<GitBranchReference>> ListBranchesAsync(string projectRoot, CancellationToken cancellationToken = default)
+    {
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var primary = entries.First().Path;
+        var result = await RunGitAsync(primary, ["for-each-ref", "--format=%(refname)\t%(worktreepath)", "refs/heads", "refs/remotes"], cancellationToken);
+        if (result.ExitCode != 0) throw GitFailure("Git could not list branches.", result);
+
+        var attached = entries.Where(entry => entry.Branch is not null)
+            .ToDictionary(entry => entry.Branch!, entry => entry.Path, StringComparer.Ordinal);
+        var branches = new List<GitBranchReference>();
+        foreach (var line in result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split('\t', 2);
+            if (parts.Length == 0) continue;
+            var reference = parts[0];
+            if (reference.StartsWith("refs/heads/", StringComparison.Ordinal))
+            {
+                var name = reference[11..];
+                branches.Add(new GitBranchReference(name, false, attached.GetValueOrDefault(name)));
+            }
+            else if (reference.StartsWith("refs/remotes/", StringComparison.Ordinal) && !reference.EndsWith("/HEAD", StringComparison.Ordinal))
+            {
+                branches.Add(new GitBranchReference(reference[13..], true, null));
+            }
+        }
+        return branches.OrderBy(branch => branch.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    internal async Task<IReadOnlyList<GitWorktreeEntry>> CreateWorktreeAsync(
+        string projectRoot,
+        string baseBranch,
+        string branch,
+        string path,
+        bool fetchLatest,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseBranch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var primary = entries.First().Path;
+        var normalizedPath = WorktreePath.Normalize(path);
+        if (entries.Any(entry => WorktreePath.Comparer.Equals(entry.Path, normalizedPath)))
+            throw new InvalidOperationException($"A worktree is already registered at '{normalizedPath}'.");
+        if (Directory.Exists(normalizedPath) || File.Exists(normalizedPath))
+            throw new InvalidOperationException($"The worktree folder already exists: '{normalizedPath}'.");
+        if (entries.Any(entry => string.Equals(entry.Branch, branch, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"Branch '{branch}' is already attached to a worktree.");
+
+        var baseRef = baseBranch;
+        if (fetchLatest)
+        {
+            var remote = await RunGitAsync(primary, ["config", "--get", $"branch.{baseBranch}.remote"], cancellationToken);
+            var merge = await RunGitAsync(primary, ["config", "--get", $"branch.{baseBranch}.merge"], cancellationToken);
+            if (remote.ExitCode == 0 && merge.ExitCode == 0)
+            {
+                var remoteName = remote.StandardOutput.Trim();
+                var mergeRef = merge.StandardOutput.Trim();
+                if (!string.IsNullOrWhiteSpace(remoteName) && remoteName != "." && mergeRef.StartsWith("refs/heads/", StringComparison.Ordinal))
+                {
+                    var remoteBranch = mergeRef[11..];
+                    var fetch = await RunGitAsync(primary, ["fetch", remoteName, $"{mergeRef}:refs/remotes/{remoteName}/{remoteBranch}"], cancellationToken);
+                    if (fetch.ExitCode != 0) throw GitFailure("Fetching the latest workspace branch failed.", fetch);
+                    baseRef = $"{remoteName}/{remoteBranch}";
+                }
+            }
+        }
+
+        var check = await RunGitAsync(primary, ["check-ref-format", "--branch", branch], cancellationToken);
+        if (check.ExitCode != 0) throw new InvalidOperationException($"Invalid branch name '{branch}'.");
+        var add = await RunGitAsync(primary, ["worktree", "add", "-b", branch, normalizedPath, baseRef], cancellationToken);
+        if (add.ExitCode != 0) throw GitFailure($"Could not create worktree '{normalizedPath}'.", add);
+        return await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+    }
+
+    internal async Task<IReadOnlyList<GitWorktreeEntry>> CreateExistingWorktreeAsync(
+        string projectRoot,
+        string localBranch,
+        string sourceRef,
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localBranch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var primary = entries.First().Path;
+        var normalizedPath = WorktreePath.Normalize(path);
+        if (entries.Any(entry => WorktreePath.Comparer.Equals(entry.Path, normalizedPath)))
+            throw new InvalidOperationException($"A worktree is already registered at '{normalizedPath}'.");
+        if (Directory.Exists(normalizedPath) || File.Exists(normalizedPath))
+            throw new InvalidOperationException($"The worktree folder already exists: '{normalizedPath}'.");
+        if (entries.Any(entry => string.Equals(entry.Branch, localBranch, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"Branch '{localBranch}' is already attached to a worktree.");
+        var check = await RunGitAsync(primary, ["check-ref-format", "--branch", localBranch], cancellationToken);
+        if (check.ExitCode != 0) throw new InvalidOperationException($"Invalid branch name '{localBranch}'.");
+
+        var localBranchExists = await RunGitAsync(primary, ["show-ref", "--verify", "--quiet", $"refs/heads/{localBranch}"], cancellationToken);
+        var arguments = new List<string> { "worktree", "add" };
+        if (!localBranchExists.ExitCode.Equals(0)) arguments.Add("-b");
+        arguments.Add(normalizedPath);
+        arguments.Add(sourceRef);
+        var add = await RunGitAsync(primary, arguments, cancellationToken);
+        if (add.ExitCode != 0) throw GitFailure($"Could not attach existing branch '{localBranch}'.", add);
+        return await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+    }
+
+    internal async Task<IReadOnlyList<GitWorktreeEntry>> RemoveWorktreeAsync(
+        string projectRoot,
+        string path,
+        bool force,
+        bool deleteLocalBranch,
+        bool forceBranchDelete,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var normalizedPath = WorktreePath.Normalize(path);
+        var target = entries.SingleOrDefault(entry => WorktreePath.Comparer.Equals(entry.Path, normalizedPath))
+            ?? throw new InvalidOperationException($"No registered worktree exists at '{normalizedPath}'.");
+        if (target.IsPrimary) throw new InvalidOperationException("The primary worktree cannot be deleted.");
+        var primary = entries.First().Path;
+        var arguments = new List<string> { "worktree", "remove" };
+        if (force) arguments.Add("--force");
+        arguments.Add(normalizedPath);
+        var remove = await RunGitAsync(primary, arguments, cancellationToken);
+        if (remove.ExitCode != 0) throw GitFailure($"Could not remove worktree '{normalizedPath}'.", remove);
+
+        if (deleteLocalBranch && target.Branch is not null)
+        {
+            var branchArguments = new List<string> { "branch", forceBranchDelete ? "-D" : "-d", target.Branch };
+            var delete = await RunGitAsync(primary, branchArguments, cancellationToken);
+            if (delete.ExitCode != 0) throw GitFailure($"Worktree was removed, but local branch '{target.Branch}' could not be deleted.", delete);
+        }
+        return await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+    }
+
+    private static InvalidOperationException GitFailure(string prefix, GitProcessResult result) =>
+        new($"{prefix} {result.StandardError.Trim()}".Trim());
+
     internal static IReadOnlyList<GitWorktreeEntry> ParseEntries(string output)
     {
         var result = new List<GitWorktreeEntry>();
@@ -122,6 +264,12 @@ internal sealed class GitWorktreeDiscovery
 
     private async Task<string?> RunAsync(string directory, CancellationToken cancellationToken)
     {
+        var result = await RunGitAsync(directory, ["worktree", "list", "--porcelain"], cancellationToken);
+        return result.ExitCode == 0 ? result.StandardOutput : null;
+    }
+
+    private async Task<GitProcessResult> RunGitAsync(string directory, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    {
         using var timeoutCancellation = new CancellationTokenSource(timeout);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCancellation.Token);
         var info = new ProcessStartInfo(executablePath)
@@ -134,7 +282,7 @@ internal sealed class GitWorktreeDiscovery
             StandardErrorEncoding = Encoding.UTF8,
             CreateNoWindow = true,
         };
-        info.ArgumentList.Add("worktree"); info.ArgumentList.Add("list"); info.ArgumentList.Add("--porcelain");
+        foreach (var argument in arguments) info.ArgumentList.Add(argument);
         try
         {
             using var process = Process.Start(info) ?? throw new InvalidOperationException("Git could not be started.");
@@ -148,7 +296,7 @@ internal sealed class GitWorktreeDiscovery
             {
                 TryStop(process);
                 await Task.WhenAll(outputTask, errorTask);
-                throw new TimeoutException("Git worktree discovery timed out.");
+                throw new TimeoutException("Git operation timed out.");
             }
             catch
             {
@@ -156,16 +304,15 @@ internal sealed class GitWorktreeDiscovery
                 await Task.WhenAll(outputTask, errorTask);
                 throw;
             }
-
-            var output = await outputTask;
-            _ = await errorTask;
-            return process.ExitCode == 0 ? output : null;
+            return new GitProcessResult(process.ExitCode, await outputTask, await errorTask);
         }
         catch (Win32Exception)
         {
             throw new InvalidOperationException("Git could not be started.");
         }
     }
+
+    private sealed record GitProcessResult(int ExitCode, string StandardOutput, string StandardError);
 
     private static async Task<string> ReadBoundedAsync(StreamReader reader)
     {
