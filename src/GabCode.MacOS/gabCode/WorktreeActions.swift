@@ -95,6 +95,7 @@ enum WorktreeActionError: Error, Equatable, Sendable {
     case targetAlreadyExists(URL)
     case branchAlreadyExists(String)
     case branchAlreadyAttached(String, URL)
+    case localBranchDeletionFailed(String, reason: String)
     case primaryWorktreeProtected(URL)
     case worktreeNotFound(URL)
     case gitUnavailable(URL)
@@ -186,6 +187,15 @@ final class GitWorktreeActionService: @unchecked Sendable {
         return try await discovery(in: projectRoot)
     }
 
+    func isDirty(path: URL, projectRoot: URL) async throws -> Bool {
+        let entries = try await discovery(in: projectRoot)
+        guard entries.contains(where: { $0.path.standardizedFileURL == path.standardizedFileURL }) else {
+            throw WorktreeActionError.worktreeNotFound(path.standardizedFileURL)
+        }
+        let output = try await run(arguments: ["status", "--porcelain"], in: path)
+        return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     func remove(path: URL, projectRoot: URL, force: Bool, deleteLocalBranch: Bool) async throws {
         try Task.checkCancellation()
         let normalized = path.standardizedFileURL
@@ -200,9 +210,22 @@ final class GitWorktreeActionService: @unchecked Sendable {
         arguments.append(normalized.path)
         _ = try await run(arguments: arguments, in: repository)
         if deleteLocalBranch {
-            _ = try await run(arguments: ["branch", "-d", entry.branch], in: repository)
+            do {
+                _ = try await run(arguments: ["branch", "-d", entry.branch], in: repository)
+            } catch let error as WorktreeActionError {
+                if case let .gitFailed(_, reason) = error {
+                    throw WorktreeActionError.localBranchDeletionFailed(entry.branch, reason: reason)
+                }
+                throw error
+            }
         }
         _ = try await discovery(in: projectRoot)
+    }
+
+    func deleteLocalBranch(_ branch: String, projectRoot: URL, force: Bool) async throws {
+        let entries = try await discovery(in: projectRoot)
+        guard let repository = entries.first?.path else { throw WorktreeActionError.invalidLocation(projectRoot) }
+        _ = try await run(arguments: ["branch", force ? "-D" : "-d", branch], in: repository)
     }
 
     private func discovery(in projectRoot: URL) async throws -> [GitWorktreeEntry] {

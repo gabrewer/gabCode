@@ -58,6 +58,9 @@ struct WorkspaceProjectView: View {
                 .onChange(of: selectedWorktreePath) { _, path in
                     if let path { presentation(for: path).focusMainTerminal() }
                 }
+                .onChange(of: controller.requestedSelectionPath) { _, path in
+                    if let path { selectedWorktreePath = path }
+                }
                 .background(WindowTitleBridge(title: selectedWorktreePath.map { "\(controller.activeDescriptor?.name ?? "gabCode") — \($0.lastPathComponent) — gabCode" } ?? controller.windowTitle))
             } else {
                 emptyOrRecoverySurface
@@ -207,11 +210,12 @@ struct WorkspaceProjectView: View {
                             Divider()
                             Button("Open in VS Code") { openInVSCode(worktree.path) }
                             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([worktree.path]) }
-                            Divider()
-                            Button("Delete Worktree…", role: .destructive) {
-                                showAlert(title: "Deletion Requires Confirmation", message: "Guarded worktree deletion will be available after terminal and dirty-state confirmation is implemented.")
+                            if !worktree.isPrimary {
+                                Divider()
+                                Button("Delete Worktree…", role: .destructive) {
+                                    requestDeletion(worktree)
+                                }
                             }
-                                .disabled(worktree.isPrimary)
                         }
                     }
                 }
@@ -244,6 +248,109 @@ struct WorkspaceProjectView: View {
         creationBase = base
         creationSelectedBranch = selectedBranch
         isPresentingWorktreeCreation = true
+    }
+
+    private func requestDeletion(_ worktree: WorktreeNavigationEntry) {
+        guard !worktree.isPrimary else { return }
+        Task { @MainActor in
+            guard let isDirty = await controller.worktreeIsDirty(path: worktree.path) else { return }
+            confirmDeletion(worktree, isDirty: isDirty)
+        }
+    }
+
+    private func confirmDeletion(_ worktree: WorktreeNavigationEntry, isDirty: Bool) {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+        let presentation = terminalRegistry.existingPresentation(for: worktree.path)
+        let activeCount = presentation?.activeTerminalCount ?? 0
+        let alert = NSAlert()
+        alert.messageText = "Delete worktree \(worktree.path.lastPathComponent)?"
+        alert.informativeText = "Branch: \(worktree.branch)\nPath: \(worktree.path.path)\n\(isDirty ? "This worktree has uncommitted or untracked files. Git will first attempt safe removal." : "Git will attempt safe removal first.")\(activeCount > 0 ? "\nDeleting requires stopping \(activeCount) gabCode-owned terminal processes." : "")"
+        alert.alertStyle = .warning
+        let branchCheckbox = NSButton(checkboxWithTitle: "Also delete local branch", target: nil, action: nil)
+        branchCheckbox.setAccessibilityLabel("Also delete local branch")
+        alert.accessoryView = branchCheckbox
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: activeCount > 0 ? "Stop Terminals and Delete" : "Delete")
+        alert.beginSheetModal(for: window) { [self] response in
+            guard response == .alertSecondButtonReturn else { return }
+            Task { @MainActor in
+                if let presentation, presentation.activeTerminalCount > 0 {
+                    let results = await presentation.workspace.stopResults(gracePeriod: .milliseconds(500))
+                    guard results.allSatisfy({ $0 != .failed }) else {
+                        showAlert(title: "Terminal cleanup did not complete", message: "The worktree was not deleted because an owned process could not be verified as stopped.")
+                        return
+                    }
+                }
+                let deleted = await controller.removeWorktree(
+                    path: worktree.path,
+                    force: false,
+                    deleteLocalBranch: branchCheckbox.state == .on,
+                    retainedPaths: terminalRegistry.retainedPaths
+                )
+                if !deleted {
+                    if case let .localBranchDeletionFailed(branch, _) = controller.worktreeActionError {
+                        terminalRegistry.remove(worktree.path)
+                        confirmForceBranchDeletion(branch)
+                    } else if isDirty {
+                        confirmForceDeletion(worktree, deleteLocalBranch: branchCheckbox.state == .on)
+                    } else {
+                        showAlert(title: "Worktree was not deleted", message: "Git rejected safe removal. Resolve the reported blocker and try again.")
+                    }
+                } else {
+                    terminalRegistry.remove(worktree.path)
+                }
+            }
+        }
+    }
+
+    private func confirmForceBranchDeletion(_ branch: String) {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+        let alert = NSAlert()
+        alert.messageText = "Force delete unmerged branch \(branch)?"
+        alert.informativeText = "The worktree was removed, but Git reported that the local branch is unmerged. Force deletion permanently discards the branch reference."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Keep Branch")
+        alert.addButton(withTitle: "Force Delete Branch")
+        alert.beginSheetModal(for: window) { [self] response in
+            guard response == .alertSecondButtonReturn else { return }
+            Task { @MainActor in
+                if !(await controller.deleteLocalBranch(branch, force: true)) {
+                    showAlert(title: "Branch was not deleted", message: "Git rejected force deletion of the local branch.")
+                }
+            }
+        }
+    }
+
+    private func confirmForceDeletion(_ worktree: WorktreeNavigationEntry, deleteLocalBranch: Bool) {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+        let alert = NSAlert()
+        alert.messageText = "Force delete this worktree?"
+        alert.informativeText = "Safe removal was blocked. Force deletion may permanently lose uncommitted or untracked files. This cannot be undone."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Force Delete")
+        alert.beginSheetModal(for: window) { [self] response in
+            guard response == .alertSecondButtonReturn else { return }
+            Task { @MainActor in
+                let deleted = await controller.removeWorktree(
+                    path: worktree.path,
+                    force: true,
+                    deleteLocalBranch: deleteLocalBranch,
+                    retainedPaths: terminalRegistry.retainedPaths
+                )
+                if !deleted {
+                    if case let .localBranchDeletionFailed(branch, _) = controller.worktreeActionError {
+                        terminalRegistry.remove(worktree.path)
+                        confirmForceBranchDeletion(branch)
+                    } else {
+                        showAlert(title: "Worktree was not deleted", message: "Git rejected force removal. Resolve the reported blocker and try again.")
+                    }
+                } else {
+                    terminalRegistry.remove(worktree.path)
+                    if selectedWorktreePath == worktree.path.standardizedFileURL { selectedWorktreePath = controller.worktrees.first?.path }
+                }
+            }
+        }
     }
 
     private func openInVSCode(_ path: URL) {
