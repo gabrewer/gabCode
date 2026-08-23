@@ -78,9 +78,9 @@ Removal must:
 - Prevent removal of the primary `main` worktree.
 - Refuse normal removal when uncommitted changes exist.
 - Warn clearly when commits have not been pushed.
-- Never use forced removal silently.
+- Never use forced removal silently; force removal requires an explicit secondary recovery confirmation.
 - Stop associated terminals only after explicit confirmation.
-- Never delete the associated branch.
+- Never delete a branch by default. An explicit worktree-removal flow may offer deletion of the associated local branch after successful worktree removal and confirmation; remote branches are never deleted.
 
 A worktree disappears from gabCode when it is no longer returned by Git. gabCode keeps no archive of removed worktrees.
 
@@ -179,8 +179,9 @@ gabCode will not:
 - Infer which PRD or GitHub issue belongs to a worktree.
 - Create, update, close, or comment on GitHub issues.
 - Create, review, merge, or otherwise mutate pull requests.
-- Stage, commit, amend, rebase, merge, push, or delete branches.
-- Force-remove dirty worktrees through normal application actions.
+- Stage, commit, amend, rebase, merge, or push.
+- Delete branches implicitly or as part of normal worktree removal. An explicit guarded worktree-removal action may offer local-branch deletion after confirmation; remote branches are never deleted.
+- Force-remove dirty worktrees silently or without an explicit recovery confirmation.
 - Archive worktrees after Git removes them.
 - Support multiple repositories inside one project in the initial version.
 - Provide hosted execution, team synchronization, or remote terminals.
