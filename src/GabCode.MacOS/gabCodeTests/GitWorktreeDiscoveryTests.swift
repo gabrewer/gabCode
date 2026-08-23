@@ -70,6 +70,136 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         XCTAssertEqual(branches, ["main"])
     }
 
+    func testPreviewsEditableBranchAndSanitizedLocationDefaults() {
+        let root = URL(fileURLWithPath: "/tmp/project/wt", isDirectory: true)
+
+        let preview = WorktreeActionPreview.make(name: "billing fix", under: root)
+
+        XCTAssertEqual(preview.branch, "feature/billing-fix")
+        XCTAssertEqual(preview.location, root.appendingPathComponent("wt-billing-fix", isDirectory: true).standardizedFileURL)
+        XCTAssertTrue(preview.isValidBranch)
+        XCTAssertTrue(preview.isValidLocation)
+    }
+
+    func testCreatesFromWorkspaceBranchAndReconcilesGitWorktrees() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let created = project.appendingPathComponent("wt/billing fix", isDirectory: true)
+        try makeRepository(at: main, defaultBranch: "trunk")
+        try FileManager.default.createDirectory(at: created.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        let request = WorktreeCreationRequest(
+            name: "billing fix",
+            branch: "feature/billing-fix",
+            location: created,
+            base: .workspaceSelectedBranch
+        )
+        let entries = try await GitWorktreeActionService().create(
+            request: request,
+            projectRoot: project,
+            workspaceSelectedBranch: "trunk"
+        )
+
+        XCTAssertEqual(entries.map(\.branch), ["trunk", "feature/billing-fix"])
+        XCTAssertEqual(entries.last?.path, created.standardizedFileURL)
+    }
+
+    func testRejectsPrimaryRemovalAndRemovesSecondaryWithoutDeletingBranch() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let feature = project.appendingPathComponent("wt/feature", isDirectory: true)
+        try makeRepository(at: main, defaultBranch: "trunk")
+        try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["worktree", "add", "--quiet", "-b", "feature/demo", feature.path, "trunk"])
+        let service = GitWorktreeActionService()
+
+        do {
+            try await service.remove(path: main, projectRoot: project, force: false, deleteLocalBranch: false)
+            XCTFail("Primary worktree removal must be rejected.")
+        } catch let error as WorktreeActionError {
+            XCTAssertEqual(error, .primaryWorktreeProtected(main.standardizedFileURL))
+        }
+
+        try await service.remove(path: feature, projectRoot: project, force: false, deleteLocalBranch: false)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: feature.path))
+        XCTAssertEqual(try runGitOutput(in: main, arguments: ["branch", "--list", "feature/demo"]).trimmingCharacters(in: .whitespacesAndNewlines), "feature/demo")
+    }
+
+    func testLatestRemoteRequiresConfiguredWorkspaceUpstream() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let created = project.appendingPathComponent("wt/latest", isDirectory: true)
+        try makeRepository(at: main, defaultBranch: "trunk")
+        try FileManager.default.createDirectory(at: created.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let request = WorktreeCreationRequest(
+            name: "latest",
+            branch: "feature/latest",
+            location: created,
+            base: .workspaceSelectedBranch,
+            useLatestRemote: true
+        )
+
+        do {
+            _ = try await GitWorktreeActionService().create(request: request, projectRoot: project, workspaceSelectedBranch: "trunk")
+            XCTFail("Latest remote creation must require a configured upstream.")
+        } catch let error as WorktreeActionError {
+            guard case .gitFailed = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: created.path))
+    }
+
+    func testTimesOutAStuckGitAction() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("repository", isDirectory: true)
+        try makeRepository(at: repository, defaultBranch: "trunk")
+        let fakeGit = root.appendingPathComponent("fake git")
+        let script = "#!/bin/sh\ncase \"$*\" in *'worktree list'*) printf 'worktree \(repository.path)\\nbranch refs/heads/trunk\\n\\n' ;; *) sleep 5 ;; esac\n"
+        try Data(script.utf8).write(to: fakeGit)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+        let request = WorktreeCreationRequest(
+            name: "stuck",
+            branch: "feature/stuck",
+            location: root.appendingPathComponent("stuck", isDirectory: true),
+            base: .workspaceSelectedBranch
+        )
+
+        do {
+            _ = try await GitWorktreeActionService(gitExecutable: fakeGit, timeout: .milliseconds(50))
+                .create(request: request, projectRoot: repository, workspaceSelectedBranch: "trunk")
+            XCTFail("A stuck action must time out.")
+        } catch let error as WorktreeActionError {
+            guard case let .gitFailed(_, reason) = error else { return XCTFail("Unexpected error: \(error)") }
+            XCTAssertTrue(reason.localizedCaseInsensitiveContains("timed out"))
+        }
+    }
+
+    func testRejectsDirtyRemovalUnlessForceIsExplicit() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let main = project.appendingPathComponent("main", isDirectory: true)
+        let feature = project.appendingPathComponent("wt/feature", isDirectory: true)
+        try makeRepository(at: main, defaultBranch: "trunk")
+        try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try runGit(in: main, arguments: ["worktree", "add", "--quiet", "-b", "feature/dirty", feature.path, "trunk"])
+        try Data("uncommitted".utf8).write(to: feature.appendingPathComponent("untracked.txt"))
+
+        do {
+            try await GitWorktreeActionService().remove(path: feature, projectRoot: project, force: false, deleteLocalBranch: false)
+            XCTFail("Dirty safe removal must fail without force.")
+        } catch let error as WorktreeActionError {
+            guard case .gitFailed = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: feature.path))
+    }
+
     func testRejectsProjectRootWithNoRepository() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -80,6 +210,28 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         } catch let error as GitWorktreeDiscoveryError {
             XCTAssertEqual(error, .repositoryNotFound(root.standardizedFileURL))
         }
+    }
+
+    private func makeRepository(at directory: URL, defaultBranch: String) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try runGit(in: directory, arguments: ["-c", "init.defaultBranch=\(defaultBranch)", "init", "--quiet"])
+        try Data("content".utf8).write(to: directory.appendingPathComponent("README.md"))
+        try runGit(in: directory, arguments: ["add", "."])
+        try runGit(in: directory, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "initial"])
+    }
+
+    private func runGitOutput(in directory: URL, arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + arguments
+        process.currentDirectoryURL = directory
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        return String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
 
     private func runGit(in directory: URL, arguments: [String]) throws {
