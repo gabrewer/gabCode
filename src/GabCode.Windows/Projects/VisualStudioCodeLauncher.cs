@@ -6,10 +6,10 @@ namespace GabCode.Windows.Projects;
 
 internal static class VisualStudioCodeLauncher
 {
-    internal static void Open(string target)
+    internal static void Open(string executable, string target)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
-        var executable = FindExecutable(Environment.GetFolderPath, File.Exists);
         var info = new ProcessStartInfo(executable) { UseShellExecute = false };
         info.ArgumentList.Add(target);
         _ = Process.Start(info) ?? throw new InvalidOperationException("VS Code could not be started.");

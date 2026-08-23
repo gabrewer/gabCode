@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? discoveryCancellation;
     private CancellationTokenSource? worktreeActionCancellation;
     private readonly SidebarSidePreference sidebarPreference = new();
+    private readonly VisualStudioCodePreference visualStudioCodePreference = new();
     private WorktreeNavigationState? worktreeState;
     private WorktreeRefreshCoordinator? refreshCoordinator;
     private bool applyingWorktreeSelection;
@@ -554,6 +555,12 @@ public partial class MainWindow : Window
         return Path.Combine(parent, "wt");
     }
 
+    private void OpenVisualStudioCodeSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new VisualStudioCodeSettingsDialog(visualStudioCodePreference.Resolve()) { Owner = this };
+        if (dialog.ShowDialog() == true) visualStudioCodePreference.Write(dialog.ExecutablePath);
+    }
+
     private void OpenWorktreeInCode_Click(object sender, RoutedEventArgs e)
     {
         var entry = ContextEntry(sender);
@@ -562,7 +569,7 @@ public partial class MainWindow : Window
         catch (Exception exception) { RefreshStatusText.Text = $"Could not open worktree in VS Code: {exception.Message}"; }
     }
 
-    private static void OpenInVsCode(string target) => VisualStudioCodeLauncher.Open(target);
+    private void OpenInVsCode(string target) => VisualStudioCodeLauncher.Open(visualStudioCodePreference.Resolve(), target);
 
     private void RevealWorktree_Click(object sender, RoutedEventArgs e)
     {
