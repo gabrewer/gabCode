@@ -211,7 +211,16 @@ final class WorkspaceProjectController: ObservableObject {
 
     func branchChoices() async -> [WorktreeBranchChoice] {
         guard let projectRoot else { return [] }
-        return (try? await worktreeActionService.branchChoices(in: projectRoot)) ?? []
+        do {
+            worktreeActionError = nil
+            return try await worktreeActionService.branchChoices(in: projectRoot)
+        } catch let error as WorktreeActionError {
+            worktreeActionError = error
+            return []
+        } catch {
+            worktreeActionError = .gitFailed(projectRoot, reason: error.localizedDescription)
+            return []
+        }
     }
 
     func worktreeIsDirty(path: URL) async -> Bool? {

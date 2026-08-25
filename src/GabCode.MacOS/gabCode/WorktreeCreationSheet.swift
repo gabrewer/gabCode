@@ -12,6 +12,8 @@ struct WorktreeCreationSheet: View {
     @State private var selectedExistingBranch = ""
     @State private var isWorking = false
     @State private var localError: String?
+    @State private var isShowingBranchPicker = false
+    @State private var isLoadingBranches = false
 
     init(
         controller: WorkspaceProjectController,
@@ -37,8 +39,10 @@ struct WorktreeCreationSheet: View {
     private var effectiveBase: WorktreeCreationBase {
         guard isExistingMode, let choice = choices.first(where: { choice in
             let key = choice.isRemote ? "remote:\(choice.remote ?? "")/\(choice.name)" : "local:\(choice.name)"
-            return key == selectedExistingBranch
-        }) else { return base }
+            return key == selectedExistingBranch && choice.name == form.branch
+        }) else {
+            return isExistingMode && !form.branch.isEmpty ? .existingLocalBranch(form.branch) : base
+        }
         if choice.isRemote, let remote = choice.remote {
             return .existingRemoteBranch(remote: remote, branch: choice.name)
         }
@@ -50,7 +54,7 @@ struct WorktreeCreationSheet: View {
             !form.location.path.isEmpty &&
             FileManager.default.fileExists(atPath: form.location.deletingLastPathComponent().path) &&
             !FileManager.default.fileExists(atPath: form.location.path) &&
-            (!isExistingMode || !selectedExistingBranch.isEmpty)
+            (!isExistingMode || !form.branch.isEmpty)
     }
 
     var body: some View {
@@ -62,6 +66,22 @@ struct WorktreeCreationSheet: View {
                     .onChange(of: form.name) { _, _ in
                         if !isExistingMode { form.refreshDefaults() }
                     }
+                if isExistingMode {
+                    Section("Existing branch") {
+                        Button(isLoadingBranches ? "Loading branches…" : "Choose from local or remote branches…") {
+                            Task {
+                                await loadChoices()
+                                isShowingBranchPicker = !choices.isEmpty
+                            }
+                        }
+                        .accessibilityIdentifier("choose-existing-branch")
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isLoadingBranches)
+                        .popover(isPresented: $isShowingBranchPicker, arrowEdge: .bottom) {
+                            branchPicker
+                        }
+                    }
+                }
                 TextField("Branch", text: $form.branch)
                     .accessibilityLabel("Branch name")
                 HStack {
@@ -70,24 +90,6 @@ struct WorktreeCreationSheet: View {
                         set: { form.location = URL(fileURLWithPath: $0, isDirectory: true) }
                     ))
                     Button("Browse…") { browseForLocation() }
-                }
-                if isExistingMode {
-                    Picker("Existing branch", selection: $selectedExistingBranch) {
-                        Text("Choose a branch").tag("")
-                        ForEach(choices, id: \.self) { choice in
-                            Text(choiceTitle(choice))
-                                .tag(choiceID(choice))
-                                .disabled(choice.attachedPath != nil)
-                        }
-                    }
-                    .accessibilityLabel("Existing local or remote branch")
-                    .onChange(of: selectedExistingBranch) { _, _ in
-                        if let choice = choices.first(where: { choice in
-                            let key = choice.isRemote ? "remote:\(choice.remote ?? "")/\(choice.name)" : "local:\(choice.name)"
-                            return key == selectedExistingBranch
-                        }) { form.branch = choice.name }
-                    }
-                    Button("Refresh Branches") { loadChoices() }
                 }
                 if case .workspaceSelectedBranch = base {
                     Toggle("Use the latest remote version of the workspace branch", isOn: $form.useLatestRemote)
@@ -112,7 +114,45 @@ struct WorktreeCreationSheet: View {
         }
         .padding(24)
         .frame(minWidth: 540, minHeight: 460)
-        .onAppear { if isExistingMode { loadChoices() } }
+        .onAppear { if isExistingMode { Task { await loadChoices() } } }
+    }
+
+    @ViewBuilder
+    private var branchPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Existing branches")
+                .font(.headline)
+            if choices.isEmpty {
+                Text("No local or remote branches were found.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(choices, id: \.self) { choice in
+                            Button {
+                                selectedExistingBranch = choiceID(choice)
+                                form.branch = choice.name
+                                isShowingBranchPicker = false
+                            } label: {
+                                HStack {
+                                    Text(choiceTitle(choice))
+                                    Spacer()
+                                    if selectedExistingBranch == choiceID(choice) {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(choice.attachedPath != nil)
+                            .opacity(choice.attachedPath == nil ? 1 : 0.5)
+                        }
+                    }
+                }
+                .frame(width: 280, height: 180)
+            }
+            Button("Refresh Branches") { Task { await loadChoices() } }
+        }
+        .padding()
     }
 
     private func choiceID(_ choice: WorktreeBranchChoice) -> String {
@@ -123,8 +163,10 @@ struct WorktreeCreationSheet: View {
         choice.isRemote ? "\(choice.name) (\(choice.remote ?? "remote"))" : choice.name
     }
 
-    private func loadChoices() {
-        Task { choices = await controller.branchChoices() }
+    private func loadChoices() async {
+        isLoadingBranches = true
+        choices = await controller.branchChoices()
+        isLoadingBranches = false
     }
 
     private func browseForLocation() {
