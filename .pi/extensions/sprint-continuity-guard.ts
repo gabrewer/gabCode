@@ -15,7 +15,7 @@ export default function (pi: ExtensionAPI) {
     return { action: "continue" };
   });
 
-  pi.on("before_agent_start", (event) => {
+  pi.on("before_agent_start", (event, ctx) => {
     const sprint = extractSprint(event.prompt) ?? activeSprint;
     if (!sprint) return;
     activeSprint = sprint;
