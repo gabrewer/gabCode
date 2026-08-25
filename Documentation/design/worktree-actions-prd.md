@@ -6,6 +6,7 @@
 | Date | 2026-08-22 |
 | Related baseline | `Documentation/design/projects-and-worktrees-prd.md` |
 | Related navigation | `Documentation/design/worktree-navigation-prd.md` |
+| Reliability follow-up | `Documentation/design/worktree-actions-reliability-prd.md` |
 
 ## Product Name & One-Liner
 
