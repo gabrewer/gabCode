@@ -29,9 +29,13 @@ struct WorkspaceProjectView: View {
     @State private var isPresentingPanel = false
     @State private var windowNumber: Int?
     @State private var selectedWorktreePath: URL?
-    @State private var isPresentingWorktreeCreation = false
-    @State private var creationBase: WorktreeCreationBase = .workspaceSelectedBranch
-    @State private var creationSelectedBranch: String?
+    private struct WorktreeCreationPresentation: Identifiable {
+        let id = UUID()
+        let base: WorktreeCreationBase
+        let selectedBranch: String?
+    }
+
+    @State private var creationPresentation: WorktreeCreationPresentation?
     @StateObject private var terminalRegistry = WorkspaceTerminalRegistry()
 
     var body: some View {
@@ -66,12 +70,15 @@ struct WorkspaceProjectView: View {
                 emptyOrRecoverySurface
             }
         }
-        .sheet(isPresented: $isPresentingWorktreeCreation) {
+        .sheet(item: $creationPresentation) { presentation in
             WorktreeCreationSheet(
                 controller: controller,
-                base: creationBase,
-                selectedWorktreeBranch: creationSelectedBranch,
-                isPresented: $isPresentingWorktreeCreation
+                base: presentation.base,
+                selectedWorktreeBranch: presentation.selectedBranch,
+                isPresented: Binding(
+                    get: { creationPresentation != nil },
+                    set: { if !$0 { creationPresentation = nil } }
+                )
             )
         }
         .frame(
@@ -198,10 +205,10 @@ struct WorkspaceProjectView: View {
                         .accessibilityLabel("\(worktree.path.lastPathComponent), \(worktree.branch)\(selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL ? ", selected" : "")\((terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0) > 0 ? ", running terminals" : "")\(worktree.availability == .unavailable ? ", unavailable" : "")")
                         .tag(worktree.path)
                         .contextMenu {
-                            Button("Create Worktree from Workspace Branch") {
+                            Button("Create Worktree from \(controller.descriptorBranch ?? "Unknown")") {
                                 presentCreation(.workspaceSelectedBranch, selectedBranch: nil)
                             }
-                            Button("Create Worktree from Selected Branch") {
+                            Button("Create Worktree from \(worktree.branch)") {
                                 presentCreation(.selectedWorktreeBranch, selectedBranch: worktree.branch)
                             }
                             Button("Create Worktree from Existing Branch…") {
@@ -212,7 +219,7 @@ struct WorkspaceProjectView: View {
                             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([worktree.path]) }
                             if !worktree.isPrimary {
                                 Divider()
-                                Button("Delete Worktree…", role: .destructive) {
+                                Button("Delete Worktree ‘\(worktree.branch)’…", role: .destructive) {
                                     requestDeletion(worktree)
                                 }
                             }
@@ -245,9 +252,7 @@ struct WorkspaceProjectView: View {
     }
 
     private func presentCreation(_ base: WorktreeCreationBase, selectedBranch: String?) {
-        creationBase = base
-        creationSelectedBranch = selectedBranch
-        isPresentingWorktreeCreation = true
+        creationPresentation = WorktreeCreationPresentation(base: base, selectedBranch: selectedBranch)
     }
 
     private func requestDeletion(_ worktree: WorktreeNavigationEntry) {
