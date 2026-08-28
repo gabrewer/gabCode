@@ -21,6 +21,8 @@ public partial class MainWindow : Window
     private ProjectContext? project;
     private readonly WorkspaceProjectLoader projectLoader = new();
     private readonly WorkspaceProjectCreator projectCreator = new();
+    private readonly WorkspaceSelectionPreference selectionPreference = new();
+    private string? activeWorkspacePath;
     private readonly GitWorktreeDiscovery worktreeDiscovery = new();
     private readonly IGabCodeInstanceLauncher instanceLauncher;
     private readonly TerminalProfileResolver profileResolver;
@@ -163,14 +165,19 @@ public partial class MainWindow : Window
                 return true;
             }
             ActivateProject(nextProject);
-            await new LastWorkspacePreference().WriteAsync(workspacePath);
+            activeWorkspacePath = Path.GetFullPath(workspacePath);
+            await new LastWorkspacePreference().WriteAsync(activeWorkspacePath);
+            if (nextProject.UsedPrimaryFallback)
+                RefreshStatusText.Text = $"The previously selected worktree is no longer available. Opened {Path.GetFileName(nextProject.ProjectFolder)} instead.";
             return true;
         }
         catch (Exception exception)
         {
+            WorktreeFailureHeading.Text = exception is FormatException ? "Invalid workspace file" : "Workspace could not be opened";
             if (project is null)
             {
-                EmptyProjectMessage.Text = $"The last workspace could not be reopened: {exception.Message} Choose another workspace or create one for an existing Git folder.";
+                EmptyProjectHeading.Text = WorktreeFailureHeading.Text;
+                EmptyProjectMessage.Text = $"{exception.Message}\n{Path.GetFullPath(workspacePath)}\nChoose another workspace or create one for an existing Git folder.";
                 EmptyProjectSurface.Visibility = Visibility.Visible;
                 WorktreeFailureSurface.Visibility = Visibility.Collapsed;
             }
@@ -542,6 +549,7 @@ public partial class MainWindow : Window
     {
         if (project is null) return;
         project = new ProjectContext(project.WorkspaceName, path, project.MainBranch);
+        PersistSelectedWorktree(path);
         Title = project.WindowTitle;
         WorktreePathText.Text = path;
         WorktreePathText.ToolTip = path;
@@ -655,9 +663,17 @@ public partial class MainWindow : Window
             return;
         }
         project = new ProjectContext(project!.WorkspaceName, entry.Path, project.MainBranch);
+        PersistSelectedWorktree(entry.Path);
         Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
         CreateTerminalWorkspace();
         UpdateSidebarIndicators();
+    }
+
+    private async void PersistSelectedWorktree(string path)
+    {
+        if (activeWorkspacePath is null) return;
+        try { await selectionPreference.WriteAsync(activeWorkspacePath, path); }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not remember the selected worktree: {exception.Message}"; }
     }
 
     private void MoveSidebarRight_Click(object sender, RoutedEventArgs e) => ApplySidebarSide(SidebarSide.Right);

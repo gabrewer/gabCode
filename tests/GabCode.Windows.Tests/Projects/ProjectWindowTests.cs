@@ -44,7 +44,8 @@ public sealed class ProjectWindowTests
             Assert.False(opened);
             Assert.Null(window.PiTerminal);
             Assert.Equal(Visibility.Visible, window.FindName("EmptyProjectSurface") is FrameworkElement surface ? surface.Visibility : Visibility.Collapsed);
-            Assert.Contains("could not be reopened", ((System.Windows.Controls.TextBlock)window.FindName("EmptyProjectMessage")!).Text);
+            Assert.Equal("Workspace could not be opened", ((System.Windows.Controls.TextBlock)window.FindName("EmptyProjectHeading")!).Text);
+            Assert.Contains(".gabcode-workspace", ((System.Windows.Controls.TextBlock)window.FindName("EmptyProjectMessage")!).Text);
         });
     }
 
