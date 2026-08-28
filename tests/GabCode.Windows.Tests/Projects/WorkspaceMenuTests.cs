@@ -55,11 +55,11 @@ public sealed class WorkspaceMenuTests
     }
 
     [Fact]
-    public void Switching_worktrees_preserves_the_workspace_selected_branch_for_from_main()
+    public void Switching_worktrees_preserves_the_configured_main_branch_for_from_main()
     {
         var code = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows", "MainWindow.xaml.cs"));
-        Assert.Contains("new ProjectContext(project!.WorkspaceName, entry.Path, project.SelectedBranch)", code);
-        Assert.Contains("project?.SelectedBranch ?? ContextEntry(sender)?.Branch", code);
+        Assert.Contains("new ProjectContext(project!.WorkspaceName, entry.Path, project.MainBranch)", code);
+        Assert.Contains("project?.MainBranch ?? ContextEntry(sender)?.Branch", code);
     }
 
     [Fact]

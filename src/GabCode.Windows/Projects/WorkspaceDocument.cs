@@ -16,11 +16,11 @@ internal sealed record WorkspaceDocument(int Version, string Name, WorkspaceProj
         if (!root.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(name.GetString()))
             throw new FormatException("Workspace name is required.");
         if (!root.TryGetProperty("project", out var project)) throw new FormatException("Workspace project is required.");
-        RequireExactProperties(project, "path", "branch");
+        RequireExactProperties(project, "path", "mainBranch");
         if (!project.TryGetProperty("path", out var path) || path.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(path.GetString()) ||
-            !project.TryGetProperty("branch", out var branch) || branch.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(branch.GetString()))
-            throw new FormatException("Workspace project path and branch are required.");
-        return new WorkspaceDocument(value, name.GetString()!, new WorkspaceProject(path.GetString()!, branch.GetString()!));
+            !project.TryGetProperty("mainBranch", out var mainBranch) || mainBranch.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(mainBranch.GetString()))
+            throw new FormatException("Workspace project path and mainBranch are required.");
+        return new WorkspaceDocument(value, name.GetString()!, new WorkspaceProject(path.GetString()!, mainBranch.GetString()!));
     }
 
     internal string ResolveProjectPath(string workspacePath)
@@ -38,7 +38,7 @@ internal sealed record WorkspaceDocument(int Version, string Name, WorkspaceProj
         var directory = Path.GetDirectoryName(fullWorkspacePath)!;
         var path = string.Equals(Path.GetPathRoot(fullWorkspacePath), Path.GetPathRoot(fullProjectPath), StringComparison.OrdinalIgnoreCase)
             ? Path.GetRelativePath(directory, fullProjectPath) : fullProjectPath;
-        return JsonSerializer.Serialize(new { version = Version, name = Name, project = new { path, branch = Project.Branch } }, new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+        return JsonSerializer.Serialize(new { version = Version, name = Name, project = new { path, mainBranch = Project.MainBranch } }, new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
     }
 
     private static void RequireExactProperties(JsonElement element, params string[] names)
@@ -48,4 +48,4 @@ internal sealed record WorkspaceDocument(int Version, string Name, WorkspaceProj
     }
 }
 
-internal sealed record WorkspaceProject(string Path, string Branch);
+internal sealed record WorkspaceProject(string Path, string MainBranch);

@@ -39,6 +39,29 @@ public sealed class OpenWorkspaceWorkflowTests
     }
 
     [Fact]
+    public async Task Opening_accepts_an_unattached_local_main_branch_and_uses_the_primary_worktree()
+    {
+        var root = CreateRepository("unattached main Ω");
+        var descriptor = WriteWorkspace(root, "Demo", "main");
+        RunGit(root, "checkout", "-b", "feature/primary");
+        try
+        {
+            await RunOnStaAsync(async () =>
+            {
+                var window = new MainWindow();
+                try
+                {
+                    Assert.True(await window.OpenWorkspaceAsync(descriptor));
+                    Assert.Equal(Path.GetFullPath(root), window.ProjectFolder);
+                    Assert.Contains("Demo", window.Title, StringComparison.Ordinal);
+                }
+                finally { window.Close(); }
+            });
+        }
+        finally { TryDelete(root); }
+    }
+
+    [Fact]
     public async Task Opening_from_an_occupied_window_launches_once_and_preserves_the_current_project()
     {
         var current = CreateRepository("occupied current");
@@ -128,7 +151,7 @@ public sealed class OpenWorkspaceWorkflowTests
   "name": "{{name}}",
   "project": {
     "path": ".",
-    "branch": "{{branch}}"
+    "mainBranch": "{{branch}}"
   }
 }
 """;

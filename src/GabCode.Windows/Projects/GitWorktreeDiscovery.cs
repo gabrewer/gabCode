@@ -84,6 +84,14 @@ internal sealed class GitWorktreeDiscovery
         return matches[0].Path;
     }
 
+    internal async Task<bool> LocalBranchExistsAsync(string projectRoot, string branch, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(branch);
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var result = await RunGitAsync(entries.First().Path, ["show-ref", "--verify", "--quiet", $"refs/heads/{branch}"], cancellationToken);
+        return result.ExitCode == 0;
+    }
+
     internal async Task<bool> HasUsableRemoteAsync(string projectRoot, string branch, CancellationToken cancellationToken = default)
     {
         var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
