@@ -408,7 +408,7 @@ public partial class MainWindow : Window
 
     private async void CreateWorktreeFromMain_Click(object sender, RoutedEventArgs e)
     {
-        var baseBranch = project?.SelectedBranch ?? ContextEntry(sender)?.Branch;
+        var baseBranch = project?.MainBranch ?? ContextEntry(sender)?.Branch;
         if (!string.IsNullOrWhiteSpace(baseBranch)) await CreateNewWorktreeAsync(baseBranch);
     }
 
@@ -541,7 +541,7 @@ public partial class MainWindow : Window
     private void SelectWorktree(string path, string branch)
     {
         if (project is null) return;
-        project = new ProjectContext(project.WorkspaceName, path, project.SelectedBranch);
+        project = new ProjectContext(project.WorkspaceName, path, project.MainBranch);
         Title = project.WindowTitle;
         WorktreePathText.Text = path;
         WorktreePathText.ToolTip = path;
@@ -631,7 +631,7 @@ public partial class MainWindow : Window
     private void SelectRemainingWorktree(IReadOnlyList<GitWorktreeEntry> entries)
     {
         if (project is null) return;
-        var selected = entries.FirstOrDefault(item => string.Equals(item.Branch, project.SelectedBranch, StringComparison.Ordinal)) ?? entries.FirstOrDefault(item => item.Branch is not null);
+        var selected = entries.FirstOrDefault(item => string.Equals(item.Branch, project.MainBranch, StringComparison.Ordinal)) ?? entries.FirstOrDefault(item => item.Branch is not null);
         if (selected?.Branch is not null) SelectWorktree(selected.Path, selected.Branch);
     }
 
@@ -654,7 +654,7 @@ public partial class MainWindow : Window
             RefreshStatusText.Text = "This worktree is unavailable; worktree-scoped Git actions are unavailable.";
             return;
         }
-        project = new ProjectContext(project!.WorkspaceName, entry.Path, project.SelectedBranch);
+        project = new ProjectContext(project!.WorkspaceName, entry.Path, project.MainBranch);
         Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
         CreateTerminalWorkspace();
         UpdateSidebarIndicators();

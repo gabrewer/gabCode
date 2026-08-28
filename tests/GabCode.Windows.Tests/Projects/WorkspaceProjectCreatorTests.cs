@@ -17,6 +17,11 @@ public sealed class WorkspaceProjectCreatorTests
         try
         {
             await RunGitAsync(repository, ["init", "--initial-branch", "main"]);
+            await RunGitAsync(repository, ["config", "user.email", "test@example.invalid"]);
+            await RunGitAsync(repository, ["config", "user.name", "Test"]);
+            await File.WriteAllTextAsync(Path.Combine(repository, "README.md"), "fixture");
+            await RunGitAsync(repository, ["add", "README.md"]);
+            await RunGitAsync(repository, ["commit", "-m", "fixture"]);
             var launcher = new RecordingLauncher();
             var creator = new WorkspaceProjectCreator(new GitRepositoryValidator(), new WorkspaceFileStore(), launcher);
 
@@ -28,7 +33,8 @@ public sealed class WorkspaceProjectCreatorTests
             Assert.True(File.Exists(descriptor));
             using var json = JsonDocument.Parse(await File.ReadAllTextAsync(descriptor));
             Assert.Equal("Demo", json.RootElement.GetProperty("name").GetString());
-            Assert.Equal("main", json.RootElement.GetProperty("project").GetProperty("branch").GetString());
+            Assert.Equal("main", json.RootElement.GetProperty("project").GetProperty("mainBranch").GetString());
+            Assert.False(json.RootElement.GetProperty("project").TryGetProperty("branch", out _));
         }
         finally
         {

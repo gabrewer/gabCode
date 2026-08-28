@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace GabCode.Windows.Projects;
 
 internal sealed class WorkspaceProjectCreator
@@ -25,11 +27,15 @@ internal sealed class WorkspaceProjectCreator
 
     internal async Task<ProjectContext> CreateAsync(string workspacePath, string workspaceName, string projectRoot, string branch, bool launchNewWindow, CancellationToken cancellationToken = default)
     {
-        _ = await worktreeDiscovery.ResolveAsync(projectRoot, branch, cancellationToken: cancellationToken);
+        var entries = await worktreeDiscovery.DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        if (!await worktreeDiscovery.LocalBranchExistsAsync(projectRoot, branch, cancellationToken))
+            throw new FormatException($"Workspace mainBranch '{branch}' is not a local branch.");
+        var primary = entries.SingleOrDefault(entry => entry.IsPrimary && Directory.Exists(entry.Path))
+            ?? throw new InvalidOperationException("No accessible primary worktree is available.");
         var document = new WorkspaceDocument(1, workspaceName, new WorkspaceProject(projectRoot, branch));
         await store.SaveNewAsync(workspacePath, document, projectRoot, cancellationToken);
         await preference.WriteAsync(workspacePath, cancellationToken);
         if (launchNewWindow) instanceLauncher.Launch(workspacePath);
-        return new ProjectContext(workspaceName, projectRoot);
+        return new ProjectContext(workspaceName, primary.Path, branch);
     }
 }
