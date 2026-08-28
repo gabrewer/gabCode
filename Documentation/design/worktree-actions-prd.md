@@ -28,7 +28,7 @@ Right-clicking a worktree provides native, keyboard-accessible actions.
 
 Primary lifecycle actions:
 
-- **Create worktree from main** — primary creation action, based on the branch selected for the workspace.
+- **Create worktree from main** — primary creation action, based on the workspace's configured local main branch.
 - **Create worktree from selected branch** — creates from the branch belonging to the selected worktree.
 - **Create worktree from existing branch** — opens a branch picker for an existing local or remote-tracking branch.
 - **Delete worktree** — removes the selected secondary worktree through Git.
@@ -54,17 +54,17 @@ The dialog validates branch names, paths, existing folders, branch conflicts, an
 
 ### 3. Base branch and fetch choice — Must-have
 
-**Create worktree from main** uses the branch selected for the workspace. If that local branch may be behind its remote-tracking branch, the dialog offers **Use the latest remote version of the workspace branch**.
+**Create worktree from main** uses the workspace's configured local main branch. If that local branch may be behind its remote-tracking branch, the dialog offers **Use the latest remote version of the workspace main branch**.
 
-Supporting text explains that gabCode will fetch before creating the new worktree and will not change the existing main worktree.
+Supporting text explains that gabCode will fetch before creating the new worktree and will not change any existing worktree checkout.
 
 When selected:
 
-1. gabCode fetches the selected workspace branch from its configured remote.
+1. gabCode fetches the configured workspace main branch from its configured remote.
 2. The new branch is created from the updated remote-tracking ref, such as `origin/main`.
-3. The existing local main worktree is not changed.
+3. No existing worktree checkout is changed.
 
-Fetch is the only update operation in this workflow. gabCode does not pull, merge, rebase, or otherwise modify the selected workspace worktree as a side effect of creation. If fetch fails, the user may retry or explicitly continue from the local workspace branch. If no usable remote branch is configured, gabCode hides the latest-remote option and creates from the local workspace branch without treating the missing remote as an error.
+Fetch is the only update operation in this workflow. gabCode does not pull, merge, rebase, or otherwise modify the selected worktree as a side effect of creation. If fetch fails, the user may retry or explicitly continue from the configured local main branch. If no usable remote branch is configured, gabCode hides the latest-remote option and creates from the configured local main branch without treating the missing remote as an error.
 
 **Create worktree from selected branch** uses the selected worktree's current branch as the base for the new branch. The selected branch is already checked out, so this action creates a new branch; it does not attempt to check out the same branch in two worktrees.
 
@@ -147,7 +147,7 @@ The PRD defines safety rules and observable outcomes, not a mandatory command se
 - `git worktree remove <path>` and `git worktree remove --force <path>` for deletion.
 - Branch deletion only after successful worktree removal, using normal deletion first and explicit force deletion only after the additional unmerged-branch confirmation.
 
-The branch used by **Create worktree from main** is the branch selected for the workspace. It is not required to be named `main`, and this feature does not introduce another branch setting.
+The branch used by **Create worktree from main** is the workspace's configured local `project.mainBranch`. It is not required to be named `main`; it is validated independently of the selected worktree and is not inferred from the primary checkout.
 
 ### Post-operation reconciliation
 
@@ -175,7 +175,7 @@ Process execution, cancellation, terminal shutdown, Git reconciliation, and UI u
 
 ## Milestones
 
-1. **Creation domain and Git adapters** — Implement normalized creation inputs, naming/path previews, workspace-selected-branch resolution, branch conflict classification, direct Git worktree-add flows, and refresh reconciliation.
+1. **Creation domain and Git adapters** — Implement normalized creation inputs, naming/path previews, configured workspace-main-branch resolution, branch conflict classification, direct Git worktree-add flows, and refresh reconciliation.
 2. **Native creation and branch-picker UI** — Add context menus, creation dialog, latest-remote option, existing local/remote branch picker, validation, keyboard paths, and optional workspace/VS Code actions.
 3. **Guarded deletion** — Implement blocker-first deletion confirmation, active terminal/process approval, force-removal warning, optional local branch deletion, unmerged-branch confirmation, and recovery/error handling.
 4. **Cross-platform verification** — Test real temporary repositories with clean/dirty/untracked/unmerged branches, local and remote refs, spaces/Unicode, conflicts, fetch failures, cancellation, active processes, and optional editor/workspace actions separately on Windows and macOS.
