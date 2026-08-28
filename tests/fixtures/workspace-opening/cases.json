@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "valid-main-unattached-primary-on-feature",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"Project ünicode\",\"mainBranch\":\"main\"}}",
+      "repository": {
+        "localRefs": ["refs/heads/main", "refs/heads/feature/active"],
+        "remoteRefs": ["refs/remotes/origin/main"],
+        "registeredWorktrees": [
+          {"id": "primary-feature", "primary": true, "accessible": true, "branch": "feature/active"}
+        ]
+      },
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "open", "selectedWorktreeId": "primary-feature", "fallbackNotice": null}
+    },
+    {
+      "id": "valid-remembered-registered-sibling",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"trunk\"}}",
+      "repository": {
+        "localRefs": ["refs/heads/trunk", "refs/heads/feature/one"],
+        "remoteRefs": [],
+        "registeredWorktrees": [
+          {"id": "primary", "primary": true, "accessible": true, "branch": "feature/one"},
+          {"id": "remembered-sibling", "primary": false, "accessible": true, "branch": "trunk"}
+        ]
+      },
+      "rememberedWorktreeId": "remembered-sibling",
+      "expected": {"outcome": "open", "selectedWorktreeId": "remembered-sibling", "fallbackNotice": null}
+    },
+    {
+      "id": "stale-remembered-sibling-falls-back-to-primary",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": {
+        "localRefs": ["refs/heads/main", "refs/heads/feature/active"],
+        "remoteRefs": [],
+        "registeredWorktrees": [
+          {"id": "primary", "primary": true, "accessible": true, "branch": "feature/active"}
+        ]
+      },
+      "rememberedWorktreeId": "removed-sibling",
+      "expected": {
+        "outcome": "open",
+        "selectedWorktreeId": "primary",
+        "fallbackNotice": "The previously selected worktree is no longer available. Opened <worktree> instead."
+      }
+    },
+    {
+      "id": "inaccessible-remembered-sibling-falls-back-to-primary",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": {
+        "localRefs": ["refs/heads/main"],
+        "remoteRefs": [],
+        "registeredWorktrees": [
+          {"id": "primary", "primary": true, "accessible": true, "branch": "feature/active"},
+          {"id": "remembered-sibling", "primary": false, "accessible": false, "branch": "main"}
+        ]
+      },
+      "rememberedWorktreeId": "remembered-sibling",
+      "expected": {
+        "outcome": "open",
+        "selectedWorktreeId": "primary",
+        "fallbackNotice": "The previously selected worktree is no longer available. Opened <worktree> instead."
+      }
+    },
+    {
+      "id": "remote-only-main-is-invalid",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": {
+        "localRefs": ["refs/heads/feature/active"],
+        "remoteRefs": ["refs/remotes/origin/main"],
+        "registeredWorktrees": [
+          {"id": "primary", "primary": true, "accessible": true, "branch": "feature/active"}
+        ]
+      },
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Configured local main branch does not exist.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "missing-local-main-is-invalid",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"trunk\"}}",
+      "repository": {
+        "localRefs": ["refs/heads/feature/active"],
+        "remoteRefs": [],
+        "registeredWorktrees": [
+          {"id": "primary", "primary": true, "accessible": true, "branch": "feature/active"}
+        ]
+      },
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Configured local main branch does not exist.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "no-accessible-registered-worktree-fails-opening",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": {
+        "localRefs": ["refs/heads/main"],
+        "remoteRefs": [],
+        "registeredWorktrees": [
+          {"id": "primary", "primary": true, "accessible": false, "branch": "feature/active"}
+        ]
+      },
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Workspace could not be opened", "reason": "No accessible registered worktree is available.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "no-primary-worktree-fails-opening",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": {
+        "localRefs": ["refs/heads/main"],
+        "remoteRefs": [],
+        "registeredWorktrees": [
+          {"id": "sibling", "primary": false, "accessible": true, "branch": "feature/active"}
+        ]
+      },
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Workspace could not be opened", "reason": "No accessible primary worktree is available.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "malformed-json",
+      "descriptorJson": "{not json",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Malformed JSON.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "former-branch-property-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"branch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Unknown project property: branch.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "unknown-top-level-property-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"},\"extra\":true}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Unknown workspace property: extra.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "missing-main-branch-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace project mainBranch is required.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "wrong-main-branch-type-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":1}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace project mainBranch must be a string.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "empty-main-branch-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"   \"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace project mainBranch must not be empty.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "wrong-version-type-is-rejected",
+      "descriptorJson": "{\"version\":\"1\",\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace version must be an integer.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "empty-name-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace name must not be empty.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "missing-version-is-rejected",
+      "descriptorJson": "{\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace version is required.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "unsupported-version-is-rejected",
+      "descriptorJson": "{\"version\":2,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace version 1 is required.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "missing-name-is-rejected",
+      "descriptorJson": "{\"version\":1,\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace name is required.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "wrong-name-type-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":false,\"project\":{\"path\":\"project\",\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace name must be a string.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "missing-project-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\"}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace project is required.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "wrong-project-type-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":[]}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace project must be an object.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "missing-project-path-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace project path is required.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "wrong-project-path-type-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":false,\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace project path must be a string.", "selectedWorktreeId": null, "fallbackNotice": null}
+    },
+    {
+      "id": "empty-project-path-is-rejected",
+      "descriptorJson": "{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"   \",\"mainBranch\":\"main\"}}",
+      "repository": null,
+      "rememberedWorktreeId": null,
+      "expected": {"outcome": "failure", "heading": "Invalid workspace file", "reason": "Workspace project path must not be empty.", "selectedWorktreeId": null, "fallbackNotice": null}
+    }
+  ]
+}
