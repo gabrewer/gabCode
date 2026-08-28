@@ -54,9 +54,9 @@ project/
 ### 2. Workspace Identity and Branch Selection — Must-have
 
 - Create or open a `*.gabcode-workspace` descriptor at the project root, including when that root is not itself a Git repository.
-- A workspace records the project-root path and the user-selected branch/worktree identity; it does not infer identity from a folder named `main`.
-- Resolve the selected branch to its current Git worktree using read-only Git queries before starting terminals. A normal repository checkout is a valid primary worktree; additional worktrees appear only when registered with Git.
-- If the project root, repository discovery, or selected branch cannot be resolved, show actionable recovery and start no terminals.
+- A workspace records the project-root path and the repository's configured local main branch; selected-worktree state is local per-user presentation state and is not inferred from a folder named `main`.
+- Validate the configured local main branch through read-only Git queries, then resolve a remembered available worktree path or Git's primary worktree before starting terminals. A normal repository checkout is a valid primary worktree; additional worktrees appear only when registered with Git.
+- If the project root, repository discovery, configured local main branch, or any accessible registered worktree cannot be resolved, show actionable recovery and start no terminals. A stale remembered worktree instead falls back visibly to Git's primary worktree.
 - Keep the descriptor independent of terminal state, output, Git status, and local preferences.
 - Opening or creating a workspace launches a separate native project window; it never stops or replaces another window's project or terminals. Existing terminal cleanup remains authoritative for close and quit.
 
@@ -75,7 +75,7 @@ Creation supports:
 Removal must:
 
 - Use `git worktree remove`; never delete the directory directly.
-- Prevent removal of the primary `main` worktree.
+- Prevent removal of Git's primary worktree, regardless of its currently checked-out branch.
 - Refuse normal removal when uncommitted changes exist.
 - Warn clearly when commits have not been pushed.
 - Never use forced removal silently; force removal requires an explicit secondary recovery confirmation.
@@ -109,7 +109,7 @@ For the selected worktree, gabCode shows:
 
 - Uncommitted files as **Work in progress**.
 - Added, changed, deleted, and renamed files.
-- Commits unique to the worktree branch relative to the configured primary branch.
+- Commits unique to the worktree branch relative to the configured `project.mainBranch`.
 - Commit message, SHA, author, timestamp, and file statistics.
 - A read-only diff for each commit.
 - A cumulative comparison against the worktree's base.
@@ -209,7 +209,7 @@ The workspace descriptor is a language-neutral artifact owned by the user. The c
   "name": "gabCode Development",
   "project": {
     "path": "..",
-    "branch": "trunk"
+    "mainBranch": "trunk"
   }
 }
 ```
@@ -217,10 +217,10 @@ The workspace descriptor is a language-neutral artifact owned by the user. The c
 - `name` is required and non-empty.
 - `project.path` is relative to the descriptor when relative, or a native absolute path.
 - `project.path` may be a non-Git project root containing the repository's worktrees.
-- `project.branch` is an ordinary branch name; `main`, `master`, and `trunk` have no special behavior.
-- Git worktree data resolves the branch to the terminal working directory at activation time.
-- Git and the filesystem remain authoritative; terminal state, status, output, and preferences do not enter the descriptor.
-- This is the initial workspace descriptor contract; no existing workspace files require migration.
+- `project.mainBranch` is a required, non-empty ordinary local branch name; `main`, `master`, and `trunk` have no special behavior. It must exist under `refs/heads` and does not need to be checked out or have a registered worktree.
+- Git worktree data and the filesystem resolve the terminal working directory at activation time: an available locally remembered worktree is selected when present, otherwise Git's primary worktree is selected. A stale remembered path falls back visibly without rewriting the descriptor.
+- Git and the filesystem remain authoritative; terminal state, status, output, and preferences do not enter the descriptor. The locally remembered selected-worktree path is revalidated presentation state, not repository authority.
+- This is the initial workspace descriptor contract; because it remains unreleased, version 1 rejects the former `project.branch` shape and requires no migration.
 
 ### Windows Terminal Implementation
 

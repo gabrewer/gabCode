@@ -22,9 +22,9 @@ This increment assumes the developer has already created the repository and work
 
 When the user opens a valid workspace, gabCode discovers the single Git repository/worktree set beneath its configured project root using read-only Git queries. Git's `git worktree list --porcelain` output is authoritative.
 
-- Every branch-bearing Git-registered worktree is listed, including the normal repository checkout. Detached worktrees remain out of scope for v1 because the workspace contract identifies selection by branch.
-- The workspace's selected branch/worktree is selected on activation.
-- A missing selected worktree produces recovery; gabCode does not silently choose another worktree.
+- Every branch-bearing Git-registered worktree is listed, including the normal repository checkout. Detached worktrees remain out of scope for v1.
+- Workspace opening selects a revalidated locally remembered registered worktree when available; with no remembered selection, it selects Git's primary worktree.
+- A remembered worktree that is no longer available falls back to Git's primary worktree with visible recovery notice; no accessible primary worktree produces a visible opening failure.
 - Discovery remains limited to the existing workspace contract: exactly one repository/worktree set beneath the project root.
 
 ### 2. Simple worktree sidebar — Must-have
@@ -55,7 +55,7 @@ Selecting an available worktree changes gabCode's selected context immediately w
 - The active title/context and project chrome update to the selected worktree.
 - Git actions in later increments must use the selected worktree context, not the focused terminal's current directory.
 - Keyboard users can move through the sidebar and activate a worktree without pointer-only interaction.
-- Switching changes in-memory window context only; it does not rewrite `project.branch` in the workspace descriptor. Reopening starts from the descriptor-selected branch until a later local selected-worktree preference is approved.
+- Switching updates platform-owned local selected-worktree presentation state only; it does not rewrite `project.mainBranch` in the workspace descriptor. Reopening uses the revalidated remembered worktree when available and otherwise Git's primary worktree.
 
 ### 4. Lazy terminal creation and retention — Must-have
 
@@ -107,7 +107,7 @@ If Git no longer reports a previously discovered worktree, gabCode keeps it visi
 - Automatically killing processes for unavailable or removed worktrees.
 - Multiple repositories beneath one workspace root.
 - Detached-worktree navigation, worktree pop-out windows, worktree-to-PR associations, or Git worktree cleanup workflows.
-- Persisting the last worktree selection or sidebar width; reopening begins from the workspace descriptor's selected branch. Sidebar side is the only layout preference added in this increment.
+- Persisting sidebar width. Selected-worktree persistence is platform-owned workspace-opening presentation state; it is never written to the workspace descriptor. Sidebar side is the only layout preference defined by this increment.
 - Interpreting terminal content or managing Pi sessions.
 - Shared production runtime code, sidecars, HTTP services, databases, or internal client/core protocols.
 
@@ -116,12 +116,12 @@ If Git no longer reports a previously discovered worktree, gabCode keeps it visi
 ### Startup and activation
 
 1. Open or create a valid workspace through the existing workspace foundation.
-2. Resolve the workspace's selected branch to a registered worktree.
-3. Discover all registered worktrees beneath the project root.
+2. Validate the workspace's configured local main branch independently of worktree selection.
+3. Discover all registered worktrees beneath the project root and select a revalidated remembered worktree or Git's primary worktree.
 4. Show the sidebar with the selected worktree active.
 5. Create that worktree's two terminals lazily as activation completes.
 
-If the selected worktree cannot be resolved, show actionable recovery, keep the project terminal-free, and do not select a different worktree automatically.
+If no accessible registered primary worktree can be resolved, show actionable recovery and keep the project terminal-free. A stale remembered worktree follows the explicit primary-worktree fallback and notice above.
 
 ### Switching
 
@@ -144,13 +144,13 @@ If the selected worktree cannot be resolved, show actionable recovery, keep the 
 ## Technical Considerations
 
 - Implement Windows and macOS independently in their native clients: C#/WPF and Swift/SwiftUI/AppKit.
-- Reuse the workspace v1 descriptor and existing project activation contracts. No workspace schema change is planned. Store sidebar side only in platform-owned per-user preferences.
+- Reuse the corrected workspace v1 descriptor and project activation contracts. `project.mainBranch` is validated as a local branch but does not select a worktree. Store sidebar side and the revalidated selected-worktree hint only in platform-owned per-user preferences; never write either into the descriptor.
 - Use installed Git directly with argument-safe invocation of `git worktree list --porcelain`.
 - Treat Git as authoritative for registered worktree identity and paths. Local UI state may retain terminal sessions and temporary unavailable presentation but does not replace Git authority.
 - Model terminal ownership by the stable normalized worktree path for the session. Switching UI context, temporary unavailability, or sidebar removal must not terminate or redirect a terminal.
 - Bound discovery, cancellation, stale-result handling, output capture, and cleanup on both platforms.
 - Preserve native accessibility: keyboard navigation, visible focus, accessible folder/branch labels, active/unavailable state announcements, refresh progress/errors, and ordinary terminal input.
-- Test real temporary Git repositories with multiple registered worktrees, spaces/Unicode, missing selected branches, refresh races, process retention, and cleanup.
+- Test real temporary Git repositories with multiple registered worktrees, spaces/Unicode, a primary checkout on a feature branch while `mainBranch` remains local and unattached, stale remembered selections, refresh races, process retention, and cleanup.
 
 ## Platform Differences
 
