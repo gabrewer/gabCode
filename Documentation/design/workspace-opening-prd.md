@@ -26,11 +26,10 @@ This correction is for gabCode developers on Windows and macOS who expect a work
 
 ### 1. Correct workspace-file identity — Must-have
 
-The unreleased version 1 workspace file has this exact shape:
+A workspace file supplies the fields gabCode currently needs; it may contain additional fields:
 
 ```json
 {
-  "version": 1,
   "name": "gabCode Development",
   "project": {
     "path": "../project",
@@ -44,7 +43,8 @@ The unreleased version 1 workspace file has this exact shape:
 - The named branch must exist as a local branch under `refs/heads`; a remote-tracking branch alone is insufficient.
 - The main branch does not need to be checked out and does not need to have its own registered worktree.
 - `project.path`, not `project.mainBranch`, identifies the project root from which gabCode discovers the single repository/worktree set.
-- Because the workspace contract has not been released, its version remains `1`. There is no compatibility parser or migration for the former `project.branch` shape.
+- `version` is neither required nor interpreted for parsing. Unknown top-level and `project` properties are ignored so future fields do not break older clients.
+- There is no fallback from the former `project.branch` shape; `project.mainBranch` remains required.
 
 ### 2. Worktree-independent opening — Must-have
 
@@ -68,7 +68,7 @@ After validation, gabCode selects a worktree using local remembered selection an
 
 A workspace-opening failure must never be silent.
 
-- Malformed JSON, unsupported versions, missing or unknown properties, wrong value types, empty required values, and a missing local `project.mainBranch` show an **Invalid workspace file** heading with the specific reason and workspace-file path.
+- Malformed JSON, missing required values, wrong types for required values, and a missing local `project.mainBranch` show an **Invalid workspace file** heading with the specific reason and workspace-file path.
 - Inaccessible project paths, unavailable Git, failed repository discovery, multiple discovered repositories, or no accessible registered worktree show a visible **Workspace could not be opened** error with the specific reason.
 - No terminal starts and no partial project activation occurs after failure.
 - Opening from the native menu, remembered startup state, command line, or file association must all leave a native recovery surface visible long enough to read and act on the error.
@@ -90,7 +90,7 @@ This correction does not:
 - Accept a remote-tracking branch as a substitute for the configured local main branch.
 - Store selected worktree paths in the workspace file.
 - Rewrite existing workspace files automatically.
-- Preserve compatibility with the unreleased `project.branch` schema.
+- Treat the former `project.branch` property as a substitute for `project.mainBranch`.
 - Change the existing one-project-root and one-repository/worktree-set boundary.
 - Add detached-worktree navigation, automatic filesystem watchers, or new worktree lifecycle actions.
 - Define special recovery for every unusual missing or inaccessible primary-worktree condition; those cases fail visibly in this increment.
@@ -100,7 +100,7 @@ This correction does not:
 
 - Implement the behavior independently in the C#/WPF Windows client and Swift/SwiftUI/AppKit macOS client.
 - Share only the workspace JSON requirements, vocabulary, language-neutral fixtures, and expected outcomes.
-- Parse version 1 strictly with exactly `version`, `name`, and `project`, and exactly `path` and `mainBranch` beneath `project`.
+- Parse by the required fields `name`, `project.path`, and `project.mainBranch`; ignore `version` and unknown fields.
 - Invoke installed Git directly with argument-safe, bounded, cancellable commands. Validate the configured local branch as `refs/heads/<mainBranch>` without requiring a worktree match.
 - Continue to use `git worktree list --porcelain` and the filesystem as authority for available worktree identities and paths.
 - Treat the locally persisted last-worktree path as revalidated presentation state. It must never create a competing repository identity or override Git discovery.

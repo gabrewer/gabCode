@@ -10,17 +10,14 @@ internal sealed record WorkspaceDocument(int Version, string Name, WorkspaceProj
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        RequireExactProperties(root, "version", "name", "project");
-        if (!root.TryGetProperty("version", out var version) || version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out var value) || value != 1)
-            throw new FormatException("Workspace version 1 is required.");
+        if (root.ValueKind != JsonValueKind.Object) throw new FormatException("Workspace JSON must be an object.");
         if (!root.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(name.GetString()))
             throw new FormatException("Workspace name is required.");
-        if (!root.TryGetProperty("project", out var project)) throw new FormatException("Workspace project is required.");
-        RequireExactProperties(project, "path", "mainBranch");
+        if (!root.TryGetProperty("project", out var project) || project.ValueKind != JsonValueKind.Object) throw new FormatException("Workspace project is required.");
         if (!project.TryGetProperty("path", out var path) || path.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(path.GetString()) ||
             !project.TryGetProperty("mainBranch", out var mainBranch) || mainBranch.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(mainBranch.GetString()))
             throw new FormatException("Workspace project path and mainBranch are required.");
-        return new WorkspaceDocument(value, name.GetString()!, new WorkspaceProject(path.GetString()!, mainBranch.GetString()!));
+        return new WorkspaceDocument(1, name.GetString()!, new WorkspaceProject(path.GetString()!, mainBranch.GetString()!));
     }
 
     internal string ResolveProjectPath(string workspacePath)
@@ -38,14 +35,9 @@ internal sealed record WorkspaceDocument(int Version, string Name, WorkspaceProj
         var directory = Path.GetDirectoryName(fullWorkspacePath)!;
         var path = string.Equals(Path.GetPathRoot(fullWorkspacePath), Path.GetPathRoot(fullProjectPath), StringComparison.OrdinalIgnoreCase)
             ? Path.GetRelativePath(directory, fullProjectPath) : fullProjectPath;
-        return JsonSerializer.Serialize(new { version = Version, name = Name, project = new { path, mainBranch = Project.MainBranch } }, new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+        return JsonSerializer.Serialize(new { name = Name, project = new { path, mainBranch = Project.MainBranch } }, new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
     }
 
-    private static void RequireExactProperties(JsonElement element, params string[] names)
-    {
-        if (element.ValueKind != JsonValueKind.Object || element.EnumerateObject().Any(p => !names.Contains(p.Name, StringComparer.Ordinal)) || element.EnumerateObject().Count() != names.Length)
-            throw new FormatException($"Workspace object must contain exactly {string.Join(", ", names)}.");
-    }
 }
 
 internal sealed record WorkspaceProject(string Path, string MainBranch);

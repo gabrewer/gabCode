@@ -16,18 +16,19 @@ public sealed class WorkspaceDocumentTests
     }
 
     [Fact]
-    public void Rejects_the_unreleased_legacy_branch_property()
+    public void Ignores_version_and_unknown_properties_but_requires_main_branch()
     {
-        var exception = Assert.Throws<FormatException>(() => WorkspaceDocument.Parse("{\"version\":1,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"branch\":\"main\"}}"));
+        var document = WorkspaceDocument.Parse("{\"version\":99,\"future\":true,\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"mainBranch\":\"main\",\"futureProjectValue\":\"x\"}}");
+        Assert.Equal("main", document.Project.MainBranch);
 
+        var exception = Assert.Throws<FormatException>(() => WorkspaceDocument.Parse("{\"name\":\"Demo\",\"project\":{\"path\":\"project\",\"branch\":\"main\"}}"));
         Assert.Contains("mainBranch", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("{}")]
-    [InlineData("{\"version\":2,\"name\":\"x\",\"project\":{\"path\":\"x\",\"mainBranch\":\"main\"}}")]
-    [InlineData("{\"version\":1,\"name\":\"\",\"project\":{\"path\":\"x\",\"mainBranch\":\"main\"}}")]
-    [InlineData("{\"version\":1,\"name\":\"x\",\"project\":{\"path\":\"x\"}}")]
+    [InlineData("{\"name\":\"\",\"project\":{\"path\":\"x\",\"mainBranch\":\"main\"}}")]
+    [InlineData("{\"name\":\"x\",\"project\":{\"path\":\"x\"}}")]
     [InlineData("{\"version\":1,\"name\":\"x\",\"folders\":[{\"path\":\"x\"}]}")]
     public void Rejects_invalid_documents(string json) => Assert.ThrowsAny<Exception>(() => WorkspaceDocument.Parse(json));
 
@@ -42,5 +43,6 @@ public sealed class WorkspaceDocumentTests
         Assert.Contains("\"project\"", json, StringComparison.Ordinal);
         Assert.Contains("\"mainBranch\": \"main\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"branch\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"version\"", json, StringComparison.Ordinal);
     }
 }
