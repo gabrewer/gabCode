@@ -59,7 +59,6 @@ This language-neutral artifact is shared requirements only. Windows and macOS ea
 
 ```json
 {
-  "version": 1,
   "name": "gabCode Development",
   "project": {
     "path": "../project",
@@ -68,17 +67,16 @@ This language-neutral artifact is shared requirements only. Windows and macOS ea
 }
 ```
 
-- The file is UTF-8 JSON with exactly the properties `version`, `name`, and `project`; unknown properties are rejected in v1.
-- `version` is the integer `1`; unsupported versions are rejected.
+- The file is UTF-8 JSON. Parsing is field-based: `version` is optional and ignored, and unknown top-level/project properties are ignored for forward compatibility.
 - `name` is a required, non-empty human-readable string. It is workspace identity, not inferred from a filename or path.
 - `project` is an object with exactly the required non-empty string properties `path` and `mainBranch`.
 - `project.path` is the project root. It may be relative to the workspace file's directory or native-absolute. Runtime behavior resolves it to an absolute accessible directory without rewriting a manually opened relative value. Creation writes a relative path when representable on the same filesystem root, otherwise an absolute path.
 - `project.mainBranch` is the repository's conventional local main branch. It is not inferred from a folder name, must exist under `refs/heads`, and need not be checked out or have a registered worktree.
 - Git discovery starts at the resolved project root and directly invokes installed Git read-only. It discovers exactly one Git repository/worktree set beneath the root, validates `project.mainBranch` independently of `git worktree list --porcelain`, and selects a locally remembered normalized worktree path only when Git still reports it as registered and accessible. With no remembered path or a stale one, Git's accessible primary worktree is selected; stale fallback is reported visibly. The project root itself may be non-Git.
 - **Create Workspace** first selects a project root, then resolves the associated repository/worktree set and a local branch to use as the project's main branch before it asks for the workspace name and descriptor location. It never runs `git init`, creates a project folder, or chooses a repository/worktree layout.
-- Malformed JSON, missing/unknown properties, wrong value types, empty name/path/mainBranch, unsupported versions, inaccessible/non-directory project roots, missing/unusable Git, zero/multiple repositories beneath the root, missing local main branches, and no accessible registered worktrees fail without starting a terminal. The unreleased v1 contract rejects the former `project.branch` shape without migration.
+- Malformed JSON, missing required properties, wrong value types for required properties, empty name/path/mainBranch, inaccessible/non-directory project roots, missing/unusable Git, zero/multiple repositories beneath the root, missing local main branches, and no accessible registered worktrees fail without starting a terminal. The former `project.branch` shape does not substitute for required `project.mainBranch`.
 - Terminal state/output, Git status, PR data, selected-worktree paths, and local preferences are not workspace-file fields. The user may keep the file local or commit/share it; gabCode does not edit `.gitignore`.
-- Existing folder-only descriptors and the former unreleased `project.branch` shape are not compatible with this v1 contract; there is no automatic migration or silent reinterpretation. They fail as unsupported/malformed until a later explicit migration decision.
+- Existing folder-only descriptors and files missing required `project.mainBranch` are not compatible with this contract; there is no automatic migration or silent reinterpretation. Unknown future fields remain readable.
 - The local last-workspace preference stores only a descriptor path hint. A separate workspace-keyed selected-worktree path is revalidated against Git on every startup/open and never overrides repository authority.
 
 On successful activation, the native and accessible title is `<workspace name> — <selected branch/worktree context> — gabCode`; context is the resolved selected worktree folder's final path component. The full resolved path belongs in project chrome/help, not the title. Title and terminal state change only after complete activation succeeds; a failed open preserves the existing title and terminal pair. Both terminals are then created with the exact normalized resolved selected-worktree folder as their starting directory.
