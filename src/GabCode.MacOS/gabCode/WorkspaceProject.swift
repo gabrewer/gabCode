@@ -48,11 +48,12 @@ final class WorkspaceProjectController: ObservableObject {
     @Published private(set) var state: WorkspaceProjectSurfaceState = .empty
     @Published private(set) var activeDescriptor: WorkspaceDescriptor?
     @Published private(set) var projectRoot: URL?
-    @Published private(set) var descriptorBranch: String?
+    @Published private(set) var mainBranch: String?
     @Published private(set) var worktrees: [WorktreeNavigationEntry] = []
     @Published private(set) var orphanedWorktreePaths: [URL] = []
     @Published private(set) var isRefreshing = false
     @Published private(set) var refreshError: WorkspaceOpenError?
+    @Published private(set) var fallbackNotice: String?
     @Published private(set) var worktreeActionError: WorktreeActionError?
     @Published private(set) var requestedSelectionPath: URL?
     private let worktreeActionService = GitWorktreeActionService()
@@ -77,6 +78,8 @@ final class WorkspaceProjectController: ObservableObject {
             try await worktreeDiscovery.worktrees(in: root)
         }
     }
+
+    var descriptorBranch: String? { mainBranch }
 
     var windowTitle: String {
         guard let activeDescriptor else { return "gabCode" }
@@ -105,24 +108,38 @@ final class WorkspaceProjectController: ObservableObject {
         operationGeneration += 1
         let generation = operationGeneration
         state = .loading
+        fallbackNotice = nil
         do {
             let descriptor = try loadDescriptor(at: url)
             try validateFolder(descriptor.projectRoot)
             let discovered = try await worktreeLoader(descriptor.projectRoot)
             guard !Task.isCancelled, generation == operationGeneration else { return false }
-            let matches = discovered.filter { $0.branch == descriptor.branch }
-            guard matches.count == 1, let selected = matches.first else {
-                throw matches.isEmpty
-                    ? WorkspaceOpenError.branchNotFound(descriptor.branch, descriptor.projectRoot)
-                    : WorkspaceOpenError.gitFailed(descriptor.projectRoot, reason: "Branch \"\(descriptor.branch)\" resolves to more than one registered worktree.")
+            try await worktreeDiscovery.validateLocalBranch(descriptor.mainBranch, in: descriptor.projectRoot)
+            let primary = discovered.first(where: { $0.isPrimary })
+            let remembered = preference.selectedWorktreeURL(for: url)
+            let rememberedEntry = remembered.flatMap { remembered in
+                discovered.first { $0.path.standardizedFileURL == remembered.standardizedFileURL }
             }
-            try validateFolder(selected.path)
-            let validation = await gitValidator.validate(folder: selected.path)
+            guard let selected = rememberedEntry ?? primary else {
+                throw WorkspaceOpenError.gitFailed(descriptor.projectRoot, reason: "No registered primary worktree is available.")
+            }
+            var activeSelection = selected
+            do {
+                try validateFolder(selected.path)
+            } catch where rememberedEntry != nil {
+                guard let primary else {
+                    throw WorkspaceOpenError.gitFailed(descriptor.projectRoot, reason: "No accessible primary worktree is available.")
+                }
+                try validateFolder(primary.path)
+                activeSelection = primary
+                fallbackNotice = "The previously selected worktree is no longer available. Opened \(primary.path.lastPathComponent) instead."
+            }
+            let validation = await gitValidator.validate(folder: activeSelection.path)
             guard !Task.isCancelled, generation == operationGeneration else { return false }
-            try validateGitResult(validation, folder: selected.path)
-            activeDescriptor = descriptor.resolved(to: selected.path)
+            try validateGitResult(validation, folder: activeSelection.path)
+            activeDescriptor = descriptor.resolved(to: activeSelection.path)
             projectRoot = descriptor.projectRoot.standardizedFileURL
-            descriptorBranch = descriptor.branch
+            mainBranch = descriptor.mainBranch
             let reconciliation = WorktreeReconciliation.reconcile(previous: [], discovered: discovered, retainedPaths: [])
             worktrees = reconciliation.worktrees
             orphanedWorktreePaths = reconciliation.orphanedPaths
@@ -130,12 +147,22 @@ final class WorkspaceProjectController: ObservableObject {
             state = .ready
             return true
         } catch let error as WorkspaceOpenError {
+            guard generation == operationGeneration else { return false }
             state = .recovery(error)
             return false
         } catch {
+            guard generation == operationGeneration else { return false }
             state = .recovery(map(error, projectRoot: url))
             return false
         }
+    }
+
+    func persistSelectedWorktree(path: URL) {
+        guard let workspaceURL = preference.lastWorkspaceURL else { return }
+        let available = worktrees
+            .filter { $0.availability == .available }
+            .map(\.path)
+        preference.setSelectedWorktreeURL(path, for: workspaceURL, availableWorktrees: available)
     }
 
     func forgetOrphan(path: URL) {
@@ -179,7 +206,7 @@ final class WorkspaceProjectController: ObservableObject {
         request: WorktreeCreationRequest,
         selectedWorktreeBranch: String? = nil
     ) async -> Bool {
-        guard let projectRoot, let workspaceBranch = descriptorBranch else {
+        guard let projectRoot, let workspaceBranch = mainBranch else {
             worktreeActionError = .invalidLocation(projectRoot ?? URL(fileURLWithPath: "/"))
             return false
         }
@@ -301,11 +328,15 @@ final class WorkspaceProjectController: ObservableObject {
         state = .loading
         do {
             try validateFolder(projectRoot)
-            let resolved = try await worktreeDiscovery.resolve(branch: branch, in: projectRoot)
-            try validateFolder(resolved)
-            let validation = await gitValidator.validate(folder: resolved)
-            try validateGitResult(validation, folder: resolved)
-            try WorkspaceDescriptor.write(name: name, projectRoot: projectRoot, branch: branch, to: descriptorURL)
+            try await worktreeDiscovery.validateLocalBranch(branch, in: projectRoot)
+            let discovered = try await worktreeDiscovery.worktrees(in: projectRoot)
+            guard let primary = discovered.first(where: { $0.isPrimary }) else {
+                throw WorkspaceOpenError.gitFailed(projectRoot, reason: "No registered primary worktree is available.")
+            }
+            try validateFolder(primary.path)
+            let validation = await gitValidator.validate(folder: primary.path)
+            try validateGitResult(validation, folder: primary.path)
+            try WorkspaceDescriptor.write(name: name, projectRoot: projectRoot, mainBranch: branch, to: descriptorURL)
             return await openWorkspace(at: descriptorURL)
         } catch let error as WorkspaceOpenError {
             state = .recovery(error)
