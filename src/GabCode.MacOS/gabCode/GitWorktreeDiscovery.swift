@@ -46,6 +46,34 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
         return match.path
     }
 
+    func validateLocalBranch(_ branch: String, in projectRoot: URL) async throws {
+        let root = projectRoot.standardizedFileURL
+        guard !branch.isEmpty, !branch.contains("\0") else {
+            throw GitWorktreeDiscoveryError.branchNotFound(branch, root)
+        }
+        guard isDirectory(root) else { throw GitWorktreeDiscoveryError.projectRootUnavailable(root) }
+        guard FileManager.default.isExecutableFile(atPath: gitExecutable.path) else {
+            throw GitWorktreeDiscoveryError.gitUnavailable(gitExecutable)
+        }
+        let repositories = repositoryCandidates(under: root)
+        guard repositories.count == 1, let repository = repositories.first else {
+            if repositories.isEmpty { throw GitWorktreeDiscoveryError.repositoryNotFound(root) }
+            throw GitWorktreeDiscoveryError.multipleRepositories(root)
+        }
+        do {
+            _ = try await runGit(
+                arguments: ["-C", repository.path, "show-ref", "--verify", "--quiet", "--", "refs/heads/\(branch)"],
+                currentDirectory: repository
+            )
+        } catch is CancellationError {
+            throw GitWorktreeDiscoveryError.gitFailed(root, reason: "Local branch validation was cancelled.")
+        } catch let error as GitWorktreeDiscoveryError {
+            throw error
+        } catch {
+            throw GitWorktreeDiscoveryError.branchNotFound(branch, root)
+        }
+    }
+
     func worktrees(in projectRoot: URL) async throws -> [GitWorktreeEntry] {
         let root = projectRoot.standardizedFileURL
         guard isDirectory(root) else {

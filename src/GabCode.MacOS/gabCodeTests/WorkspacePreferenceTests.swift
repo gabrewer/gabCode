@@ -17,6 +17,21 @@ final class WorkspacePreferenceTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: WorkspacePreference.lastWorkspaceKey), descriptor.path)
     }
 
+    func testSelectedWorktreeIsWorkspaceKeyedAndRejectsUnavailablePath() throws {
+        let suite = "gabCode.workspace.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preference = WorkspacePreference(defaults: defaults)
+        let workspace = URL(fileURLWithPath: "/tmp/Workspace ünicode.gabcode-workspace")
+        let available = URL(fileURLWithPath: "/tmp/project/wt/available", isDirectory: true)
+        let unavailable = URL(fileURLWithPath: "/tmp/project/wt/unavailable", isDirectory: true)
+
+        preference.setSelectedWorktreeURL(unavailable, for: workspace, availableWorktrees: [available])
+        XCTAssertNil(preference.selectedWorktreeURL(for: workspace))
+        preference.setSelectedWorktreeURL(available, for: workspace, availableWorktrees: [available])
+        XCTAssertEqual(preference.selectedWorktreeURL(for: workspace)?.path, available.standardizedFileURL.path)
+    }
+
     func testSidebarSideRoundTripsThroughInjectedDefaultsOnly() throws {
         let suite = "gabCode.workspace.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

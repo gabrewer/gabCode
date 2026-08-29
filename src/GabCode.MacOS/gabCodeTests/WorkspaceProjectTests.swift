@@ -26,7 +26,7 @@ final class WorkspaceProjectTests: XCTestCase {
         try FileManager.default.createDirectory(at: feature.deletingLastPathComponent(), withIntermediateDirectories: true)
         try runGit(in: main, arguments: ["worktree", "add", "--quiet", feature.path, "feature/demo"])
         let descriptorURL = project.appendingPathComponent("project.gabcode-workspace")
-        try WorkspaceDescriptor.write(name: "Project", projectRoot: project, branch: "feature/demo", to: descriptorURL)
+        try WorkspaceDescriptor.write(name: "Project", projectRoot: project, mainBranch: "trunk", to: descriptorURL)
         let suite = "gabCode.project.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -36,11 +36,11 @@ final class WorkspaceProjectTests: XCTestCase {
 
         XCTAssertTrue(result)
         XCTAssertEqual(controller.activeDescriptor?.name, "Project")
-        XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, feature.standardizedFileURL)
+        XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, main.standardizedFileURL)
         XCTAssertEqual(controller.projectRoot, project.standardizedFileURL)
-        XCTAssertEqual(controller.descriptorBranch, "feature/demo")
+        XCTAssertEqual(controller.mainBranch, "trunk")
         XCTAssertEqual(controller.worktrees.map(\.path), [main.standardizedFileURL, feature.standardizedFileURL])
-        XCTAssertEqual(controller.windowTitle, "Project — feature demo — gabCode")
+        XCTAssertEqual(controller.windowTitle, "Project — main — gabCode")
         XCTAssertEqual(controller.state, .ready)
         XCTAssertEqual(controller.preference.lastWorkspaceURL, descriptorURL.standardizedFileURL)
     }
@@ -81,10 +81,11 @@ final class WorkspaceProjectTests: XCTestCase {
         let repository = root.appendingPathComponent("repo", isDirectory: true)
         try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
         try runGit(in: repository, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try runGit(in: repository, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "--quiet", "-m", "initial"])
         let validURL = root.appendingPathComponent("valid.gabcode-workspace")
-        try WorkspaceDescriptor.write(name: "Valid", projectRoot: repository, branch: "trunk", to: validURL)
+        try WorkspaceDescriptor.write(name: "Valid", projectRoot: repository, mainBranch: "trunk", to: validURL)
         let invalidURL = root.appendingPathComponent("invalid.gabcode-workspace")
-        try Data("{\"version\":1,\"name\":\"Broken\",\"project\":{\"path\":\"repo\",\"branch\":\"trunk\"},\"unknown\":true}".utf8).write(to: invalidURL)
+        try Data("{\"version\":1,\"name\":\"Broken\",\"project\":{\"path\":\"repo\",\"mainBranch\":\"trunk\"},\"unknown\":true}".utf8).write(to: invalidURL)
         let suite = "gabCode.project.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -108,8 +109,9 @@ final class WorkspaceProjectTests: XCTestCase {
         let repository = root.appendingPathComponent("repository", isDirectory: true)
         try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
         try runGit(in: repository, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try runGit(in: repository, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "--quiet", "-m", "initial"])
         let descriptorURL = root.appendingPathComponent("project.gabcode-workspace")
-        try WorkspaceDescriptor.write(name: "Project", projectRoot: repository, branch: "trunk", to: descriptorURL)
+        try WorkspaceDescriptor.write(name: "Project", projectRoot: repository, mainBranch: "trunk", to: descriptorURL)
         let entry = GitWorktreeEntry(path: repository, branch: "trunk", isPrimary: true)
         let loader = RefreshLoader(entries: [entry])
         let suite = "gabCode.project.tests.\(UUID().uuidString)"
