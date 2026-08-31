@@ -173,17 +173,20 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            WorktreeFailureHeading.Text = exception is FormatException ? "Invalid workspace file" : "Workspace could not be opened";
+            var heading = exception is FormatException ? "Invalid workspace file" : "Workspace could not be opened";
+            var reason = DescribeWorkspaceOpenFailure(exception);
+            var details = $"Reason: {reason}\nWorkspace file: {Path.GetFullPath(workspacePath)}";
+            WorktreeFailureHeading.Text = heading;
             if (project is null)
             {
-                EmptyProjectHeading.Text = WorktreeFailureHeading.Text;
-                EmptyProjectMessage.Text = $"{exception.Message}\n{Path.GetFullPath(workspacePath)}\nChoose another workspace or create one for an existing Git folder.";
+                EmptyProjectHeading.Text = heading;
+                EmptyProjectMessage.Text = $"{details}\nChoose another workspace or create one for an existing Git folder.";
                 EmptyProjectSurface.Visibility = Visibility.Visible;
                 WorktreeFailureSurface.Visibility = Visibility.Collapsed;
             }
             else
             {
-                WorktreeFailureMessage.Text = exception.Message;
+                WorktreeFailureMessage.Text = details;
                 WorktreeFailureSurface.Visibility = Visibility.Visible;
             }
             return false;
@@ -668,6 +671,16 @@ public partial class MainWindow : Window
         CreateTerminalWorkspace();
         UpdateSidebarIndicators();
     }
+
+    private static string DescribeWorkspaceOpenFailure(Exception exception) => exception switch
+    {
+        FileNotFoundException => "The workspace file could not be found.",
+        DirectoryNotFoundException => "A required workspace or project folder could not be found.",
+        UnauthorizedAccessException => "gabCode does not have permission to read the workspace or project folder.",
+        FormatException => exception.Message,
+        _ when string.IsNullOrWhiteSpace(exception.Message) => "An unexpected error occurred while opening the workspace.",
+        _ => exception.Message
+    };
 
     private async void PersistSelectedWorktree(string path)
     {

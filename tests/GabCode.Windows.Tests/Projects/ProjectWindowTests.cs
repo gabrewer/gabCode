@@ -45,7 +45,9 @@ public sealed class ProjectWindowTests
             Assert.Null(window.PiTerminal);
             Assert.Equal(Visibility.Visible, window.FindName("EmptyProjectSurface") is FrameworkElement surface ? surface.Visibility : Visibility.Collapsed);
             Assert.Equal("Workspace could not be opened", ((System.Windows.Controls.TextBlock)window.FindName("EmptyProjectHeading")!).Text);
-            Assert.Contains(".gabcode-workspace", ((System.Windows.Controls.TextBlock)window.FindName("EmptyProjectMessage")!).Text);
+            var message = ((System.Windows.Controls.TextBlock)window.FindName("EmptyProjectMessage")!).Text;
+            Assert.Contains("Reason: The workspace file could not be found.", message);
+            Assert.Contains(".gabcode-workspace", message);
         });
     }
 
