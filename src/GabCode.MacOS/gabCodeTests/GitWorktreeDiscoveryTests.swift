@@ -168,6 +168,25 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: created.path))
     }
 
+    func testPreservesUnexpectedLocalRefValidationFailureAsGitFailure() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("repository", isDirectory: true)
+        try makeRepository(at: repository, defaultBranch: "trunk")
+        let fakeGit = root.appendingPathComponent("fake git")
+        try Data("#!/bin/sh\necho controlled failure >&2\nexit 2\n".utf8).write(to: fakeGit)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+
+        do {
+            try await GitWorktreeDiscovery(gitExecutable: fakeGit, timeout: .seconds(1))
+                .validateLocalBranch("trunk", in: repository)
+            XCTFail("An unexpected Git failure must not be presented as a missing local branch.")
+        } catch let error as GitWorktreeDiscoveryError {
+            guard case let .gitFailed(_, reason) = error else { return XCTFail("Unexpected error: \(error)") }
+            XCTAssertTrue(reason.contains("controlled failure"))
+        }
+    }
+
     func testTimesOutAStuckGitAction() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

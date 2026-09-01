@@ -11,7 +11,7 @@ enum WorkspaceProjectTitle {
 enum WorkspaceOpenError: Error, Equatable {
     case cancelled
     case unreadableDescriptor(URL)
-    case malformedDescriptor(URL)
+    case malformedDescriptor(URL, reason: String)
     case invalidFolder(URL)
     case repositoryNotFound(URL)
     case multipleRepositories(URL)
@@ -24,7 +24,7 @@ enum WorkspaceOpenError: Error, Equatable {
         switch self {
         case .cancelled: "Workspace opening was cancelled."
         case let .unreadableDescriptor(url): "Could not read workspace file: \(url.path)"
-        case let .malformedDescriptor(url): "The workspace file is malformed or unsupported: \(url.path)"
+        case let .malformedDescriptor(url, reason): "\(reason) Workspace file: \(url.path)"
         case let .invalidFolder(url): "The project folder is missing or inaccessible: \(url.path)"
         case let .repositoryNotFound(url): "No Git worktree set was found beneath: \(url.path)"
         case let .multipleRepositories(url): "More than one Git repository was found beneath: \(url.path)"
@@ -56,6 +56,7 @@ final class WorkspaceProjectController: ObservableObject {
     @Published private(set) var fallbackNotice: String?
     @Published private(set) var worktreeActionError: WorktreeActionError?
     @Published private(set) var requestedSelectionPath: URL?
+    @Published private(set) var recoveryDescriptorURL: URL?
     private let worktreeActionService = GitWorktreeActionService()
 
     let preference: WorkspacePreference
@@ -64,18 +65,23 @@ final class WorkspaceProjectController: ObservableObject {
     private let gitValidator: GitRepositoryValidator
     private let worktreeDiscovery: GitWorktreeDiscovery
     private let worktreeLoader: @Sendable (URL) async throws -> [GitWorktreeEntry]
+    private let localBranchValidator: @Sendable (String, URL) async throws -> Void
 
     init(
         defaults: UserDefaults = .standard,
         gitValidator: GitRepositoryValidator = GitRepositoryValidator(),
         worktreeDiscovery: GitWorktreeDiscovery = GitWorktreeDiscovery(),
-        worktreeLoader: (@Sendable (URL) async throws -> [GitWorktreeEntry])? = nil
+        worktreeLoader: (@Sendable (URL) async throws -> [GitWorktreeEntry])? = nil,
+        localBranchValidator: (@Sendable (String, URL) async throws -> Void)? = nil
     ) {
         preference = WorkspacePreference(defaults: defaults)
         self.gitValidator = gitValidator
         self.worktreeDiscovery = worktreeDiscovery
         self.worktreeLoader = worktreeLoader ?? { root in
             try await worktreeDiscovery.worktrees(in: root)
+        }
+        self.localBranchValidator = localBranchValidator ?? { branch, root in
+            try await worktreeDiscovery.validateLocalBranch(branch, in: root)
         }
     }
 
@@ -109,12 +115,21 @@ final class WorkspaceProjectController: ObservableObject {
         let generation = operationGeneration
         state = .loading
         fallbackNotice = nil
+        recoveryDescriptorURL = url.standardizedFileURL
         do {
             let descriptor = try loadDescriptor(at: url)
             try validateFolder(descriptor.projectRoot)
             let discovered = try await worktreeLoader(descriptor.projectRoot)
             guard !Task.isCancelled, generation == operationGeneration else { return false }
-            try await worktreeDiscovery.validateLocalBranch(descriptor.mainBranch, in: descriptor.projectRoot)
+            do {
+                try await localBranchValidator(descriptor.mainBranch, descriptor.projectRoot)
+            } catch let error as GitWorktreeDiscoveryError {
+                if case let .branchNotFound(branch, _) = error {
+                    throw WorkspaceOpenError.branchNotFound(branch, url.standardizedFileURL)
+                }
+                throw error
+            }
+            guard !Task.isCancelled, generation == operationGeneration else { return false }
             let primary = discovered.first(where: { $0.isPrimary })
             let remembered = preference.selectedWorktreeURL(for: url)
             let rememberedEntry = remembered.flatMap { remembered in
@@ -124,15 +139,25 @@ final class WorkspaceProjectController: ObservableObject {
                 throw WorkspaceOpenError.gitFailed(descriptor.projectRoot, reason: "No registered primary worktree is available.")
             }
             var activeSelection = selected
-            do {
-                try validateFolder(selected.path)
-            } catch where rememberedEntry != nil {
+            var stagedFallbackNotice: String?
+            if remembered != nil, rememberedEntry == nil {
                 guard let primary else {
                     throw WorkspaceOpenError.gitFailed(descriptor.projectRoot, reason: "No accessible primary worktree is available.")
                 }
                 try validateFolder(primary.path)
                 activeSelection = primary
-                fallbackNotice = "The previously selected worktree is no longer available. Opened \(primary.path.lastPathComponent) instead."
+                stagedFallbackNotice = "The previously selected worktree is no longer available. Opened \(primary.path.lastPathComponent) instead."
+            } else {
+                do {
+                    try validateFolder(selected.path)
+                } catch where rememberedEntry != nil {
+                    guard let primary else {
+                        throw WorkspaceOpenError.gitFailed(descriptor.projectRoot, reason: "No accessible primary worktree is available.")
+                    }
+                    try validateFolder(primary.path)
+                    activeSelection = primary
+                    stagedFallbackNotice = "The previously selected worktree is no longer available. Opened \(primary.path.lastPathComponent) instead."
+                }
             }
             let validation = await gitValidator.validate(folder: activeSelection.path)
             guard !Task.isCancelled, generation == operationGeneration else { return false }
@@ -144,6 +169,8 @@ final class WorkspaceProjectController: ObservableObject {
             worktrees = reconciliation.worktrees
             orphanedWorktreePaths = reconciliation.orphanedPaths
             preference.lastWorkspaceURL = url.standardizedFileURL
+            fallbackNotice = stagedFallbackNotice
+            recoveryDescriptorURL = nil
             state = .ready
             return true
         } catch let error as WorkspaceOpenError {
@@ -351,7 +378,28 @@ final class WorkspaceProjectController: ObservableObject {
         let data: Data
         do { data = try Data(contentsOf: url) } catch { throw WorkspaceOpenError.unreadableDescriptor(url) }
         do { return try WorkspaceDescriptor.decode(data: data, from: url) }
-        catch { throw WorkspaceOpenError.malformedDescriptor(url) }
+        catch let error as WorkspaceDescriptorError {
+            throw WorkspaceOpenError.malformedDescriptor(url, reason: descriptorReason(error))
+        }
+        catch { throw WorkspaceOpenError.malformedDescriptor(url, reason: "The workspace file is malformed or unsupported.") }
+    }
+
+    private func descriptorReason(_ error: WorkspaceDescriptorError) -> String {
+        switch error {
+        case .malformed: "The workspace file contains malformed JSON."
+        case let .unknownProperty(name): "The workspace file contains unknown property \"\(name)\"."
+        case let .unsupportedVersion(version): "The workspace file uses unsupported version \(version)."
+        case .missingVersion: "The workspace file is missing version."
+        case .missingName: "The workspace file is missing name."
+        case .emptyName: "The workspace file has an empty name."
+        case .missingProject: "The workspace file is missing project."
+        case let .unknownProjectProperty(name): "The workspace file contains unknown project property \"\(name)\"."
+        case .missingProjectPath: "The workspace file is missing project.path."
+        case .emptyProjectPath: "The workspace file has an empty project.path."
+        case .missingMainBranch: "The workspace file is missing project.mainBranch."
+        case .emptyMainBranch: "The workspace file has an empty project.mainBranch."
+        case .destinationExists, .writeFailed: "The workspace file could not be written."
+        }
     }
 
     private func validateFolder(_ folder: URL) throws {

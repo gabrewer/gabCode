@@ -11,13 +11,25 @@ extension Notification.Name {
 @MainActor
 final class WorkspaceWindowIntentStore {
     enum Action { case open, create }
-    static let shared = WorkspaceWindowIntentStore()
-    private var pendingAction: Action?
+    enum Intent { case openPanel, open(URL), create }
 
-    func enqueue(_ action: Action) { pendingAction = action }
-    func take() -> Action? {
-        defer { pendingAction = nil }
-        return pendingAction
+    static let shared = WorkspaceWindowIntentStore()
+    private var pendingIntents: [Intent] = []
+
+    func enqueue(_ action: Action) {
+        switch action {
+        case .open: pendingIntents.append(.openPanel)
+        case .create: pendingIntents.append(.create)
+        }
+    }
+
+    func enqueueOpen(_ url: URL) {
+        pendingIntents.append(.open(url.standardizedFileURL))
+    }
+
+    func take() -> Intent? {
+        guard !pendingIntents.isEmpty else { return nil }
+        return pendingIntents.removeFirst()
     }
 }
 
@@ -44,6 +56,16 @@ struct WorkspaceProjectView: View {
                 HStack(spacing: 0) {
                     if !controller.preference.sidebarOnRight { worktreeSidebar }
                     VStack(spacing: 0) {
+                        if let fallbackNotice = controller.fallbackNotice {
+                            Text(fallbackNotice)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                                .background(.blue.opacity(0.12))
+                                .accessibilityLabel(fallbackNotice)
+                                .accessibilityAddTraits(.isStaticText)
+                                .accessibilityIdentifier("workspace-fallback-notice")
+                                .background(FallbackAnnouncementBridge(notice: fallbackNotice))
+                        }
                         if let selectedWorktreePath, controller.orphanedWorktreePaths.contains(selectedWorktreePath.standardizedFileURL) {
                             Text("Orphaned terminal — Git worktree unavailable")
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -60,7 +82,10 @@ struct WorkspaceProjectView: View {
                 }
                 .onAppear { selectedWorktreePath = descriptor.resolvedFolder }
                 .onChange(of: selectedWorktreePath) { _, path in
-                    if let path { presentation(for: path).focusMainTerminal() }
+                    if let path {
+                        controller.persistSelectedWorktree(path: path)
+                        presentation(for: path).focusMainTerminal()
+                    }
                 }
                 .onChange(of: controller.requestedSelectionPath) { _, path in
                     if let path { selectedWorktreePath = path }
@@ -91,7 +116,11 @@ struct WorkspaceProjectView: View {
         })
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeOpenWorkspace)) { notification in
             guard handles(notification) else { return }
-            chooseWorkspace()
+            if let url = notification.userInfo?["workspaceURL"] as? URL {
+                routeExternalWorkspace(url)
+            } else {
+                chooseWorkspace()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeCreateWorkspace)) { notification in
             guard handles(notification) else { return }
@@ -110,12 +139,11 @@ struct WorkspaceProjectView: View {
             }
         }
         .onAppear {
-            if let action = WorkspaceWindowIntentStore.shared.take() {
-                DispatchQueue.main.async { [self] in
-                    switch action {
-                    case .open: chooseWorkspace()
-                    case .create: chooseProjectFolderAndCreateWorkspace()
-                    }
+            if let intent = WorkspaceWindowIntentStore.shared.take() {
+                switch intent {
+                case .openPanel: chooseWorkspace()
+                case let .open(url): Task { _ = await controller.openWorkspace(at: url) }
+                case .create: chooseProjectFolderAndCreateWorkspace()
                 }
                 return
             }
@@ -128,10 +156,7 @@ struct WorkspaceProjectView: View {
     private var emptyOrRecoverySurface: some View {
         VStack(spacing: 18) {
             ContentUnavailableView {
-                Label(
-                    controller.state == .recovery(.cancelled) ? "Open a gabCode project" : "No workspace open",
-                    systemImage: "folder"
-                )
+                Label(recoveryHeading, systemImage: "folder")
             } description: {
                 Text(recoveryDescription)
             }
@@ -141,6 +166,10 @@ struct WorkspaceProjectView: View {
                     .accessibilityIdentifier("open-workspace")
                 Button("Create Workspace from Project Folder…") { route(.create) }
                     .accessibilityIdentifier("create-workspace")
+                if let recoveryURL = controller.recoveryDescriptorURL {
+                    Button("Retry") { Task { _ = await controller.openWorkspace(at: recoveryURL) } }
+                        .accessibilityIdentifier("retry-workspace")
+                }
             }
             if case let .recovery(error) = controller.state {
                 Text(error.message)
@@ -390,6 +419,18 @@ struct WorkspaceProjectView: View {
         terminalRegistry.presentation(for: path)
     }
 
+    private var recoveryHeading: String {
+        guard case let .recovery(error) = controller.state else {
+            return controller.state == .loading ? "Opening workspace" : "No workspace open"
+        }
+        switch error {
+        case .malformedDescriptor, .unreadableDescriptor, .branchNotFound:
+            return "Invalid workspace file"
+        default:
+            return "Workspace could not be opened"
+        }
+    }
+
     private var recoveryDescription: String {
         switch controller.state {
         case .loading: "Validating the workspace. No terminal will start until validation succeeds."
@@ -407,6 +448,15 @@ struct WorkspaceProjectView: View {
             case .open: chooseWorkspace()
             case .create: chooseProjectFolderAndCreateWorkspace()
             }
+        }
+    }
+
+    private func routeExternalWorkspace(_ url: URL) {
+        if WorkspaceWindowRouting.opensSeparateWindow(hasActiveProject: controller.activeDescriptor != nil) {
+            WorkspaceWindowIntentStore.shared.enqueueOpen(url)
+            openWindow(id: "main")
+        } else {
+            Task { _ = await controller.openWorkspace(at: url) }
         }
     }
 
@@ -534,14 +584,14 @@ struct WorkspaceProjectView: View {
             return
         }
         let alert = NSAlert()
-        alert.messageText = "Choose a branch"
-        alert.informativeText = "Select the worktree to use for this workspace."
+        alert.messageText = "Choose the project's main branch"
+        alert.informativeText = "Select a local branch to record as this project's main branch."
         let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
         popup.addItems(withTitles: branches)
         if branches.contains("main") {
             popup.selectItem(withTitle: "main")
         }
-        popup.setAccessibilityLabel("Workspace branch")
+        popup.setAccessibilityLabel("Project main branch")
         alert.accessoryView = popup
         alert.addButton(withTitle: "Continue")
         alert.addButton(withTitle: "Cancel")
@@ -603,6 +653,37 @@ struct WorkspaceProjectView: View {
         panel.beginSheetModal(for: window) { response in
             completion(response == .OK ? panel.url : nil)
         }
+    }
+}
+
+@MainActor
+private struct FallbackAnnouncementBridge: NSViewRepresentable {
+    let notice: String
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        announce(notice, from: view, coordinator: context.coordinator)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        announce(notice, from: view, coordinator: context.coordinator)
+    }
+
+    private func announce(_ notice: String, from view: NSView, coordinator: Coordinator) {
+        guard coordinator.lastNotice != notice else { return }
+        coordinator.lastNotice = notice
+        NSAccessibility.post(
+            element: view,
+            notification: .announcementRequested,
+            userInfo: [.announcement: notice, .priority: 50]
+        )
+    }
+
+    final class Coordinator {
+        var lastNotice: String?
     }
 }
 

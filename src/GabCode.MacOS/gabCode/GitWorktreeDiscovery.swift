@@ -61,16 +61,20 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
             throw GitWorktreeDiscoveryError.multipleRepositories(root)
         }
         do {
-            _ = try await runGit(
+            let result = try await runGitResult(
                 arguments: ["-C", repository.path, "show-ref", "--verify", "--quiet", "--", "refs/heads/\(branch)"],
-                currentDirectory: repository
+                currentDirectory: repository,
+                acceptedExitStatuses: [0, 1]
             )
+            guard result.status == 0 else {
+                throw GitWorktreeDiscoveryError.branchNotFound(branch, root)
+            }
         } catch is CancellationError {
             throw GitWorktreeDiscoveryError.gitFailed(root, reason: "Local branch validation was cancelled.")
         } catch let error as GitWorktreeDiscoveryError {
             throw error
         } catch {
-            throw GitWorktreeDiscoveryError.branchNotFound(branch, root)
+            throw GitWorktreeDiscoveryError.gitFailed(root, reason: error.localizedDescription)
         }
     }
 
@@ -160,6 +164,14 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
     }
 
     private func runGit(arguments: [String], currentDirectory: URL) async throws -> String {
+        try await runGitResult(arguments: arguments, currentDirectory: currentDirectory).output
+    }
+
+    private func runGitResult(
+        arguments: [String],
+        currentDirectory: URL,
+        acceptedExitStatuses: Set<Int32> = [0]
+    ) async throws -> (output: String, status: Int32) {
         let process = Process()
         process.executableURL = gitExecutable
         process.arguments = arguments
@@ -201,10 +213,10 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
 
         let output = String(data: await stdoutReader.value, encoding: .utf8) ?? ""
         let errorOutput = String(data: await stderrReader.value, encoding: .utf8) ?? ""
-        guard process.terminationStatus == 0 else {
+        guard acceptedExitStatuses.contains(process.terminationStatus) else {
             throw GitWorktreeDiscoveryError.gitFailed(currentDirectory, reason: String(errorOutput.prefix(64 * 1024)))
         }
-        return output
+        return (output, process.terminationStatus)
     }
 
     private static func readBounded(from handle: FileHandle) -> Data {
