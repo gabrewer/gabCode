@@ -96,6 +96,41 @@ final class GabCodeAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         TerminalShutdownCoordinator.shared.requestApplicationTermination(sender)
     }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let workspaceURLs = urls.filter {
+            $0.pathExtension.caseInsensitiveCompare("gabcode-workspace") == .orderedSame
+        }
+        guard !workspaceURLs.isEmpty else { return }
+
+        guard let targetWindow = application.keyWindow ?? application.windows.first else {
+            for workspaceURL in workspaceURLs {
+                WorkspaceWindowIntentStore.shared.enqueueOpen(workspaceURL)
+                requestNewWindow(in: application)
+            }
+            return
+        }
+
+        for workspaceURL in workspaceURLs {
+            NotificationCenter.default.post(
+                name: .gabCodeOpenWorkspace,
+                object: nil,
+                userInfo: [
+                    "windowNumber": targetWindow.windowNumber,
+                    "workspaceURL": workspaceURL.standardizedFileURL
+                ]
+            )
+        }
+    }
+
+    private func requestNewWindow(in application: NSApplication) {
+        guard
+            let fileMenu = application.mainMenu?.item(withTitle: "File")?.submenu,
+            let newWindowItem = fileMenu.items.first(where: { $0.title == "New Window" && $0.isEnabled }),
+            let action = newWindowItem.action
+        else { return }
+        application.sendAction(action, to: newWindowItem.target, from: newWindowItem)
+    }
 }
 
 @MainActor

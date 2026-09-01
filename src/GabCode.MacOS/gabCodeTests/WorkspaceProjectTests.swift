@@ -43,6 +43,21 @@ final class WorkspaceProjectTests: XCTestCase {
         XCTAssertEqual(controller.windowTitle, "Project — main — gabCode")
         XCTAssertEqual(controller.state, .ready)
         XCTAssertEqual(controller.preference.lastWorkspaceURL, descriptorURL.standardizedFileURL)
+
+        controller.preference.setSelectedWorktreeURL(
+            feature,
+            for: descriptorURL,
+            availableWorktrees: [main, feature]
+        )
+        try runGit(in: main, arguments: ["worktree", "remove", "--force", feature.path])
+
+        let reopened = await controller.openWorkspace(at: descriptorURL)
+        XCTAssertTrue(reopened)
+        XCTAssertEqual(controller.activeDescriptor?.resolvedFolder, main.standardizedFileURL)
+        XCTAssertEqual(
+            controller.fallbackNotice,
+            "The previously selected worktree is no longer available. Opened main instead."
+        )
     }
 
     func testCreateWorkspaceWritesDescriptorInNonGitProjectRootAndActivatesBranch() async throws {
@@ -98,9 +113,63 @@ final class WorkspaceProjectTests: XCTestCase {
 
         XCTAssertEqual(controller.activeDescriptor?.name, "Valid")
         XCTAssertEqual(controller.windowTitle, "Valid — repo — gabCode")
-        guard case .recovery = controller.state else {
+        guard case let .recovery(error) = controller.state else {
             return XCTFail("Expected actionable recovery state")
         }
+        XCTAssertEqual(
+            error.message,
+            "The workspace file contains unknown property \"unknown\". Workspace file: \(invalidURL.path)"
+        )
+
+        let missingMainURL = root.appendingPathComponent("missing-main.gabcode-workspace")
+        try WorkspaceDescriptor.write(name: "Missing Main", projectRoot: repository, mainBranch: "missing", to: missingMainURL)
+        let openedMissingMain = await controller.openWorkspace(at: missingMainURL)
+        XCTAssertFalse(openedMissingMain)
+        guard case let .recovery(.branchNotFound(_, errorURL)) = controller.state else {
+            return XCTFail("A missing local main branch must produce workspace-file recovery.")
+        }
+        XCTAssertEqual(errorURL, missingMainURL.standardizedFileURL)
+        XCTAssertEqual(controller.recoveryDescriptorURL, missingMainURL.standardizedFileURL)
+    }
+
+    func testSupersededOpenCannotPublishStaleFallbackNotice() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        try runGit(in: repository, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try runGit(in: repository, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "--quiet", "-m", "initial"])
+        let oldURL = root.appendingPathComponent("old.gabcode-workspace")
+        let newURL = root.appendingPathComponent("new.gabcode-workspace")
+        try WorkspaceDescriptor.write(name: "Old", projectRoot: repository, mainBranch: "old", to: oldURL)
+        try WorkspaceDescriptor.write(name: "New", projectRoot: repository, mainBranch: "new", to: newURL)
+        let missing = root.appendingPathComponent("removed-worktree", isDirectory: true)
+        let gate = BranchValidationGate()
+        let suite = "gabCode.project.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = WorkspaceProjectController(
+            defaults: defaults,
+            worktreeLoader: { _ in [
+                GitWorktreeEntry(path: repository, branch: "trunk", isPrimary: true),
+                GitWorktreeEntry(path: missing, branch: "feature", isPrimary: false)
+            ] },
+            localBranchValidator: { branch, _ in await gate.validate(branch: branch) }
+        )
+        controller.preference.setSelectedWorktreeURL(missing, for: oldURL, availableWorktrees: [repository, missing])
+
+        let oldOpen = Task { await controller.openWorkspace(at: oldURL) }
+        for _ in 0..<100 {
+            if await gate.hasBlockedOldValidation { break }
+            await Task.yield()
+        }
+        XCTAssertTrue(await gate.hasBlockedOldValidation)
+
+        XCTAssertTrue(await controller.openWorkspace(at: newURL))
+        await gate.releaseOldValidation()
+        XCTAssertFalse(await oldOpen.value)
+        XCTAssertEqual(controller.activeDescriptor?.name, "New")
+        XCTAssertNil(controller.fallbackNotice)
     }
 
     func testFailedRefreshPreservesReadyProjectAndPublishesActionableError() async throws {
@@ -150,6 +219,22 @@ final class WorkspaceProjectTests: XCTestCase {
         )
 
         XCTAssertEqual(controller.worktrees, [])
+    }
+
+    private actor BranchValidationGate {
+        private var oldContinuation: CheckedContinuation<Void, Never>?
+        private(set) var hasBlockedOldValidation = false
+
+        func validate(branch: String) async {
+            guard branch == "old" else { return }
+            hasBlockedOldValidation = true
+            await withCheckedContinuation { oldContinuation = $0 }
+        }
+
+        func releaseOldValidation() {
+            oldContinuation?.resume()
+            oldContinuation = nil
+        }
     }
 
     private final class RefreshLoader: @unchecked Sendable {
