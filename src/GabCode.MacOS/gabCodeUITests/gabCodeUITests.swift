@@ -60,6 +60,27 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testQuotedCommandLineWorkspacePathReachesVisibleRecovery() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = directory.appendingPathComponent("Broken workspace.gabcode-workspace")
+        try Data("not json".utf8).write(to: workspace)
+        app.launchArguments.append(workspace.path)
+
+        app.launch()
+
+        XCTAssertTrue(
+            app.staticTexts["Invalid workspace file"].waitForExistence(timeout: 5),
+            "A quoted command-line workspace path must reach visible native recovery."
+        )
+        let recovery = app.staticTexts["workspace-recovery-message"]
+        XCTAssertTrue(recovery.exists)
+        XCTAssertTrue((recovery.value as? String)?.contains(workspace.path) == true)
+        XCTAssertTrue(app.buttons["retry-workspace"].exists)
+        XCTAssertFalse(app.groups["terminal-workspace"].exists)
+    }
+
+    @MainActor
     func testCommandNCreatesIndependentEmptyWorkspaceWindow() throws {
         app.launch()
 

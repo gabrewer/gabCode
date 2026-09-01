@@ -93,6 +93,20 @@ final class TerminalShutdownCoordinator: ObservableObject {
 
 @MainActor
 final class GabCodeAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let workspaceURLs = ProcessInfo.processInfo.arguments.dropFirst().compactMap { argument -> URL? in
+            let url = URL(fileURLWithPath: argument)
+            return url.pathExtension.caseInsensitiveCompare("gabcode-workspace") == .orderedSame
+                ? url.standardizedFileURL
+                : nil
+        }
+        guard !workspaceURLs.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.application(NSApp, open: workspaceURLs)
+        }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         TerminalShutdownCoordinator.shared.requestApplicationTermination(sender)
     }

@@ -163,11 +163,14 @@ final class WorkspaceProjectTests: XCTestCase {
             if await gate.hasBlockedOldValidation { break }
             await Task.yield()
         }
-        XCTAssertTrue(await gate.hasBlockedOldValidation)
+        let oldValidationBlocked = await gate.hasBlockedOldValidation
+        XCTAssertTrue(oldValidationBlocked)
 
-        XCTAssertTrue(await controller.openWorkspace(at: newURL))
+        let openedNewWorkspace = await controller.openWorkspace(at: newURL)
+        XCTAssertTrue(openedNewWorkspace)
         await gate.releaseOldValidation()
-        XCTAssertFalse(await oldOpen.value)
+        let oldOpenResult = await oldOpen.value
+        XCTAssertFalse(oldOpenResult)
         XCTAssertEqual(controller.activeDescriptor?.name, "New")
         XCTAssertNil(controller.fallbackNotice)
     }
