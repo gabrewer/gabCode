@@ -19,6 +19,7 @@ enum WorkspaceOpenError: Error, Equatable {
     case gitUnavailable(URL)
     case gitFailed(URL, reason: String)
     case descriptorWriteFailed(URL)
+    case instancePresenceUnavailable(String)
 
     var message: String {
         switch self {
@@ -32,6 +33,7 @@ enum WorkspaceOpenError: Error, Equatable {
         case let .gitUnavailable(url): "Git could not be found at \(url.path)."
         case let .gitFailed(url, reason): "Git validation failed for \(url.path).\n\(reason)"
         case let .descriptorWriteFailed(url): "Could not write workspace file: \(url.path)"
+        case let .instancePresenceUnavailable(reason): "Could not determine whether another gabCode window is running. Open a workspace explicitly. \(reason)"
         }
     }
 }
@@ -86,6 +88,10 @@ final class WorkspaceProjectController: ObservableObject {
     }
 
     var descriptorBranch: String? { mainBranch }
+
+    func showStartupRecovery(_ error: WorkspaceOpenError) {
+        state = .recovery(error)
+    }
 
     var windowTitle: String {
         guard let activeDescriptor else { return "gabCode" }
