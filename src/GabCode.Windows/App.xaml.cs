@@ -5,6 +5,8 @@ namespace GabCode.Windows;
 
 public partial class App : Application
 {
+    private static readonly WindowsInstancePresence instancePresence = WindowsInstancePresence.Acquire();
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -12,6 +14,12 @@ public partial class App : Application
         MainWindow = window;
         window.Show();
         _ = OpenInitialWorkspaceAsync(window, e.Args);
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        instancePresence.Dispose();
+        base.OnExit(e);
     }
 
     private static async Task OpenInitialWorkspaceAsync(MainWindow window, string[] arguments)
@@ -28,7 +36,9 @@ public partial class App : Application
         }
 
         if (selection.IsExplicitEmpty) return;
-        var workspacePath = selection.WorkspacePath ?? await new LastWorkspacePreference().ReadAsync();
+        var workspacePath = selection.WorkspacePath;
+        if (workspacePath is null && selection.ShouldRestoreRememberedWorkspace(instancePresence.IsFirstInstance))
+            workspacePath = await new LastWorkspacePreference().ReadAsync();
         if (workspacePath is not null && !await window.OpenWorkspaceAsync(workspacePath) && selection.WorkspacePath is null)
         {
             new LastWorkspacePreference().Forget();
