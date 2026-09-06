@@ -398,6 +398,14 @@ public sealed class GitWorktreeActionsTests
     }
 
     [Fact]
+    public void Regular_file_at_a_worktree_path_is_indeterminate()
+    {
+        var path = Path.GetTempFileName();
+        try { Assert.Equal(WorktreePathAvailability.Indeterminate, GitWorktreeDiscovery.GetPathAvailability(path)); }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task Does_not_prune_an_indeterminate_secondary_path()
     {
         var root = CreateRoot("gabCode indeterminate path Ω");

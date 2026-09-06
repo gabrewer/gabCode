@@ -412,12 +412,12 @@ internal sealed class GitWorktreeDiscovery
         return result;
     }
 
-    private static WorktreePathAvailability GetPathAvailability(string path)
+    internal static WorktreePathAvailability GetPathAvailability(string path)
     {
         try
         {
-            _ = File.GetAttributes(path);
-            return WorktreePathAvailability.Present;
+            var attributes = File.GetAttributes(path);
+            return (attributes & FileAttributes.Directory) != 0 ? WorktreePathAvailability.Present : WorktreePathAvailability.Indeterminate;
         }
         catch (FileNotFoundException) { return WorktreePathAvailability.Missing; }
         catch (DirectoryNotFoundException) { return WorktreePathAvailability.Missing; }
