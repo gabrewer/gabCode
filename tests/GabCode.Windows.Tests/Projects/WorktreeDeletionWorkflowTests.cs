@@ -44,6 +44,29 @@ public sealed class WorktreeDeletionWorkflowTests
     }
 
     [Fact]
+    public void Sidebar_blocks_missing_activation_and_pointer_right_click_selection()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows");
+        var xaml = File.ReadAllText(Path.Combine(root, "MainWindow.xaml"));
+        var code = File.ReadAllText(Path.Combine(root, "MainWindow.xaml.cs"));
+
+        Assert.Contains("PreviewMouseRightButtonDown=\"WorktreeList_PreviewMouseRightButtonDown\"", xaml);
+        Assert.Contains("ReconcileMissingSecondaryWorktreesAsync", code);
+        Assert.Contains("GitWorktreeDiscovery.GetPathAvailability(entry.Path)", code);
+        Assert.Contains("Removed missing worktree", code);
+        Assert.Contains("worktreeState?.Entries.FirstOrDefault(entry => entry.IsPrimary)?.Path", code);
+        Assert.Contains("ReconcileWorktrees(outcome.Entries, confirmedRemoval: true)", code);
+        Assert.Contains("ConfigureWorktreeContextMenu(item)", code);
+        Assert.Contains("FocusWorktreeListItem(project?.ProjectFolder", code);
+        Assert.Contains("orphan.Attach(MainTerminalRegion, BottomTerminalRegion)", code);
+        Assert.Contains("Orphaned terminals are attached", code);
+        Assert.Contains("if (!ConfigureWorktreeContextMenu(item)) return;", code);
+        Assert.Contains("entry.Availability != WorktreeAvailability.Available) return false", code);
+        Assert.Contains("worktreeState?.RemoveOrphan(entry.Path);", code);
+        Assert.Contains("CreateTerminalWorkspace();", code);
+    }
+
+    [Fact]
     public void Primary_worktree_delete_is_disabled_in_the_context_menu()
     {
         var code = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows", "MainWindow.xaml.cs"));

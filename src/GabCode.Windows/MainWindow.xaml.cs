@@ -312,16 +312,23 @@ public partial class MainWindow : Window
         RefreshStatusText.Text = "Refreshing worktrees…";
         try
         {
-            var entries = await worktreeDiscovery.DiscoverEntriesAsync(project.ProjectFolder, cancellationToken: discoveryCancellation.Token);
-            ReconcileWorktrees(entries, generation);
-            RefreshStatusText.Text = string.Empty;
+            var anchor = worktreeState?.Entries.FirstOrDefault(entry => entry.IsPrimary)?.Path ?? project.ProjectFolder;
+            var reconciliation = await worktreeDiscovery.ReconcileMissingSecondaryWorktreesAsync(anchor, discoveryCancellation.Token);
+            ReconcileWorktrees(reconciliation.Entries, generation, confirmedRemoval: true);
+            if (!reconciliation.Entries.Any(entry => WorktreePath.Comparer.Equals(entry.Path, project.ProjectFolder)))
+            {
+                var safe = reconciliation.Entries.FirstOrDefault(entry => string.Equals(entry.Branch, project.MainBranch, StringComparison.Ordinal))
+                    ?? reconciliation.Entries.First(entry => entry.IsPrimary);
+                SelectWorktree(safe.Path, safe.Branch!);
+            }
+            RefreshStatusText.Text = reconciliation.PrunedPaths.Count == 0 ? string.Empty : $"Removed missing worktree: {string.Join(", ", reconciliation.PrunedPaths)}.";
         }
         catch (OperationCanceledException) { RefreshStatusText.Text = "Worktree refresh cancelled."; }
         catch (Exception exception) { RefreshStatusText.Text = $"Could not refresh worktrees: {exception.Message}"; }
         finally { discoveryCancellation.Dispose(); discoveryCancellation = null; RefreshWorktreesButton.IsEnabled = true; CancelRefreshButton.Visibility = Visibility.Collapsed; }
     }
 
-    private void ReconcileWorktrees(IReadOnlyList<GitWorktreeEntry> entries, long generation = 0)
+    private void ReconcileWorktrees(IReadOnlyList<GitWorktreeEntry> entries, long generation = 0, bool confirmedRemoval = false)
     {
         var registered = entries.Where(entry => entry.Branch is not null).Select(entry => new RegisteredWorktree(entry.Path, entry.Branch!, entry.IsPrimary));
         worktreeState ??= new WorktreeNavigationState(registered);
@@ -329,6 +336,11 @@ public partial class MainWindow : Window
         refreshCoordinator ??= new WorktreeRefreshCoordinator(worktreeState);
         if (generation == 0) generation = refreshCoordinator.BeginRefresh();
         if (!refreshCoordinator.TryReconcile(generation, registered)) return;
+        if (confirmedRemoval)
+        {
+            var confirmedGeneration = refreshCoordinator.BeginRefresh();
+            if (!refreshCoordinator.TryReconcile(confirmedGeneration, registered)) return;
+        }
         PopulateWorktrees();
     }
 
@@ -402,15 +414,30 @@ public partial class MainWindow : Window
         }
     }
 
+    private void WorktreeList_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (ItemsControl.ContainerFromElement(WorktreeList, e.OriginalSource as DependencyObject) is not ListBoxItem item || item.ContextMenu is null) return;
+        e.Handled = true;
+        if (!ConfigureWorktreeContextMenu(item)) return;
+        item.ContextMenu.PlacementTarget = item;
+        item.ContextMenu.IsOpen = true;
+    }
+
     private void WorktreeList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
-        if (e.OriginalSource is not ListBoxItem { Tag: WorktreeNavigationEntry entry } item || item.ContextMenu is null) return;
+        if (e.OriginalSource is ListBoxItem item && !ConfigureWorktreeContextMenu(item)) e.Handled = true;
+    }
+
+    private static bool ConfigureWorktreeContextMenu(ListBoxItem item)
+    {
+        if (item.Tag is not WorktreeNavigationEntry entry || item.ContextMenu is null || entry.Availability != WorktreeAvailability.Available) return false;
         var delete = item.ContextMenu.Items.OfType<MenuItem>().FirstOrDefault(menu => string.Equals(menu.Header?.ToString(), "Delete worktree", StringComparison.Ordinal));
         if (delete is not null)
         {
             delete.Visibility = entry.IsPrimary ? Visibility.Collapsed : Visibility.Visible;
             delete.IsEnabled = !entry.IsPrimary;
         }
+        return true;
     }
 
     private static WorktreeNavigationEntry? ContextEntry(object sender)
@@ -561,6 +588,12 @@ public partial class MainWindow : Window
         WorktreePathText.ToolTip = path;
         CreateTerminalWorkspace();
         PopulateWorktrees();
+        FocusWorktreeListItem(path);
+    }
+
+    private void FocusWorktreeListItem(string path)
+    {
+        WorktreeList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag is WorktreeNavigationEntry entry && WorktreePath.Comparer.Equals(entry.Path, path))?.Focus();
     }
 
     private static string WorktreeActionRoot(string worktreePath)
@@ -734,7 +767,7 @@ public partial class MainWindow : Window
                 if (retained) ShowWorktreeRecovery(outcome.Path, $"Worktree removed; local folder remains at {outcome.Path}.", repositoryPath: primaryPath);
 
                 if (hasTerminalPair && activeTerminals == 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
-                ReconcileWorktrees(outcome.Entries);
+                ReconcileWorktrees(outcome.Entries, confirmedRemoval: true);
                 SelectRemainingWorktree(outcome.Entries);
                 if (!dialog.DeleteLocalBranch || string.IsNullOrWhiteSpace(entry.Branch))
                 {
@@ -777,18 +810,43 @@ public partial class MainWindow : Window
         if (sender is not Button { Tag: WorktreeNavigationEntry entry } || terminalRegistry is null) return;
         var activeCount = terminalRegistry.GetActiveTerminalCount(entry.Path);
         if (activeCount != 0 && exitConfirmation.Confirm(this, activeCount) == TerminalExitDecision.Cancel) return;
-        try { await terminalRegistry.CloseAndRemoveAsync(entry.Path); worktreeState?.RemoveOrphan(entry.Path); PopulateWorktrees(); }
+        try
+        {
+            await terminalRegistry.CloseAndRemoveAsync(entry.Path);
+            worktreeState?.RemoveOrphan(entry.Path);
+            CreateTerminalWorkspace();
+            PopulateWorktrees();
+            FocusWorktreeListItem(project?.ProjectFolder ?? string.Empty);
+        }
         catch (Exception exception) { RefreshStatusText.Text = $"Could not close orphaned terminals: {exception.Message}"; }
     }
 
     private void WorktreeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (applyingWorktreeSelection || WorktreeList.SelectedItem is not ListBoxItem { Tag: WorktreeNavigationEntry entry }) return;
-        if (entry.Availability != WorktreeAvailability.Available)
+        var availability = GitWorktreeDiscovery.GetPathAvailability(entry.Path);
+        if (entry.Availability != WorktreeAvailability.Available || availability != WorktreePathAvailability.Present)
         {
-            var pair = terminalRegistry?.GetOrCreate(entry.Path);
-            if (pair is not null) { ObserveTerminalPair(pair); MarkTerminalPairOwned(pair); pair.Attach(MainTerminalRegion, BottomTerminalRegion); piTerminal = pair.First; commandsTerminal = pair.Second; terminalLayout = pair.Layout; }
-            RefreshStatusText.Text = "This worktree is unavailable; worktree-scoped Git actions are unavailable.";
+            if (entry.MissingRefreshes >= 2 && terminalRegistry?.Pairs.FirstOrDefault(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path)) is { } orphan)
+            {
+                orphan.Attach(MainTerminalRegion, BottomTerminalRegion);
+                piTerminal = orphan.First;
+                commandsTerminal = orphan.Second;
+                terminalLayout = orphan.Layout;
+                RefreshStatusText.Text = "Orphaned terminals are attached; worktree-scoped Git actions are unavailable.";
+                return;
+            }
+            if (availability == WorktreePathAvailability.Missing)
+            {
+                applyingWorktreeSelection = true;
+                WorktreeList.SelectedItem = WorktreeList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag is WorktreeNavigationEntry current && WorktreePath.Comparer.Equals(current.Path, project?.ProjectFolder));
+                applyingWorktreeSelection = false;
+                FocusWorktreeListItem(project?.ProjectFolder ?? string.Empty);
+                RefreshStatusText.Text = $"Worktree path is missing; reconciling {entry.Path}.";
+                _ = RefreshWorktreesAsync();
+                return;
+            }
+            RefreshStatusText.Text = $"Cannot activate worktree because its path is unavailable: {entry.Path}.";
             return;
         }
         project = new ProjectContext(project!.WorkspaceName, entry.Path, project.MainBranch);
