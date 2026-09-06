@@ -4,13 +4,32 @@ import XCTest
 @MainActor
 final class InstanceStartupPolicyTests: XCTestCase {
     func testExplicitIntentAlwaysWins() {
-        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: true, ownsPresence: false), .openExplicit)
-        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: true, ownsPresence: true), .openExplicit)
+        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: true, ownsPresence: false, isFirstWindow: true), .openExplicit)
+        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: true, ownsPresence: true, isFirstWindow: false), .openExplicit)
     }
 
-    func testOnlyPresenceOwnerRestoresPlainWorkspace() {
-        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: false, ownsPresence: true), .restoreRemembered)
-        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: false, ownsPresence: false), .remainEmpty)
+    func testOnlyFirstWindowOfPresenceOwnerRestoresPlainWorkspace() {
+        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: false, ownsPresence: true, isFirstWindow: true), .restoreRemembered)
+        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: false, ownsPresence: true, isFirstWindow: false), .remainEmpty)
+        XCTAssertEqual(InstanceStartupPolicy.action(hasExplicitWorkspace: false, ownsPresence: false, isFirstWindow: true), .remainEmpty)
+    }
+
+    func testExplicitFirstWindowConsumesTheOnlyRestoreClaim() {
+        let claims = ProcessWindowStartupClaims()
+
+        let explicit = InstanceStartupPolicy.action(
+            hasExplicitWorkspace: true,
+            ownsPresence: true,
+            isFirstWindow: claims.claimFirstWindow()
+        )
+        let commandN = InstanceStartupPolicy.action(
+            hasExplicitWorkspace: false,
+            ownsPresence: true,
+            isFirstWindow: claims.claimFirstWindow()
+        )
+
+        XCTAssertEqual(explicit, .openExplicit)
+        XCTAssertEqual(commandN, .remainEmpty)
     }
 
     func testExistingUnlockedLockFileDoesNotIndicatePresence() throws {
