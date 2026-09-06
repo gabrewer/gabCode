@@ -43,9 +43,23 @@ final class gabCodeUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.buttons["open-workspace"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["open-workspace"].exists)
-        XCTAssertTrue(app.buttons["create-workspace"].exists)
+        let openWorkspace = app.buttons["open-workspace"]
+        let createWorkspace = app.buttons["create-workspace"]
+        XCTAssertTrue(openWorkspace.exists)
+        XCTAssertEqual(openWorkspace.label, "Open Workspace")
+        XCTAssertTrue(createWorkspace.exists)
+        XCTAssertEqual(createWorkspace.label, "Create Workspace from Project Folder")
         XCTAssertFalse(app.groups["terminal-workspace"].exists)
+    }
+
+    @MainActor
+    func testCommandOOpensWorkspaceChooserFromEmptyStartupSurface() throws {
+        app.launch()
+        XCTAssertTrue(app.buttons["open-workspace"].waitForExistence(timeout: 5))
+
+        app.typeKey("o", modifierFlags: .command)
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 5))
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     @MainActor

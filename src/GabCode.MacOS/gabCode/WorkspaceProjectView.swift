@@ -148,7 +148,14 @@ struct WorkspaceProjectView: View {
                 return
             }
             guard controller.state == .empty, controller.activeDescriptor == nil else { return }
-            Task { _ = await controller.reopenRememberedWorkspace() }
+            switch MacOSInstancePresence.shared {
+            case let .success(presence) where InstanceStartupPolicy.action(hasExplicitWorkspace: false, ownsPresence: presence.ownsPresence) == .restoreRemembered:
+                Task { _ = await controller.reopenRememberedWorkspace() }
+            case let .failure(error):
+                controller.showStartupRecovery(.instancePresenceUnavailable(error.localizedDescription))
+            default:
+                break
+            }
         }
     }
 
@@ -163,8 +170,10 @@ struct WorkspaceProjectView: View {
             HStack(spacing: 12) {
                 Button("Open Workspace…") { route(.open) }
                     .keyboardShortcut("o", modifiers: .command)
+                    .accessibilityLabel("Open Workspace")
                     .accessibilityIdentifier("open-workspace")
                 Button("Create Workspace from Project Folder…") { route(.create) }
+                    .accessibilityLabel("Create Workspace from Project Folder")
                     .accessibilityIdentifier("create-workspace")
                 if let recoveryURL = controller.recoveryDescriptorURL {
                     Button("Retry") { Task { _ = await controller.openWorkspace(at: recoveryURL) } }

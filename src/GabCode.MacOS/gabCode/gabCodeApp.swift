@@ -13,6 +13,8 @@ struct gabCodeApp: App {
     @StateObject private var fontPreference: TerminalFontPreferenceStore
 
     init() {
+        // Acquire the process-lifetime presence before any window or launch intent is routed.
+        _ = MacOSInstancePresence.shared
         _fontPreference = StateObject(
             wrappedValue: TerminalFontPreferenceStore(defaults: Self.fontPreferenceDefaults())
         )
