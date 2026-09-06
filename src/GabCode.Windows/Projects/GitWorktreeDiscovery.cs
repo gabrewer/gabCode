@@ -11,6 +11,40 @@ internal sealed record GitWorktreeEntry(string Path, string? Branch, bool IsPrim
 
 internal sealed record GitBranchReference(string Name, bool IsRemote, string? AttachedPath);
 
+internal enum GitWorktreeRemovalState
+{
+    Removed,
+    RemovedWithRetainedPath,
+    Blocked,
+    ReconciliationUnavailable,
+}
+
+internal enum WorktreePathAvailability
+{
+    Present,
+    Missing,
+    Indeterminate,
+}
+
+internal enum GitWorktreeRemovalAttempt
+{
+    Completed,
+    Rejected,
+    TimedOut,
+    Cancelled,
+}
+
+internal sealed record GitWorktreeRemovalOutcome(
+    GitWorktreeRemovalState State,
+    GitWorktreeRemovalAttempt Attempt,
+    string Path,
+    IReadOnlyList<GitWorktreeEntry> Entries,
+    string? Diagnostic);
+
+internal sealed record GitWorktreeReconciliation(
+    IReadOnlyList<GitWorktreeEntry> Entries,
+    IReadOnlyList<string> PrunedPaths);
+
 internal sealed class GitWorktreeDiscovery
 {
     private const int MaximumCandidates = 2_000;
@@ -21,12 +55,14 @@ internal sealed class GitWorktreeDiscovery
     };
     private readonly string executablePath;
     private readonly TimeSpan timeout;
+    private readonly Func<string, WorktreePathAvailability> pathAvailability;
 
-    internal GitWorktreeDiscovery(string executablePath = "git", TimeSpan? timeout = null)
+    internal GitWorktreeDiscovery(string executablePath = "git", TimeSpan? timeout = null, Func<string, WorktreePathAvailability>? pathAvailability = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         this.executablePath = executablePath;
         this.timeout = timeout ?? TimeSpan.FromSeconds(10);
+        this.pathAvailability = pathAvailability ?? GetPathAvailability;
     }
 
     internal async Task<IReadOnlyDictionary<string, string>> DiscoverAsync(string projectRoot, IProgress<GitDiscoveryProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -285,6 +321,63 @@ internal sealed class GitWorktreeDiscovery
         return await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
     }
 
+    internal async Task<GitWorktreeRemovalOutcome> RemoveWorktreeWithOutcomeAsync(
+        string projectRoot,
+        string path,
+        bool force,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var normalizedPath = WorktreePath.Normalize(path);
+        var target = entries.SingleOrDefault(entry => WorktreePath.Comparer.Equals(entry.Path, normalizedPath))
+            ?? throw new InvalidOperationException($"No registered worktree exists at '{normalizedPath}'.");
+        if (target.IsPrimary) throw new InvalidOperationException("The primary worktree cannot be deleted.");
+        var arguments = new List<string> { "worktree", "remove" };
+        if (force) arguments.Add("--force");
+        arguments.Add(normalizedPath);
+        GitProcessResult? remove = null;
+        Exception? attemptFailure = null;
+        var attempt = GitWorktreeRemovalAttempt.Completed;
+        try { remove = await RunGitAsync(entries.First(entry => entry.IsPrimary).Path, arguments, cancellationToken); attempt = remove.ExitCode == 0 ? GitWorktreeRemovalAttempt.Completed : GitWorktreeRemovalAttempt.Rejected; }
+        catch (TimeoutException exception) { attemptFailure = exception; attempt = GitWorktreeRemovalAttempt.TimedOut; }
+        catch (OperationCanceledException exception) { attemptFailure = exception; attempt = GitWorktreeRemovalAttempt.Cancelled; }
+
+        IReadOnlyList<GitWorktreeEntry> reconciled;
+        try { reconciled = await DiscoverEntriesAsync(projectRoot, cancellationToken: CancellationToken.None); }
+        catch (Exception exception)
+        {
+            return new(GitWorktreeRemovalState.ReconciliationUnavailable, attempt, normalizedPath, entries, attemptFailure?.Message ?? exception.Message);
+        }
+
+        var registered = reconciled.Any(entry => WorktreePath.Comparer.Equals(entry.Path, normalizedPath));
+        if (!registered)
+        {
+            return new(
+                pathAvailability(normalizedPath) == WorktreePathAvailability.Missing ? GitWorktreeRemovalState.Removed : GitWorktreeRemovalState.RemovedWithRetainedPath,
+                attempt,
+                normalizedPath,
+                reconciled,
+                remove?.ExitCode == 0 ? attemptFailure?.Message : remove?.StandardError.Trim() ?? attemptFailure?.Message);
+        }
+        return new(GitWorktreeRemovalState.Blocked, attempt, normalizedPath, reconciled, remove?.StandardError.Trim() ?? attemptFailure?.Message);
+    }
+
+    internal async Task<GitWorktreeReconciliation> ReconcileMissingSecondaryWorktreesAsync(
+        string projectRoot,
+        CancellationToken cancellationToken = default)
+    {
+        var before = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var missing = before.Where(entry => !entry.IsPrimary && pathAvailability(entry.Path) == WorktreePathAvailability.Missing).Select(entry => entry.Path).ToArray();
+        if (missing.Length == 0) return new(before, []);
+        var primary = before.First(entry => entry.IsPrimary).Path;
+        var prune = await RunGitAsync(primary, ["worktree", "prune", "--expire", "now"], cancellationToken);
+        if (prune.ExitCode != 0) throw GitFailure("Git could not prune missing worktrees.", prune);
+        var after = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var pruned = missing.Where(path => !after.Any(entry => WorktreePath.Comparer.Equals(entry.Path, path))).ToArray();
+        return new(after, pruned);
+    }
+
     internal async Task DeleteLocalBranchAsync(string projectRoot, string branch, bool force, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
@@ -317,6 +410,19 @@ internal sealed class GitWorktreeDiscovery
             worktreeOrdinal++;
         }
         return result;
+    }
+
+    private static WorktreePathAvailability GetPathAvailability(string path)
+    {
+        try
+        {
+            _ = File.GetAttributes(path);
+            return WorktreePathAvailability.Present;
+        }
+        catch (FileNotFoundException) { return WorktreePathAvailability.Missing; }
+        catch (DirectoryNotFoundException) { return WorktreePathAvailability.Missing; }
+        catch (UnauthorizedAccessException) { return WorktreePathAvailability.Indeterminate; }
+        catch (IOException) { return WorktreePathAvailability.Indeterminate; }
     }
 
     private static bool HasGitMarker(string directory) => Directory.Exists(Path.Combine(directory, ".git")) || File.Exists(Path.Combine(directory, ".git"));

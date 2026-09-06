@@ -334,6 +334,114 @@ public sealed class GitWorktreeActionsTests
         finally { TryDelete(root); }
     }
 
+    [Fact]
+    public async Task Reconciles_a_nonzero_force_removal_when_git_unregisters_a_directory_held_as_a_process_cwd()
+    {
+        var root = CreateRoot("gabCode partial remove cwd Ω");
+        var primary = Path.Combine(root, "primary");
+        var feature = Path.Combine(root, "wt", "held");
+        Directory.CreateDirectory(primary);
+        Process? holder = null;
+        try
+        {
+            await InitializeRepository(primary, "trunk");
+            Directory.CreateDirectory(Path.GetDirectoryName(feature)!);
+            await Git(primary, ["worktree", "add", "-b", "feature/held", feature]);
+            holder = Process.Start(new ProcessStartInfo("cmd.exe", "/d /c ping -n 30 127.0.0.1 > nul")
+            {
+                WorkingDirectory = feature,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            await Task.Delay(100);
+
+            var outcome = await new GitWorktreeDiscovery().RemoveWorktreeWithOutcomeAsync(root, feature, force: true);
+
+            Assert.Equal(GitWorktreeRemovalState.RemovedWithRetainedPath, outcome.State);
+            Assert.Equal(Path.GetFullPath(feature), outcome.Path);
+            Assert.DoesNotContain(outcome.Entries, entry => WorktreePath.Comparer.Equals(entry.Path, feature));
+            Assert.True(Directory.Exists(feature));
+        }
+        finally
+        {
+            if (holder is not null && !holder.HasExited) holder.Kill(entireProcessTree: true);
+            try { holder?.WaitForExit(2_000); } catch { }
+            TryDelete(root);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Reconciles_after_a_timed_out_or_cancelled_remove_process(bool cancel)
+    {
+        var root = CreateRoot("gabCode interrupted remove");
+        var primary = Path.Combine(root, "primary");
+        var feature = Path.Combine(root, "wt", "held");
+        var state = Path.Combine(root, "removed.flag");
+        var fakeGit = Path.Combine(root, "interruptible-git.cmd");
+        Directory.CreateDirectory(Path.Combine(primary, ".git"));
+        Directory.CreateDirectory(feature);
+        await File.WriteAllTextAsync(fakeGit, $"@echo off\r\nif \"%1\"==\"worktree\" if \"%2\"==\"list\" goto list\r\nif \"%1\"==\"worktree\" if \"%2\"==\"remove\" goto remove\r\nexit /b 2\r\n:list\r\necho worktree {primary}\r\necho HEAD 000\r\necho branch refs/heads/trunk\r\necho.\r\nif exist \"{state}\" exit /b 0\r\necho worktree {feature}\r\necho HEAD 111\r\necho branch refs/heads/feature/held\r\necho.\r\nexit /b 0\r\n:remove\r\necho removed>\"{state}\"\r\nping -n 30 127.0.0.1 > nul\r\nexit /b 1\r\n");
+        using var cancellation = new CancellationTokenSource();
+        if (cancel) cancellation.CancelAfter(TimeSpan.FromMilliseconds(300));
+        try
+        {
+            var outcome = await new GitWorktreeDiscovery(fakeGit, cancel ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(300))
+                .RemoveWorktreeWithOutcomeAsync(root, feature, force: true, cancellation.Token);
+
+            Assert.Equal(cancel ? GitWorktreeRemovalAttempt.Cancelled : GitWorktreeRemovalAttempt.TimedOut, outcome.Attempt);
+            Assert.Equal(GitWorktreeRemovalState.RemovedWithRetainedPath, outcome.State);
+            Assert.DoesNotContain(outcome.Entries, entry => WorktreePath.Comparer.Equals(entry.Path, feature));
+        }
+        finally { TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task Does_not_prune_an_indeterminate_secondary_path()
+    {
+        var root = CreateRoot("gabCode indeterminate path Ω");
+        var primary = Path.Combine(root, "primary");
+        var feature = Path.Combine(root, "wt", "indeterminate");
+        Directory.CreateDirectory(primary);
+        try
+        {
+            await InitializeRepository(primary, "trunk");
+            Directory.CreateDirectory(Path.GetDirectoryName(feature)!);
+            await Git(primary, ["worktree", "add", "-b", "feature/indeterminate", feature]);
+
+            var reconciliation = await new GitWorktreeDiscovery(pathAvailability: _ => WorktreePathAvailability.Indeterminate)
+                .ReconcileMissingSecondaryWorktreesAsync(root);
+
+            Assert.Empty(reconciliation.PrunedPaths);
+            Assert.Contains(reconciliation.Entries, entry => WorktreePath.Comparer.Equals(entry.Path, feature));
+        }
+        finally { TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task Prunes_an_externally_missing_secondary_worktree_and_re_reads_the_authoritative_list()
+    {
+        var root = CreateRoot("gabCode stale prune Ω");
+        var primary = Path.Combine(root, "primary");
+        var feature = Path.Combine(root, "wt", "missing");
+        Directory.CreateDirectory(primary);
+        try
+        {
+            await InitializeRepository(primary, "trunk");
+            Directory.CreateDirectory(Path.GetDirectoryName(feature)!);
+            await Git(primary, ["worktree", "add", "-b", "feature/missing", feature]);
+            Directory.Delete(feature, recursive: true);
+
+            var reconciliation = await new GitWorktreeDiscovery().ReconcileMissingSecondaryWorktreesAsync(root);
+
+            Assert.Contains(Path.GetFullPath(feature), reconciliation.PrunedPaths, WorktreePath.Comparer);
+            Assert.DoesNotContain(reconciliation.Entries, entry => WorktreePath.Comparer.Equals(entry.Path, feature));
+            Assert.Contains(reconciliation.Entries, entry => entry.IsPrimary);
+        }
+        finally { TryDelete(root); }
+    }
+
     private static string CreateRoot(string name)
     {
         var root = Path.Combine(Path.GetTempPath(), name, Guid.NewGuid().ToString("N"));
