@@ -139,6 +139,7 @@ struct WorkspaceProjectView: View {
             }
         }
         .onAppear {
+            let isFirstWindow = ProcessWindowStartupClaims.shared.claimFirstWindow()
             if let intent = WorkspaceWindowIntentStore.shared.take() {
                 switch intent {
                 case .openPanel: chooseWorkspace()
@@ -149,7 +150,11 @@ struct WorkspaceProjectView: View {
             }
             guard controller.state == .empty, controller.activeDescriptor == nil else { return }
             switch MacOSInstancePresence.shared {
-            case let .success(presence) where InstanceStartupPolicy.action(hasExplicitWorkspace: false, ownsPresence: presence.ownsPresence) == .restoreRemembered:
+            case let .success(presence) where InstanceStartupPolicy.action(
+                hasExplicitWorkspace: false,
+                ownsPresence: presence.ownsPresence,
+                isFirstWindow: isFirstWindow
+            ) == .restoreRemembered:
                 Task { _ = await controller.reopenRememberedWorkspace() }
             case let .failure(error):
                 controller.showStartupRecovery(.instancePresenceUnavailable(error.localizedDescription))

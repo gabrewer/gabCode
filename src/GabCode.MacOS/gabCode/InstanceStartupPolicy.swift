@@ -4,9 +4,21 @@ import Foundation
 enum InstanceStartupPolicy {
     enum Action: Equatable { case openExplicit, restoreRemembered, remainEmpty }
 
-    static func action(hasExplicitWorkspace: Bool, ownsPresence: Bool) -> Action {
+    static func action(hasExplicitWorkspace: Bool, ownsPresence: Bool, isFirstWindow: Bool) -> Action {
         if hasExplicitWorkspace { return .openExplicit }
-        return ownsPresence ? .restoreRemembered : .remainEmpty
+        return ownsPresence && isFirstWindow ? .restoreRemembered : .remainEmpty
+    }
+}
+
+@MainActor
+final class ProcessWindowStartupClaims {
+    static let shared = ProcessWindowStartupClaims()
+    private var hasClaimedFirstWindow = false
+
+    func claimFirstWindow() -> Bool {
+        guard !hasClaimedFirstWindow else { return false }
+        hasClaimedFirstWindow = true
+        return true
     }
 }
 
