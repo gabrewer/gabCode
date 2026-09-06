@@ -40,6 +40,9 @@ public partial class MainWindow : Window
     private WorktreeNavigationState? worktreeState;
     private WorktreeRefreshCoordinator? refreshCoordinator;
     private bool applyingWorktreeSelection;
+    private string? retainedWorktreePath;
+    private string? retainedWorktreeRepositoryPath;
+    private WorktreeNavigationEntry? blockedWorktreeEntry;
     private readonly HashSet<WorktreeTerminalPair> observedTerminalPairs = [];
     private static readonly RoutedCommand RefreshWorktreesCommand = new("Refresh Worktrees", typeof(MainWindow));
 
@@ -595,43 +598,166 @@ public partial class MainWindow : Window
         catch (Exception exception) { RefreshStatusText.Text = $"Could not reveal worktree in Explorer: {exception.Message}"; }
     }
 
+    private enum RetainedCleanupState { Removed, Retained, Registered, Cancelled }
+
+    private void ShowWorktreeRecovery(string path, string message, WorktreeNavigationEntry? blockedEntry = null, string? repositoryPath = null)
+    {
+        retainedWorktreePath = path;
+        retainedWorktreeRepositoryPath = repositoryPath ?? project?.ProjectFolder;
+        blockedWorktreeEntry = blockedEntry;
+        RefreshStatusText.Text = message;
+        RetryCleanupButton.Visibility = Visibility.Visible;
+        OpenRetainedFolderButton.Visibility = Visibility.Visible;
+        RetryCleanupButton.Focus();
+    }
+
+    private void ClearWorktreeRecovery()
+    {
+        retainedWorktreePath = null;
+        retainedWorktreeRepositoryPath = null;
+        blockedWorktreeEntry = null;
+        RetryCleanupButton.Visibility = Visibility.Collapsed;
+        OpenRetainedFolderButton.Visibility = Visibility.Collapsed;
+    }
+
+    private async void RetryRetainedWorktreeCleanup_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null) return;
+        if (blockedWorktreeEntry is { } blocked) { await DeleteWorktreeAsync(blocked); return; }
+        if (string.IsNullOrWhiteSpace(retainedWorktreePath)) return;
+        var path = retainedWorktreePath;
+        await RunWorktreeActionAsync("Retrying cleanup…", async cancellationToken =>
+        {
+            var result = await RetryRetainedWorktreeCleanup(path, retainedWorktreeRepositoryPath!, requireNonEmptyConfirmation: true, cancellationToken);
+            if (result == RetainedCleanupState.Removed)
+            {
+                ClearWorktreeRecovery();
+                RefreshStatusText.Text = "Retained worktree folder removed.";
+            }
+            else if (result == RetainedCleanupState.Registered)
+                ShowWorktreeRecovery(path, $"Cleanup stopped because a worktree is registered at {path}.");
+            else if (result == RetainedCleanupState.Retained)
+                ShowWorktreeRecovery(path, $"Could not remove retained folder {path}. Close applications using it, then retry.");
+            else if (result == RetainedCleanupState.Cancelled)
+                ShowWorktreeRecovery(path, $"Cleanup cancelled; local folder remains at {path}.");
+        });
+    }
+
+    private async Task<RetainedCleanupState> RetryRetainedWorktreeCleanup(string path, string repositoryPath, bool requireNonEmptyConfirmation, CancellationToken cancellationToken)
+    {
+        if (requireNonEmptyConfirmation)
+        {
+            try
+            {
+                if (Directory.EnumerateFileSystemEntries(path).Any() &&
+                    MessageBox.Show(this, $"The retained folder is not empty:\n{path}\n\nDelete its remaining contents?", "Delete retained folder contents", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                    return RetainedCleanupState.Cancelled;
+            }
+            catch (DirectoryNotFoundException) { return RetainedCleanupState.Removed; }
+            catch (UnauthorizedAccessException) { return RetainedCleanupState.Retained; }
+            catch (IOException) { return RetainedCleanupState.Retained; }
+        }
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var entries = await worktreeDiscovery.DiscoverEntriesAsync(repositoryPath, cancellationToken: cancellationToken);
+            if (entries.Any(entry => WorktreePath.Comparer.Equals(entry.Path, path))) return RetainedCleanupState.Registered;
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return RetainedCleanupState.Removed;
+            }
+            catch (DirectoryNotFoundException) { return RetainedCleanupState.Removed; }
+            catch (UnauthorizedAccessException) { }
+            catch (IOException) { }
+            if (attempt < 3) await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
+        }
+        return RetainedCleanupState.Retained;
+    }
+
+    private void OpenRetainedFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(retainedWorktreePath)) return;
+        try { _ = Process.Start(new ProcessStartInfo("explorer.exe", retainedWorktreePath) { UseShellExecute = true }) ?? throw new InvalidOperationException("Explorer could not be started."); }
+        catch (Exception exception) { RefreshStatusText.Text = $"Could not open retained folder: {exception.Message}"; }
+    }
+
     private async void DeleteWorktree_Click(object sender, RoutedEventArgs e)
     {
-        if (ContextEntry(sender) is not { } entry || entry.IsPrimary || project is null) return;
+        if (ContextEntry(sender) is { } entry) await DeleteWorktreeAsync(entry);
+    }
+
+    private async Task DeleteWorktreeAsync(WorktreeNavigationEntry entry)
+    {
+        if (entry.IsPrimary || project is null) return;
         var dialog = new WorktreeDeletionDialog(entry, terminalRegistry?.GetActiveTerminalCount(entry.Path) ?? 0) { Owner = this };
         if (dialog.ShowDialog() != true) return;
         var activeTerminals = terminalRegistry?.GetActiveTerminalCount(entry.Path) ?? 0;
         var hasTerminalPair = terminalRegistry?.Pairs.Any(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path)) is true;
         if (activeTerminals != 0 && exitConfirmation.Confirm(this, activeTerminals) == TerminalExitDecision.Cancel) return;
+        ClearWorktreeRecovery();
         try
         {
             await RunWorktreeActionAsync("Removing worktree…", async cancellationToken =>
             {
                 var dirty = await worktreeDiscovery.HasUncommittedOrUntrackedChangesAsync(entry.Path, cancellationToken);
                 if (activeTerminals != 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
-                IReadOnlyList<GitWorktreeEntry> entries;
-                try
+                var outcome = await worktreeDiscovery.RemoveWorktreeWithOutcomeAsync(project.ProjectFolder, entry.Path, force: false, cancellationToken);
+                if (outcome.State == GitWorktreeRemovalState.Blocked && dirty &&
+                    (outcome.Diagnostic?.Contains("modified or untracked", StringComparison.OrdinalIgnoreCase) is true) && ConfirmForceRemoval(entry, outcome.Diagnostic))
+                    outcome = await worktreeDiscovery.RemoveWorktreeWithOutcomeAsync(project.ProjectFolder, entry.Path, force: true, cancellationToken);
+
+                if (outcome.State is GitWorktreeRemovalState.Blocked or GitWorktreeRemovalState.ReconciliationUnavailable)
                 {
-                    entries = await worktreeDiscovery.RemoveWorktreeAsync(project.ProjectFolder, entry.Path, force: false, deleteLocalBranch: false, forceBranchDelete: false, cancellationToken: cancellationToken);
+                    if (outcome.Attempt == GitWorktreeRemovalAttempt.Cancelled) throw new OperationCanceledException(cancellationToken);
+                    throw new WorktreeRemovalBlockedException(outcome.Diagnostic ?? "Git reconciliation could not confirm removal.");
                 }
-                catch (InvalidOperationException exception) when (dirty && exception.Message.Contains("modified or untracked", StringComparison.OrdinalIgnoreCase) && ConfirmForceRemoval(entry, exception.Message))
+
+                var retained = outcome.State == GitWorktreeRemovalState.RemovedWithRetainedPath;
+                var primaryPath = outcome.Entries.First(entry => entry.IsPrimary).Path;
+                var cleanup = RetainedCleanupState.Removed;
+                if (retained && outcome.Attempt != GitWorktreeRemovalAttempt.Cancelled)
+                    cleanup = await RetryRetainedWorktreeCleanup(outcome.Path, primaryPath, requireNonEmptyConfirmation: false, cancellationToken);
+                if (cleanup == RetainedCleanupState.Registered)
                 {
-                    entries = await worktreeDiscovery.RemoveWorktreeAsync(project.ProjectFolder, entry.Path, force: true, deleteLocalBranch: false, forceBranchDelete: false, cancellationToken: cancellationToken);
+                    if (hasTerminalPair && activeTerminals == 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
+                    var current = await worktreeDiscovery.DiscoverEntriesAsync(primaryPath, cancellationToken: cancellationToken);
+                    ReconcileWorktrees(current);
+                    var safe = current.FirstOrDefault(item => string.Equals(item.Branch, project.MainBranch, StringComparison.Ordinal) && !WorktreePath.Comparer.Equals(item.Path, outcome.Path))
+                        ?? current.First(item => item.IsPrimary);
+                    SelectWorktree(safe.Path, safe.Branch!);
+                    ShowWorktreeRecovery(outcome.Path, $"Cleanup stopped because a worktree is registered at {outcome.Path}.", repositoryPath: primaryPath);
+                    return;
                 }
+                retained = retained && cleanup != RetainedCleanupState.Removed;
+                if (retained) ShowWorktreeRecovery(outcome.Path, $"Worktree removed; local folder remains at {outcome.Path}.", repositoryPath: primaryPath);
+
                 if (hasTerminalPair && activeTerminals == 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
-                ReconcileWorktrees(entries);
-                SelectRemainingWorktree(entries);
-                if (!dialog.DeleteLocalBranch || string.IsNullOrWhiteSpace(entry.Branch)) return;
-                try { await worktreeDiscovery.DeleteLocalBranchAsync(project.ProjectFolder, entry.Branch, force: false, cancellationToken); }
+                ReconcileWorktrees(outcome.Entries);
+                SelectRemainingWorktree(outcome.Entries);
+                if (!dialog.DeleteLocalBranch || string.IsNullOrWhiteSpace(entry.Branch))
+                {
+                    if (!retained) RefreshStatusText.Text = "Worktree removed.";
+                    return;
+                }
+                try { await worktreeDiscovery.DeleteLocalBranchAsync(project.ProjectFolder, entry.Branch, force: false, cancellationToken); RefreshStatusText.Text = retained ? $"Worktree removed; local folder remains at {outcome.Path}. Local branch removed." : "Worktree and local branch removed."; }
                 catch (InvalidOperationException exception) when (ConfirmForceBranchDeletion(entry, exception.Message))
                 {
                     await worktreeDiscovery.DeleteLocalBranchAsync(project.ProjectFolder, entry.Branch, force: true, cancellationToken);
+                    RefreshStatusText.Text = retained ? $"Worktree removed; local folder remains at {outcome.Path}. Local branch removed." : "Worktree and local branch removed.";
                 }
-                catch (Exception exception) { RefreshStatusText.Text = $"Worktree removed, but local branch was retained: {exception.Message}"; }
+                catch (Exception exception) { RefreshStatusText.Text = retained ? $"Worktree removed; local folder remains at {outcome.Path}. Local branch was retained: {exception.Message}" : $"Worktree removed, but local branch was retained: {exception.Message}"; }
             });
+        }
+        catch (WorktreeRemovalBlockedException exception)
+        {
+            ShowWorktreeRecovery(entry.Path, $"Could not remove worktree at {entry.Path}: {exception.Message}", entry);
         }
         catch (Exception exception) { RefreshStatusText.Text = $"Could not remove worktree: {exception.Message}"; }
     }
+
+    private sealed class WorktreeRemovalBlockedException(string message) : Exception(message);
 
     private bool ConfirmForceRemoval(WorktreeNavigationEntry entry, string error) =>
         MessageBox.Show(this, $"Git could not safely remove '{entry.Branch}'.\n\n{error}\n\nForce delete this worktree may permanently lose uncommitted and untracked files.", "Force delete this worktree", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
