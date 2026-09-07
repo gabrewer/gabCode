@@ -668,7 +668,7 @@ public partial class MainWindow : Window
                 RefreshStatusText.Text = "Retained worktree folder removed.";
             }
             else if (result == RetainedCleanupState.Registered)
-                ShowWorktreeRecovery(path, $"Cleanup stopped because a worktree is registered at {path}.");
+                ShowWorktreeRecovery(path, $"Cleanup stopped because a worktree is registered at {path}.", repositoryPath: retainedWorktreeRepositoryPath);
             else if (result == RetainedCleanupState.Retained)
                 ShowWorktreeRecovery(path, $"Could not remove retained folder {path}. Close applications using it, then retry.");
             else if (result == RetainedCleanupState.Cancelled)
@@ -728,6 +728,7 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() != true) return;
         var activeTerminals = terminalRegistry?.GetActiveTerminalCount(entry.Path) ?? 0;
         var hasTerminalPair = terminalRegistry?.Pairs.Any(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path)) is true;
+        var repositoryPath = worktreeState?.Entries.FirstOrDefault(item => item.IsPrimary)?.Path ?? project.ProjectFolder;
         if (activeTerminals != 0 && exitConfirmation.Confirm(this, activeTerminals) == TerminalExitDecision.Cancel) return;
         ClearWorktreeRecovery();
         try
@@ -736,10 +737,10 @@ public partial class MainWindow : Window
             {
                 var dirty = await worktreeDiscovery.HasUncommittedOrUntrackedChangesAsync(entry.Path, cancellationToken);
                 if (activeTerminals != 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
-                var outcome = await worktreeDiscovery.RemoveWorktreeWithOutcomeAsync(project.ProjectFolder, entry.Path, force: false, cancellationToken);
+                var outcome = await worktreeDiscovery.RemoveWorktreeWithOutcomeAsync(repositoryPath, entry.Path, force: false, cancellationToken);
                 if (outcome.State == GitWorktreeRemovalState.Blocked && dirty &&
                     (outcome.Diagnostic?.Contains("modified or untracked", StringComparison.OrdinalIgnoreCase) is true) && ConfirmForceRemoval(entry, outcome.Diagnostic))
-                    outcome = await worktreeDiscovery.RemoveWorktreeWithOutcomeAsync(project.ProjectFolder, entry.Path, force: true, cancellationToken);
+                    outcome = await worktreeDiscovery.RemoveWorktreeWithOutcomeAsync(repositoryPath, entry.Path, force: true, cancellationToken);
 
                 if (outcome.State is GitWorktreeRemovalState.Blocked or GitWorktreeRemovalState.ReconciliationUnavailable)
                 {
@@ -774,10 +775,10 @@ public partial class MainWindow : Window
                     if (!retained) RefreshStatusText.Text = "Worktree removed.";
                     return;
                 }
-                try { await worktreeDiscovery.DeleteLocalBranchAsync(project.ProjectFolder, entry.Branch, force: false, cancellationToken); RefreshStatusText.Text = retained ? $"Worktree removed; local folder remains at {outcome.Path}. Local branch removed." : "Worktree and local branch removed."; }
+                try { await worktreeDiscovery.DeleteLocalBranchAsync(repositoryPath, entry.Branch, force: false, cancellationToken); RefreshStatusText.Text = retained ? $"Worktree removed; local folder remains at {outcome.Path}. Local branch removed." : "Worktree and local branch removed."; }
                 catch (InvalidOperationException exception) when (ConfirmForceBranchDeletion(entry, exception.Message))
                 {
-                    await worktreeDiscovery.DeleteLocalBranchAsync(project.ProjectFolder, entry.Branch, force: true, cancellationToken);
+                    await worktreeDiscovery.DeleteLocalBranchAsync(repositoryPath, entry.Branch, force: true, cancellationToken);
                     RefreshStatusText.Text = retained ? $"Worktree removed; local folder remains at {outcome.Path}. Local branch removed." : "Worktree and local branch removed.";
                 }
                 catch (Exception exception) { RefreshStatusText.Text = retained ? $"Worktree removed; local folder remains at {outcome.Path}. Local branch was retained: {exception.Message}" : $"Worktree removed, but local branch was retained: {exception.Message}"; }
