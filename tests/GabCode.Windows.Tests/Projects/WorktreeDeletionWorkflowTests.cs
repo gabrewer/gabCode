@@ -39,6 +39,8 @@ public sealed class WorktreeDeletionWorkflowTests
         Assert.Contains("Worktree and local branch removed.", code);
         Assert.Contains("Local branch removed.", code);
         Assert.Contains("Local branch was retained:", code);
+        Assert.Contains("var repositoryPath = worktreeState?.Entries.FirstOrDefault(item => item.IsPrimary)?.Path", code);
+        Assert.Contains("RemoveWorktreeWithOutcomeAsync(repositoryPath", code);
         Assert.Contains("var safe = current.FirstOrDefault", code);
         Assert.Contains("SelectWorktree(safe.Path", code);
     }
