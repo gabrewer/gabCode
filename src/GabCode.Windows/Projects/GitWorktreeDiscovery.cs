@@ -47,9 +47,6 @@ internal sealed record GitWorktreeReconciliation(
 
 internal sealed class GitWorktreeDiscovery
 {
-    // Repository roots can legitimately contain large source trees. Keep a generous safety bound
-    // without making normal workspace creation fail at the old 2,000-directory threshold.
-    private const int MaximumCandidates = 50_000;
     private const int MaximumGitOutputCharacters = 64 * 1024;
     private static readonly HashSet<string> IgnoredDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -86,7 +83,7 @@ internal sealed class GitWorktreeDiscovery
         while (pending.TryPop(out var candidate))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (++foldersScanned > MaximumCandidates) throw new InvalidOperationException($"Project root contains more than {MaximumCandidates} directories to inspect.");
+            foldersScanned++;
             progress?.Report(new GitDiscoveryProgress("Searching for Git repositories", foldersScanned, repositories.Count));
             if (ShouldSkipDirectory(candidate, root)) continue;
             if (coveredWorktrees.Any(path => candidate.StartsWith(path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase))) continue;
