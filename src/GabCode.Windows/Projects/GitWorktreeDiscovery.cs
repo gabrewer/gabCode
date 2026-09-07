@@ -47,7 +47,9 @@ internal sealed record GitWorktreeReconciliation(
 
 internal sealed class GitWorktreeDiscovery
 {
-    private const int MaximumCandidates = 2_000;
+    // Repository roots can legitimately contain large source trees. Keep a generous safety bound
+    // without making normal workspace creation fail at the old 2,000-directory threshold.
+    private const int MaximumCandidates = 50_000;
     private const int MaximumGitOutputCharacters = 64 * 1024;
     private static readonly HashSet<string> IgnoredDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
     {
