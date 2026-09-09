@@ -735,10 +735,11 @@ public partial class MainWindow : Window
         {
             await RunWorktreeActionAsync("Removing worktree…", async cancellationToken =>
             {
-                var dirty = await worktreeDiscovery.HasUncommittedOrUntrackedChangesAsync(entry.Path, cancellationToken);
+                // Let Git perform the authoritative dirty-state check. A status probe against a
+                // locked/removed worktree can itself time out and must not prevent removal recovery.
                 if (activeTerminals != 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
                 var outcome = await worktreeDiscovery.RemoveWorktreeWithOutcomeAsync(repositoryPath, entry.Path, force: false, cancellationToken);
-                if (outcome.State == GitWorktreeRemovalState.Blocked && dirty &&
+                if (outcome.State == GitWorktreeRemovalState.Blocked &&
                     (outcome.Diagnostic?.Contains("modified or untracked", StringComparison.OrdinalIgnoreCase) is true) && ConfirmForceRemoval(entry, outcome.Diagnostic))
                     outcome = await worktreeDiscovery.RemoveWorktreeWithOutcomeAsync(repositoryPath, entry.Path, force: true, cancellationToken);
 
