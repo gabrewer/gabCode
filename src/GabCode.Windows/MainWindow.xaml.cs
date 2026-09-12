@@ -34,7 +34,10 @@ public partial class MainWindow : Window
     private bool closeInProgress;
     private bool allowClose;
     private CancellationTokenSource? discoveryCancellation;
+    private TaskCompletionSource? refreshCompletion;
+    private CancellationTokenSource? workspaceOpenCancellation;
     private CancellationTokenSource? worktreeActionCancellation;
+    private string? worktreeActionRepositoryPath;
     private readonly SidebarSidePreference sidebarPreference = new();
     private readonly VisualStudioCodePreference visualStudioCodePreference = new();
     private WorktreeNavigationState? worktreeState;
@@ -159,9 +162,25 @@ public partial class MainWindow : Window
 
     internal async Task<bool> OpenWorkspaceAsync(string workspacePath)
     {
+        if (workspaceOpenCancellation is not null || worktreeActionCancellation is not null) return false;
+        if (discoveryCancellation is not null)
+        {
+            if (refreshCompletion is not { } completion) return false;
+            discoveryCancellation.Cancel();
+            await completion.Task;
+        }
+        workspaceOpenCancellation = new CancellationTokenSource();
+        RefreshStatusText.Text = "Opening workspace…";
+        CancelDiscoveryButton.Visibility = Visibility.Visible;
+        if (project is not null)
+        {
+            CancelRefreshButton.Visibility = Visibility.Visible;
+            CancelRefreshButton.Content = "Cancel opening";
+            AutomationProperties.SetName(CancelRefreshButton, "Cancel workspace opening");
+        }
         try
         {
-            var nextProject = await projectLoader.LoadAsync(workspacePath);
+            var nextProject = await projectLoader.LoadAsync(workspacePath, workspaceOpenCancellation.Token);
             if (ProjectWindowRouting.ShouldLaunchNewWindow(project is not null))
             {
                 instanceLauncher.Launch(Path.GetFullPath(workspacePath));
@@ -173,6 +192,11 @@ public partial class MainWindow : Window
             if (nextProject.UsedPrimaryFallback)
                 RefreshStatusText.Text = $"The previously selected worktree is no longer available. Opened {Path.GetFileName(nextProject.ProjectFolder)} instead.";
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            RefreshStatusText.Text = "Workspace opening was cancelled.";
+            return false;
         }
         catch (Exception exception)
         {
@@ -193,6 +217,16 @@ public partial class MainWindow : Window
                 WorktreeFailureSurface.Visibility = Visibility.Visible;
             }
             return false;
+        }
+        finally
+        {
+            workspaceOpenCancellation.Dispose();
+            workspaceOpenCancellation = null;
+            CancelDiscoveryButton.Visibility = Visibility.Collapsed;
+            CancelRefreshButton.Content = "Cancel";
+            AutomationProperties.SetName(CancelRefreshButton, "Cancel worktree refresh");
+            if (worktreeActionCancellation is null && discoveryCancellation is null) CancelRefreshButton.Visibility = Visibility.Collapsed;
+            if (project is not null) _ = RefreshWorktreesAsync();
         }
     }
 
@@ -271,7 +305,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void CancelDiscoveryButton_Click(object sender, RoutedEventArgs e) => discoveryCancellation?.Cancel();
+    private void CancelDiscoveryButton_Click(object sender, RoutedEventArgs e)
+    {
+        discoveryCancellation?.Cancel();
+        workspaceOpenCancellation?.Cancel();
+    }
 
     private async Task<bool> ReplaceProjectAsync(ProjectContext nextProject)
     {
@@ -291,7 +329,7 @@ public partial class MainWindow : Window
 
     private void RefreshWorktreesCommand_CanExecute(object sender, CanExecuteRoutedEventArgs e)
     {
-        e.CanExecute = project is not null && discoveryCancellation is null;
+        e.CanExecute = project is not null && discoveryCancellation is null && workspaceOpenCancellation is null && worktreeActionCancellation is null;
         e.Handled = true;
     }
 
@@ -304,8 +342,9 @@ public partial class MainWindow : Window
 
     private async Task RefreshWorktreesAsync()
     {
-        if (project is null || discoveryCancellation is not null || worktreeActionCancellation is not null) return;
+        if (project is null || discoveryCancellation is not null || workspaceOpenCancellation is not null || worktreeActionCancellation is not null) return;
         discoveryCancellation = new CancellationTokenSource();
+        var completion = refreshCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var generation = refreshCoordinator?.BeginRefresh() ?? 0;
         RefreshWorktreesButton.IsEnabled = false;
         CancelRefreshButton.Visibility = Visibility.Visible;
@@ -325,7 +364,15 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) { RefreshStatusText.Text = "Worktree refresh cancelled."; }
         catch (Exception exception) { RefreshStatusText.Text = $"Could not refresh worktrees: {exception.Message}"; }
-        finally { discoveryCancellation.Dispose(); discoveryCancellation = null; RefreshWorktreesButton.IsEnabled = true; CancelRefreshButton.Visibility = Visibility.Collapsed; }
+        finally
+        {
+            discoveryCancellation.Dispose();
+            discoveryCancellation = null;
+            if (ReferenceEquals(refreshCompletion, completion)) refreshCompletion = null;
+            completion.TrySetResult();
+            RefreshWorktreesButton.IsEnabled = workspaceOpenCancellation is null;
+            if (workspaceOpenCancellation is null) CancelRefreshButton.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void ReconcileWorktrees(IReadOnlyList<GitWorktreeEntry> entries, long generation = 0, bool confirmedRemoval = false)
@@ -348,6 +395,7 @@ public partial class MainWindow : Window
     {
         discoveryCancellation?.Cancel();
         worktreeActionCancellation?.Cancel();
+        workspaceOpenCancellation?.Cancel();
     }
 
     private void PopulateWorktrees()
@@ -525,7 +573,8 @@ public partial class MainWindow : Window
         {
             try
             {
-                if (project is not null) ReconcileWorktrees(await worktreeDiscovery.DiscoverEntriesAsync(project.ProjectFolder));
+                var anchor = worktreeActionRepositoryPath ?? worktreeState?.Entries.FirstOrDefault(entry => entry.IsPrimary)?.Path ?? project?.ProjectFolder;
+                if (!string.IsNullOrWhiteSpace(anchor)) ReconcileWorktrees(await worktreeDiscovery.DiscoverEntriesAsync(anchor));
                 RefreshStatusText.Text = "Worktree action cancelled.";
             }
             catch (Exception exception) { RefreshStatusText.Text = $"Worktree action cancelled; reconciliation failed: {exception.Message}"; }
@@ -534,6 +583,7 @@ public partial class MainWindow : Window
         {
             worktreeActionCancellation.Dispose();
             worktreeActionCancellation = null;
+            worktreeActionRepositoryPath = null;
             WorktreeList.IsEnabled = true;
             RefreshWorktreesButton.IsEnabled = true;
             CancelRefreshButton.Visibility = Visibility.Collapsed;
@@ -731,6 +781,7 @@ public partial class MainWindow : Window
         var repositoryPath = worktreeState?.Entries.FirstOrDefault(item => item.IsPrimary)?.Path ?? project.ProjectFolder;
         if (activeTerminals != 0 && exitConfirmation.Confirm(this, activeTerminals) == TerminalExitDecision.Cancel) return;
         ClearWorktreeRecovery();
+        worktreeActionRepositoryPath = repositoryPath;
         try
         {
             await RunWorktreeActionAsync("Removing worktree…", async cancellationToken =>
@@ -771,6 +822,11 @@ public partial class MainWindow : Window
                 if (hasTerminalPair && activeTerminals == 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
                 ReconcileWorktrees(outcome.Entries, confirmedRemoval: true);
                 SelectRemainingWorktree(outcome.Entries);
+                if (outcome.Attempt == GitWorktreeRemovalAttempt.Cancelled)
+                {
+                    if (!retained) RefreshStatusText.Text = "Worktree removal was cancelled after Git removed its registration.";
+                    return;
+                }
                 if (!dialog.DeleteLocalBranch || string.IsNullOrWhiteSpace(entry.Branch))
                 {
                     if (!retained) RefreshStatusText.Text = "Worktree removed.";

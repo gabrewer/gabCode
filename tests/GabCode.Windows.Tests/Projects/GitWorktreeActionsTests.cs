@@ -370,6 +370,28 @@ public sealed class GitWorktreeActionsTests
         }
     }
 
+    [Fact]
+    public async Task Allows_worktree_removal_to_outlive_the_read_operation_timeout()
+    {
+        var root = CreateRoot("gabCode slow remove");
+        var primary = Path.Combine(root, "primary");
+        var feature = Path.Combine(root, "wt", "slow");
+        var state = Path.Combine(root, "removed.flag");
+        var fakeGit = Path.Combine(root, "slow-remove-git.cmd");
+        Directory.CreateDirectory(Path.Combine(primary, ".git"));
+        Directory.CreateDirectory(feature);
+        await File.WriteAllTextAsync(fakeGit, $"@echo off\r\nif \"%1\"==\"worktree\" if \"%2\"==\"list\" goto list\r\nif \"%1\"==\"worktree\" if \"%2\"==\"remove\" goto remove\r\nexit /b 2\r\n:list\r\necho worktree {primary}\r\necho HEAD 000\r\necho branch refs/heads/trunk\r\necho.\r\nif exist \"{state}\" exit /b 0\r\necho worktree {feature}\r\necho HEAD 111\r\necho branch refs/heads/feature/slow\r\necho.\r\nexit /b 0\r\n:remove\r\nping -n 3 127.0.0.1 > nul\r\necho removed>\"{state}\"\r\nexit /b 0\r\n");
+        try
+        {
+            var outcome = await new GitWorktreeDiscovery(fakeGit, TimeSpan.FromSeconds(1), removalTimeout: Timeout.InfiniteTimeSpan)
+                .RemoveWorktreeWithOutcomeAsync(root, feature, force: true);
+
+            Assert.Equal(GitWorktreeRemovalAttempt.Completed, outcome.Attempt);
+            Assert.Equal(GitWorktreeRemovalState.RemovedWithRetainedPath, outcome.State);
+        }
+        finally { TryDelete(root); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -387,7 +409,7 @@ public sealed class GitWorktreeActionsTests
         if (cancel) cancellation.CancelAfter(TimeSpan.FromMilliseconds(300));
         try
         {
-            var outcome = await new GitWorktreeDiscovery(fakeGit, cancel ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(300))
+            var outcome = await new GitWorktreeDiscovery(fakeGit, cancel ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(300), removalTimeout: cancel ? Timeout.InfiniteTimeSpan : TimeSpan.FromMilliseconds(300))
                 .RemoveWorktreeWithOutcomeAsync(root, feature, force: true, cancellation.Token);
 
             Assert.Equal(cancel ? GitWorktreeRemovalAttempt.Cancelled : GitWorktreeRemovalAttempt.TimedOut, outcome.Attempt);
