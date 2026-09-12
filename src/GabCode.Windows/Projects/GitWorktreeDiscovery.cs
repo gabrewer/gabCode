@@ -54,13 +54,16 @@ internal sealed class GitWorktreeDiscovery
     };
     private readonly string executablePath;
     private readonly TimeSpan timeout;
+    private readonly TimeSpan removalTimeout;
     private readonly Func<string, WorktreePathAvailability> pathAvailability;
 
-    internal GitWorktreeDiscovery(string executablePath = "git", TimeSpan? timeout = null, Func<string, WorktreePathAvailability>? pathAvailability = null)
+    internal GitWorktreeDiscovery(string executablePath = "git", TimeSpan? timeout = null, Func<string, WorktreePathAvailability>? pathAvailability = null, TimeSpan? removalTimeout = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         this.executablePath = executablePath;
         this.timeout = timeout ?? TimeSpan.FromSeconds(10);
+        // Filesystem-heavy removal is user-cancellable but never inherits a short read-probe timeout.
+        this.removalTimeout = removalTimeout ?? Timeout.InfiniteTimeSpan;
         this.pathAvailability = pathAvailability ?? GetPathAvailability;
     }
 
@@ -84,6 +87,7 @@ internal sealed class GitWorktreeDiscovery
         {
             cancellationToken.ThrowIfCancellationRequested();
             foldersScanned++;
+            if ((foldersScanned & 63) == 0) await Task.Yield();
             progress?.Report(new GitDiscoveryProgress("Searching for Git repositories", foldersScanned, repositories.Count));
             if (ShouldSkipDirectory(candidate, root)) continue;
             if (coveredWorktrees.Any(path => candidate.StartsWith(path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase))) continue;
@@ -101,8 +105,11 @@ internal sealed class GitWorktreeDiscovery
                 }
                 continue;
             }
+            var childrenScanned = 0;
             foreach (var child in Directory.EnumerateDirectories(candidate))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                if ((++childrenScanned & 63) == 0) await Task.Yield();
                 if (!ShouldSkipDirectory(child, root)) pending.Push(child);
             }
         }
@@ -338,7 +345,7 @@ internal sealed class GitWorktreeDiscovery
         GitProcessResult? remove = null;
         Exception? attemptFailure = null;
         var attempt = GitWorktreeRemovalAttempt.Completed;
-        try { remove = await RunGitAsync(entries.First(entry => entry.IsPrimary).Path, arguments, cancellationToken); attempt = remove.ExitCode == 0 ? GitWorktreeRemovalAttempt.Completed : GitWorktreeRemovalAttempt.Rejected; }
+        try { remove = await RunGitAsync(entries.First(entry => entry.IsPrimary).Path, arguments, cancellationToken, removalTimeout); attempt = remove.ExitCode == 0 ? GitWorktreeRemovalAttempt.Completed : GitWorktreeRemovalAttempt.Rejected; }
         catch (TimeoutException exception) { attemptFailure = exception; attempt = GitWorktreeRemovalAttempt.TimedOut; }
         catch (OperationCanceledException exception) { attemptFailure = exception; attempt = GitWorktreeRemovalAttempt.Cancelled; }
 
@@ -416,7 +423,10 @@ internal sealed class GitWorktreeDiscovery
         try
         {
             var attributes = File.GetAttributes(path);
-            return (attributes & FileAttributes.Directory) != 0 ? WorktreePathAvailability.Present : WorktreePathAvailability.Indeterminate;
+            if ((attributes & FileAttributes.Directory) == 0) return WorktreePathAvailability.Indeterminate;
+            using var entries = Directory.EnumerateFileSystemEntries(path).GetEnumerator();
+            _ = entries.MoveNext();
+            return WorktreePathAvailability.Present;
         }
         catch (FileNotFoundException) { return WorktreePathAvailability.Missing; }
         catch (DirectoryNotFoundException) { return WorktreePathAvailability.Missing; }
@@ -446,9 +456,10 @@ internal sealed class GitWorktreeDiscovery
         return result.ExitCode == 0 ? result.StandardOutput : null;
     }
 
-    private async Task<GitProcessResult> RunGitAsync(string directory, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    private async Task<GitProcessResult> RunGitAsync(string directory, IReadOnlyList<string> arguments, CancellationToken cancellationToken, TimeSpan? operationTimeout = null)
     {
-        using var timeoutCancellation = new CancellationTokenSource(timeout);
+        var effectiveTimeout = operationTimeout ?? timeout;
+        using var timeoutCancellation = effectiveTimeout == Timeout.InfiniteTimeSpan ? new CancellationTokenSource() : new CancellationTokenSource(effectiveTimeout);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCancellation.Token);
         var info = new ProcessStartInfo(executablePath)
         {

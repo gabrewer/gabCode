@@ -105,6 +105,21 @@ public sealed class GitWorktreeDiscoveryTests
     }
 
     [Fact]
+    public async Task Cancels_discovery_in_a_wide_tree_without_a_directory_count_failure()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabCode wide discovery", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            for (var index = 0; index < 256; index++) Directory.CreateDirectory(Path.Combine(root, $"child-{index:D3}"));
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            await Assert.ThrowsAsync<OperationCanceledException>(() => new GitWorktreeDiscovery().DiscoverEntriesAsync(root, cancellationToken: cancellation.Token));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public async Task Drains_noisy_stdout_and_stderr_without_retaining_unbounded_output()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabCode noisy discovery", Guid.NewGuid().ToString("N"));
