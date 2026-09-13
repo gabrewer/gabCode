@@ -13,6 +13,7 @@ using GabCode.Windows.Projects;
 using GabCode.Windows.Terminal.Hosting;
 using GabCode.Windows.Terminal.Profiles;
 using GabCode.Windows.Terminal.Views;
+using GabCode.Windows.Terminal.Settings;
 
 namespace GabCode.Windows;
 
@@ -40,6 +41,7 @@ public partial class MainWindow : Window
     private string? worktreeActionRepositoryPath;
     private readonly SidebarSidePreference sidebarPreference = new();
     private readonly VisualStudioCodePreference visualStudioCodePreference = new();
+    private readonly TerminalFontPreferenceStore terminalFontPreference = new();
     private WorktreeNavigationState? worktreeState;
     private WorktreeRefreshCoordinator? refreshCoordinator;
     private bool applyingWorktreeSelection;
@@ -76,6 +78,7 @@ public partial class MainWindow : Window
         this.exitConfirmation = exitConfirmation ?? throw new ArgumentNullException(nameof(exitConfirmation));
         this.instanceLauncher = instanceLauncher ?? new GabCodeInstanceLauncher();
         InitializeComponent();
+        terminalFontPreference.Changed += TerminalFontPreference_Changed;
         InputBindings.Add(new KeyBinding(RefreshWorktreesCommand, Key.F5, ModifierKeys.None) { CommandTarget = this });
         CommandBindings.Add(new CommandBinding(RefreshWorktreesCommand, RefreshWorktreesCommand_Executed, RefreshWorktreesCommand_CanExecute));
         Closing += MainWindow_Closing;
@@ -135,7 +138,7 @@ public partial class MainWindow : Window
 
     private void CreateTerminalWorkspace()
     {
-        var pair = (terminalRegistry ??= new WorktreeTerminalRegistry(profileResolver.Resolve)).GetOrCreate(project!.ProjectFolder);
+        var pair = (terminalRegistry ??= new WorktreeTerminalRegistry(profileResolver.Resolve, () => terminalFontPreference.EffectiveSelection)).GetOrCreate(project!.ProjectFolder);
         ObserveTerminalPair(pair);
         MarkTerminalPairOwned(pair);
         pair.Attach(MainTerminalRegion, BottomTerminalRegion);
@@ -331,6 +334,11 @@ public partial class MainWindow : Window
     {
         e.CanExecute = project is not null && discoveryCancellation is null && workspaceOpenCancellation is null && worktreeActionCancellation is null;
         e.Handled = true;
+    }
+
+    private void TerminalFontPreference_Changed(TerminalFontSelection selection)
+    {
+        Dispatcher.InvokeAsync(() => terminalRegistry?.ApplyFont(selection), DispatcherPriority.DataBind);
     }
 
     private void SwapTerminalsButton_Click(object sender, RoutedEventArgs e)
