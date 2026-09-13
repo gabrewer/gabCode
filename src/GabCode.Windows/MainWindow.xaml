@@ -26,7 +26,9 @@
                         <SolidColorBrush x:Key="{x:Static SystemColors.MenuTextBrushKey}" Color="White" />
                         <SolidColorBrush x:Key="{x:Static SystemColors.MenuHighlightBrushKey}" Color="#3A3A3A" />
                         <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="White" />
-                        <Style TargetType="MenuItem" BasedOn="{StaticResource ApplicationMenuItemStyle}">
+                        <Style TargetType="MenuItem">
+                            <Setter Property="Background" Value="#242424" />
+                            <Setter Property="Foreground" Value="White" />
                             <Setter Property="BorderThickness" Value="0" />
                             <Setter Property="BorderBrush" Value="Transparent" />
                         </Style>
@@ -64,7 +66,12 @@
                     <ListBox.Resources>
                         <ContextMenu x:Key="WorktreeContextMenu" x:Shared="False" AutomationProperties.Name="Worktree actions">
                             <ContextMenu.Resources>
-                                <Style TargetType="MenuItem" BasedOn="{StaticResource ApplicationMenuItemStyle}" />
+                                <Style TargetType="MenuItem">
+                                    <Setter Property="Background" Value="#242424" />
+                                    <Setter Property="Foreground" Value="White" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="BorderBrush" Value="Transparent" />
+                                </Style>
                             </ContextMenu.Resources>
                             <MenuItem Header="Create worktree from main" Click="CreateWorktreeFromMain_Click" AutomationProperties.Name="Create worktree from main" />
                             <MenuItem Header="Create worktree from selected branch" Click="CreateWorktreeFromSelectedBranch_Click" AutomationProperties.Name="Create worktree from selected branch" />
