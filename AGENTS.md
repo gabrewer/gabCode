@@ -2,7 +2,7 @@
 
 ## Authoritative context
 
-- `Documentation/design/gabcode-initial-prd.md` owns product scope and architecture.
+- `Documentation/design/2026-07-24-gabcode-initial-prd.md` owns product scope and architecture.
 - `TEAM-ORCHESTRATION.md` owns planning, execution, state tracking, and quality gates.
 - `TOOL-PI.md` owns Pi resource mechanics.
 - `Documentation/agents/gabcode-orchestration-context.md` adapts the generic roles to gabCode.

@@ -4,9 +4,9 @@
 | --- | --- |
 | Status | Product definition; implementation not yet approved |
 | Date | 2026-08-22 |
-| Related baseline | `Documentation/design/projects-and-worktrees-prd.md` |
-| Related navigation | `Documentation/design/worktree-navigation-prd.md` |
-| Reliability follow-up | `Documentation/design/worktree-actions-reliability-prd.md` |
+| Related baseline | `Documentation/design/2026-08-08-projects-and-worktrees-prd.md` |
+| Related navigation | `Documentation/design/2026-08-10-worktree-navigation-prd.md` |
+| Reliability follow-up | `Documentation/design/2026-08-24-worktree-actions-reliability-prd.md` |
 
 ## Product Name & One-Liner
 

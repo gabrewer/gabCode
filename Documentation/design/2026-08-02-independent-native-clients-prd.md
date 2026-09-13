@@ -8,7 +8,7 @@
 | State backend | `github-issues` |
 | Planning issue | [#32 — independent native client architecture](https://github.com/gabrewer/gabCode/issues/32) |
 | Feature branch | `feature/independent-native-clients` |
-| Parent direction | `Documentation/design/gabcode-initial-prd.md` |
+| Parent direction | `Documentation/design/2026-07-24-gabcode-initial-prd.md` |
 
 ## Product Name & One-Liner
 
@@ -31,7 +31,7 @@ Remove the planned C# NativeAOT sidecar and its JSON-over-standard-input/output 
 - Neither application embeds, launches, packages, or requires the other platform's runtime or implementation.
 - The repository shares requirements, vocabulary, language-neutral fixtures, and expected normalized outcomes—not production runtime code.
 
-This is a foundational architecture change to `Documentation/design/gabcode-initial-prd.md`. Authoritative baseline and implementation guidance must follow this approved boundary.
+This is a foundational architecture change to `Documentation/design/2026-07-24-gabcode-initial-prd.md`. Authoritative baseline and implementation guidance must follow this approved boundary.
 
 ## User Outcome
 

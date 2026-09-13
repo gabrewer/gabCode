@@ -16,7 +16,7 @@ Work only inside the `/pm-agent` planning loop. Do not implement code or create 
 Read:
 
 - `AGENTS.md`;
-- `Documentation/design/gabcode-initial-prd.md`;
+- `Documentation/design/2026-07-24-gabcode-initial-prd.md`;
 - `Documentation/agents/gabcode-orchestration-context.md`;
 - the requested feature/design source;
 - relevant existing UI and tests when they exist.

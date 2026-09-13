@@ -4,9 +4,9 @@
 | --- | --- |
 | Status | Proposed |
 | Platform | Windows |
-| Parent direction | `Documentation/design/gabcode-initial-prd.md` |
-| Related foundation | `Documentation/design/windows-native-terminal-foundation-prd.md` |
-| Related input compatibility | `Documentation/design/windows-terminal-input-compatibility-prd.md` |
+| Parent direction | `Documentation/design/2026-07-24-gabcode-initial-prd.md` |
+| Related foundation | `Documentation/design/2026-07-30-windows-native-terminal-foundation-prd.md` |
+| Related input compatibility | `Documentation/design/2026-08-01-windows-terminal-input-compatibility-prd.md` |
 
 ## Product Name & One-Liner
 

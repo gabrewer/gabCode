@@ -5,8 +5,8 @@
 | Status | Product definition; implementation not yet approved |
 | Date | 2026-08-24 |
 | Platforms | Native Windows and native macOS clients |
-| Related baseline | `Documentation/design/worktree-actions-prd.md` |
-| Related navigation | `Documentation/design/worktree-navigation-prd.md` |
+| Related baseline | `Documentation/design/2026-08-22-worktree-actions-prd.md` |
+| Related navigation | `Documentation/design/2026-08-10-worktree-navigation-prd.md` |
 | Originating review | PR #78 review findings |
 
 ## Product Name & One-Liner

@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Approved for planning; implementation not yet approved |
 | Date | 2026-08-09 |
-| Related baseline | `Documentation/design/projects-and-worktrees-prd.md` |
+| Related baseline | `Documentation/design/2026-08-08-projects-and-worktrees-prd.md` |
 
 ## Product Name & One-Liner
 

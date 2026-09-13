@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Approved — dependency decision recorded |
 | Platform | Windows |
-| Parent direction | `Documentation/design/gabcode-initial-prd.md`, Milestone 1 |
+| Parent direction | `Documentation/design/2026-07-24-gabcode-initial-prd.md`, Milestone 1 |
 | Issues | [#13 — Windows Terminal WPF Dependency Gate](https://github.com/gabrewer/gabCode/issues/13); [#15 — Windows Terminal Runtime Foundation](https://github.com/gabrewer/gabCode/issues/15) |
 
 ## Purpose

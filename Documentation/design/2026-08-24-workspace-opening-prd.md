@@ -4,8 +4,8 @@
 | --- | --- |
 | Status | Approved product correction; implementation tracked by #81 |
 | Date | 2026-08-23 |
-| Related baseline | `Documentation/design/gabcode-initial-prd.md` |
-| Refines | `Documentation/design/projects-and-worktrees-prd.md`, `Documentation/design/worktree-navigation-prd.md` |
+| Related baseline | `Documentation/design/2026-07-24-gabcode-initial-prd.md` |
+| Refines | `Documentation/design/2026-08-08-projects-and-worktrees-prd.md`, `Documentation/design/2026-08-10-worktree-navigation-prd.md` |
 | Conformance fixtures | `tests/fixtures/workspace-opening/cases.json` |
 
 This focused PRD corrects the unreleased workspace-file contract and workspace-opening behavior. Where those documents describe `project.branch` as the worktree selected during workspace opening, this PRD replaces that behavior with the required `project.mainBranch` and local last-worktree selection described below.

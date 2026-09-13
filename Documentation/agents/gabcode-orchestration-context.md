@@ -6,7 +6,7 @@ This is a thin project profile for generating gabCode's Pi prompts and skills. I
 
 Use these documents together:
 
-1. `Documentation/design/gabcode-initial-prd.md` — product scope and architecture.
+1. `Documentation/design/2026-07-24-gabcode-initial-prd.md` — product scope and architecture.
 2. `TEAM-ORCHESTRATION.md` — roles, planning/execution flow, state backends, and quality gates.
 3. `TOOL-PI.md` — Pi prompt, skill, extension, and model-routing mechanics.
 4. This file — gabCode-specific interpretation of the generic roles.

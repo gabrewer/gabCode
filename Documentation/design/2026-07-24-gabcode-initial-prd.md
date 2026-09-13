@@ -8,7 +8,7 @@
 
 This document defines gabCode's initial product boundary and direction. It should evolve when foundational product decisions change. Substantial new capabilities should receive focused PRDs under `Documentation/design` rather than turning this document into an exhaustive specification.
 
-The approved independent-native-client decision is recorded in `Documentation/design/independent-native-clients-prd.md`. Windows and macOS share product requirements and conformance cases, but no production runtime code or companion service.
+The approved independent-native-client decision is recorded in `Documentation/design/2026-08-02-independent-native-clients-prd.md`. Windows and macOS share product requirements and conformance cases, but no production runtime code or companion service.
 
 ## Product Name & One-Liner
 
@@ -158,7 +158,7 @@ The action opens the current worktree's file, preferably at the relevant line an
 
 ### 9. Safe Multiline Terminal Paste — Must-have
 
-Single-line clipboard text is pasted immediately. Multiline clipboard text requires a fresh native confirmation with a short preview before gabCode sends it to the terminal. Approval forwards the original text unchanged; cancellation sends nothing. See `Documentation/design/windows-terminal-safe-multiline-paste-prd.md`.
+Single-line clipboard text is pasted immediately. Multiline clipboard text requires a fresh native confirmation with a short preview before gabCode sends it to the terminal. Approval forwards the original text unchanged; cancellation sends nothing. See `Documentation/design/2026-08-02-windows-terminal-safe-multiline-paste-prd.md`.
 
 ### 10. Local Tool Diagnostics and Layout Persistence — Should-have
 
