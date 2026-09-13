@@ -34,6 +34,8 @@
                     <MenuItem x:Name="FileMenuItem" Header="_File" Background="#242424" Foreground="White" Loaded="FileMenuItem_Loaded" AutomationProperties.Name="File">
                         <MenuItem Header="_Open Workspace…" Background="#242424" Foreground="White" Click="OpenWorkspaceButton_Click" AutomationProperties.Name="Open workspace" />
                         <MenuItem Header="_Create Workspace…" Background="#242424" Foreground="White" Click="CreateWorkspaceButton_Click" AutomationProperties.Name="Create workspace" />
+                        <Separator />
+                        <MenuItem Header="_Settings…" Background="#242424" Foreground="White" Click="OpenTerminalFontSettings_Click" AutomationProperties.Name="Open terminal font settings" />
                     </MenuItem>
                     <MenuItem Header="_View" Background="#242424" Foreground="White" AutomationProperties.Name="View">
                         <MenuItem Header="Move Sidebar _Right" Click="MoveSidebarRight_Click" AutomationProperties.Name="Move sidebar right" />
