@@ -65,7 +65,8 @@ internal sealed class TerminalFontPreferenceStore
         EffectiveSelection = Restore();
     }
 
-    internal event EventHandler<TerminalFontSelection>? Changed;
+    internal event Action<TerminalFontSelection>? Changed;
+    internal TerminalFontCatalog Catalog => catalog;
     internal TerminalFontSelection EffectiveSelection { get; private set; }
 
     internal void Save(TerminalFontSelection selection)
@@ -122,7 +123,7 @@ internal sealed class TerminalFontPreferenceStore
     {
         if (EffectiveSelection == selection) return;
         EffectiveSelection = selection;
-        Changed?.Invoke(this, selection);
+        Changed?.Invoke(selection);
     }
 
     private sealed record Persisted(string Face, double PointSize);

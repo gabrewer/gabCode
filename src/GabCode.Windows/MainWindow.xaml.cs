@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private readonly SidebarSidePreference sidebarPreference = new();
     private readonly VisualStudioCodePreference visualStudioCodePreference = new();
     private readonly TerminalFontPreferenceStore terminalFontPreference = new();
+    private TerminalFontSettingsDialog? terminalFontSettingsDialog;
     private WorktreeNavigationState? worktreeState;
     private WorktreeRefreshCoordinator? refreshCoordinator;
     private bool applyingWorktreeSelection;
@@ -334,6 +335,15 @@ public partial class MainWindow : Window
     {
         e.CanExecute = project is not null && discoveryCancellation is null && workspaceOpenCancellation is null && worktreeActionCancellation is null;
         e.Handled = true;
+    }
+
+    private void OpenTerminalFontSettings_Click(object sender, RoutedEventArgs e)
+    {
+        terminalFontSettingsDialog ??= new TerminalFontSettingsDialog(terminalFontPreference);
+        terminalFontSettingsDialog.Owner = this;
+        terminalFontSettingsDialog.Closed += (_, _) => terminalFontSettingsDialog = null;
+        terminalFontSettingsDialog.Show();
+        terminalFontSettingsDialog.Activate();
     }
 
     private void TerminalFontPreference_Changed(TerminalFontSelection selection)
