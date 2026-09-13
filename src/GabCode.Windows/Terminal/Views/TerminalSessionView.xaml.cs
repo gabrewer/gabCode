@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using GabCode.Windows.Terminal.Conpty;
 using GabCode.Windows.Terminal.Hosting;
 using GabCode.Windows.Terminal.Profiles;
+using GabCode.Windows.Terminal.Settings;
 
 namespace GabCode.Windows.Terminal.Views;
 
@@ -14,6 +15,7 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
     private readonly TerminalSessionKind kind;
     private readonly string workingDirectory;
     private readonly Func<TerminalProfileResolution> resolveProfile;
+    private readonly Func<TerminalFontSelection> resolveFont;
     private TerminalHostedSession? session;
     private TerminalSessionState state = TerminalSessionState.Created;
     private Exception? localFailure;
@@ -24,11 +26,13 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
     internal TerminalSessionView(
         TerminalSessionKind kind,
         string workingDirectory,
-        Func<TerminalProfileResolution> resolveProfile)
+        Func<TerminalProfileResolution> resolveProfile,
+        Func<TerminalFontSelection>? resolveFont = null)
     {
         this.kind = kind;
         this.workingDirectory = workingDirectory;
         this.resolveProfile = resolveProfile ?? throw new ArgumentNullException(nameof(resolveProfile));
+        this.resolveFont = resolveFont ?? (() => TerminalFontSelection.Default);
         InitializeComponent();
         var terminalName = kind.GetDisplayName();
         AutomationProperties.SetName(this, terminalName);
@@ -122,6 +126,8 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
         ClaimTerminalFocus();
     }
 
+    internal void ApplyFont(TerminalFontSelection selection) => session?.ApplyFont(selection);
+
     internal void RefreshLayout() => session?.RefreshLayout();
 
     public async ValueTask DisposeAsync()
@@ -146,7 +152,7 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
         {
             var profile = resolveProfile();
             SetProfileStatus(profile.StatusMessage);
-            session = new TerminalHostedSession(kind, workingDirectory, profile);
+            session = new TerminalHostedSession(kind, workingDirectory, profile, resolveFont());
             session.StateChanged += Session_StateChanged;
             session.Control.GotFocus += TerminalControl_GotFocus;
             session.Control.LostFocus += TerminalControl_LostFocus;

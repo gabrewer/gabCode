@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using Microsoft.Terminal.Wpf;
 using GabCode.Windows.Terminal.Conpty;
 using GabCode.Windows.Terminal.Profiles;
+using GabCode.Windows.Terminal.Settings;
 
 namespace GabCode.Windows.Terminal.Hosting;
 
@@ -15,14 +16,17 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     private Task? startTask;
     private Task? closeTask;
     private bool controlConnected;
+    private readonly TerminalFontSelection fontSelection;
 
     internal TerminalHostedSession(
         TerminalSessionKind kind,
         string workingDirectory,
-        TerminalProfileResolution profile)
+        TerminalProfileResolution profile,
+        TerminalFontSelection? fontSelection = null)
     {
         Kind = kind;
         Profile = profile ?? throw new ArgumentNullException(nameof(profile));
+        this.fontSelection = fontSelection ?? TerminalFontSelection.Default;
         Control = new TerminalControl
         {
             AutoResize = true,
@@ -69,6 +73,11 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     internal Task ResizeAsync(uint rows, uint columns, CancellationToken cancellationToken = default) =>
         Control.ResizeAsync(rows, columns, cancellationToken);
 
+    internal void ApplyFont(TerminalFontSelection selection)
+    {
+        Control.SetTheme(TerminalThemeFactory.CreateDefault(), selection.FaceId!, checked((short)Math.Round(selection.PointSize)));
+    }
+
     internal void RefreshLayout()
     {
         Control.UpdateLayout();
@@ -88,7 +97,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     private async Task StartCoreAsync()
     {
         await WaitUntilLoadedAsync(Control);
-        Control.SetTheme(TerminalThemeFactory.CreateDefault(), "Cascadia Mono", 12);
+        ApplyFont(fontSelection);
         Control.Connection = connection;
         controlConnected = true;
         nativePasteInterceptor = new TerminalNativePasteInterceptor(
