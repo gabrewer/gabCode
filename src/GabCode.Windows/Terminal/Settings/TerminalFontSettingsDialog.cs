@@ -70,8 +70,9 @@ internal sealed class TerminalFontSettingsDialog : Window
 
     private void SaveSelection()
     {
-        if (facePicker.SelectedItem is not TerminalFontFace face || !double.TryParse(sizeBox.Text, out var size)) return;
-        preferences.Save(TerminalFontSelection.Named(face.Id, size)!);
+        if (facePicker.SelectedItem is not TerminalFontFace face || !double.TryParse(sizeBox.Text, out var size) ||
+            TerminalFontSelection.Named(face.Id, size) is not { } selection) return;
+        preferences.Save(selection);
         Refresh();
     }
 }

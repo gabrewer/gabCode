@@ -47,10 +47,22 @@ internal sealed class TerminalFontCatalog
         .Select(family =>
         {
             var typeface = new Typeface(family, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
-            var fixedPitch = typeface.TryGetGlyphTypeface(out var glyph) &&
-                glyph.AdvanceWidths.Count != 0 && glyph.AdvanceWidths.Values.Distinct().Take(2).Count() == 1;
+            var fixedPitch = typeface.TryGetGlyphTypeface(out var glyph) && IsFixedPitchTerminalFace(glyph);
             return new TerminalFontFace(family.Source, family.Source, fixedPitch);
         }));
+
+    private static bool IsFixedPitchTerminalFace(GlyphTypeface glyph)
+    {
+        double? width = null;
+        foreach (var character in "ilMW0123")
+        {
+            if (!glyph.CharacterToGlyphMap.TryGetValue(character, out var glyphIndex) ||
+                !glyph.AdvanceWidths.TryGetValue(glyphIndex, out var nextWidth)) return false;
+            if (width is null) width = nextWidth;
+            else if (Math.Abs(width.Value - nextWidth) > 0.0001) return false;
+        }
+        return width is not null;
+    }
 }
 
 internal sealed class TerminalFontPreferenceStore
