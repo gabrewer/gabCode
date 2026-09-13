@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Approved — implementation sprint #18 |
 | Platform | macOS |
-| Parent direction | `Documentation/design/gabcode-initial-prd.md`, Milestone 1 |
+| Parent direction | `Documentation/design/2026-07-24-gabcode-initial-prd.md`, Milestone 1 |
 | Issues | [#14 — SwiftTerm Dependency and Retention Gate](https://github.com/gabrewer/gabCode/issues/14); [#18 — Retained Dual Terminal Runtime](https://github.com/gabrewer/gabCode/issues/18) |
 
 ## Purpose

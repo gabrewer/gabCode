@@ -5,7 +5,7 @@
 | Status | Approved product direction — implementation planning pending |
 | Platform | macOS |
 | Date | 2026-08-01 |
-| Parent direction | `Documentation/design/gabcode-initial-prd.md`, native terminal foundation |
+| Parent direction | `Documentation/design/2026-07-24-gabcode-initial-prd.md`, native terminal foundation |
 
 ## Product Name & One-Liner
 

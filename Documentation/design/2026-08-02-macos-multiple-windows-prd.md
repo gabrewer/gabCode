@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Draft |
 | Platform | macOS |
-| Parent direction | `Documentation/design/gabcode-initial-prd.md` |
+| Parent direction | `Documentation/design/2026-07-24-gabcode-initial-prd.md` |
 
 ## Product Name & One-Liner
 

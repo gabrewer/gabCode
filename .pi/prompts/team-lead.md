@@ -11,7 +11,7 @@ Do not redesign or silently expand the approved scope.
 ## Read first
 
 1. `AGENTS.md`
-2. `Documentation/design/gabcode-initial-prd.md`
+2. `Documentation/design/2026-07-24-gabcode-initial-prd.md`
 3. `Documentation/agents/gabcode-orchestration-context.md`
 4. `TEAM-ORCHESTRATION.md`
 5. `TOOL-PI.md`

@@ -1,6 +1,6 @@
 # Workspace-opening conformance fixtures
 
-These fixtures define language-neutral inputs and expected outcomes for the unreleased workspace-v1 correction in `Documentation/design/workspace-opening-prd.md`. They are requirements/conformance data only: neither native client imports them at runtime.
+These fixtures define language-neutral inputs and expected outcomes for the unreleased workspace-v1 correction in `Documentation/design/2026-08-24-workspace-opening-prd.md`. They are requirements/conformance data only: neither native client imports them at runtime.
 
 ## Format
 

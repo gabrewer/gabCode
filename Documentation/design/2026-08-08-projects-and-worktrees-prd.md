@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Project Foundation implemented; project creation deferred; later milestones remain proposed |
 | Date | 2026-08-06 |
-| Related baseline | `Documentation/design/gabcode-initial-prd.md` |
+| Related baseline | `Documentation/design/2026-07-24-gabcode-initial-prd.md` |
 
 This focused PRD refines the project-entry and worktree-lifecycle direction in the initial baseline. It is a product artifact, not an approved implementation sprint.
 

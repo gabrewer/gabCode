@@ -34,7 +34,7 @@ Parallel coding work becomes difficult when terminals, branches, reviews, and ed
 
 ![gabCode product direction: worktrees, a CLI coding harness, Git and GitHub, and VS Code connected in one context](Documentation/media/readme/gabcode-workflow.png)
 
-The [initial product requirements document](Documentation/design/gabcode-initial-prd.md) owns the product boundary, architecture direction, and planned milestones. gabCode is designed to observe source, pull requests, project documents, commits, and diffs without becoming a competing system of record.
+The [initial product requirements document](Documentation/design/2026-07-24-gabcode-initial-prd.md) owns the product boundary, architecture direction, and planned milestones. gabCode is designed to observe source, pull requests, project documents, commits, and diffs without becoming a competing system of record.
 
 ## Native clients
 
@@ -131,8 +131,8 @@ The command validates the prepared inputs and generates a public prerelease desc
 
 ## Project documentation
 
-- [Initial product requirements](Documentation/design/gabcode-initial-prd.md)
-- [Independent native clients architecture](Documentation/design/independent-native-clients-prd.md)
+- [Initial product requirements](Documentation/design/2026-07-24-gabcode-initial-prd.md)
+- [Independent native clients architecture](Documentation/design/2026-08-02-independent-native-clients-prd.md)
 - [Windows local preview workflow](Documentation/release/windows-unsigned-preview.md)
 - [macOS local preview workflow](Documentation/release/macos-unsigned-preview.md)
 - [Pi build orchestration](TOOL-PI.md) — contributor tooling used to build gabCode, not a runtime dependency
