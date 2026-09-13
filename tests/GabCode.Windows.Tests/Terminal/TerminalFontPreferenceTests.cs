@@ -59,6 +59,15 @@ public sealed class TerminalFontPreferenceTests
     }
 
     [Fact]
+    public void Installed_catalog_contains_the_current_windows_default_terminal_face()
+    {
+        var catalog = TerminalFontCatalog.Installed();
+
+        Assert.NotEmpty(catalog.SelectableFaces);
+        Assert.True(catalog.IsSelectable("Cascadia Mono"), "Cascadia Mono must be selectable on the target Windows development machine.");
+    }
+
+    [Fact]
     public void Missing_cascadia_default_uses_an_installed_fixed_pitch_fallback()
     {
         var path = TemporaryPath();
