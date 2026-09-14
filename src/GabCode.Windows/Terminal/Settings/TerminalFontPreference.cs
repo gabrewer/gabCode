@@ -1,4 +1,6 @@
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
@@ -124,11 +126,34 @@ internal sealed class TerminalFontPreferenceStore
 
     private void Write(TerminalFontSelection selection)
     {
-        var directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
-        var temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(new Persisted(selection.FaceId!, selection.PointSize)));
-        File.Move(temporary, path, overwrite: true);
+        var mutexName = $"Local\\gabCode.terminalFontPreference.{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))}";
+        using var mutex = new Mutex(initiallyOwned: false, mutexName);
+        var acquired = false;
+        try
+        {
+            try { acquired = mutex.WaitOne(TimeSpan.FromSeconds(2)); }
+            catch (AbandonedMutexException) { acquired = true; }
+            if (!acquired) throw new IOException("Timed out while saving the terminal font preference.");
+
+            var directory = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(directory);
+            var temporary = $"{path}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.WriteAllText(temporary, JsonSerializer.Serialize(new Persisted(selection.FaceId!, selection.PointSize)));
+                File.Move(temporary, path, overwrite: true);
+            }
+            finally
+            {
+                try { File.Delete(temporary); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+        finally
+        {
+            if (acquired) mutex.ReleaseMutex();
+        }
     }
 
     private void SetEffective(TerminalFontSelection selection)

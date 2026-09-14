@@ -12,6 +12,7 @@ using GabCode.Windows;
 using GabCode.Windows.Terminal.Conpty;
 using GabCode.Windows.Terminal.Hosting;
 using GabCode.Windows.Terminal.Profiles;
+using GabCode.Windows.Terminal.Settings;
 using GabCode.Windows.Terminal.Views;
 
 namespace GabCode.Windows.Tests.Terminal;
@@ -32,6 +33,56 @@ public sealed class RetainedTerminalPrototypeTests
             Assert.Equal(KeyboardNavigationMode.Contained, KeyboardNavigation.GetDirectionalNavigation(terminalSurface));
             Assert.Equal(KeyboardNavigationMode.Cycle, KeyboardNavigation.GetTabNavigation(terminalSurface));
             return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task Live_font_update_preserves_control_connection_process_and_output()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var initial = TerminalFontSelection.Named("Cascadia Mono", 12)!;
+            var updated = TerminalFontSelection.Named("Cascadia Mono", 18)!;
+            var session = new TerminalHostedSession(TerminalSessionKind.First, CreateTemporaryDirectory(), CreateCmdResolution(), initial);
+            var window = new Window { Content = session.Control, Width = 640, Height = 480 };
+            window.Show();
+
+            try
+            {
+                await session.StartAsync().WaitAsync(Timeout);
+                var control = session.Control;
+                var connection = session.Connection;
+                var processId = Assert.IsType<int>(session.ProcessId);
+                Assert.Equal(initial, session.AppliedFontSelection);
+
+                session.ApplyFont(updated);
+
+                Assert.Equal(updated, session.AppliedFontSelection);
+                Assert.Same(control, session.Control);
+                Assert.Same(connection, session.Connection);
+                Assert.Equal(processId, session.ProcessId);
+
+                var marker = $"WFS_FONT_{Guid.NewGuid():N}";
+                var output = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                EventHandler<Microsoft.Terminal.Wpf.TerminalOutputEventArgs>? handler = null;
+                handler = (_, data) =>
+                {
+                    if (!data.Data.Contains(marker, StringComparison.Ordinal)) return;
+                    connection.TerminalOutput -= handler;
+                    output.TrySetResult(data.Data);
+                };
+                connection.TerminalOutput += handler;
+                await session.WriteInputAsync($"echo {marker}\r");
+                Assert.Contains(marker, await output.Task.WaitAsync(Timeout), StringComparison.Ordinal);
+
+                await session.CloseAsync();
+                await WaitForProcessExitAsync(processId);
+            }
+            finally
+            {
+                window.Close();
+                await session.DisposeAsync();
+            }
         });
     }
 
