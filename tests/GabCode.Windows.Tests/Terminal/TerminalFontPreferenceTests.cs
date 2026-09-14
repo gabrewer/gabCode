@@ -1,4 +1,7 @@
 using System.IO;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Media;
 using System.Windows.Threading;
 using GabCode.Windows.Terminal.Settings;
 
@@ -99,6 +102,9 @@ public sealed class TerminalFontPreferenceTests
             store.Save(patched);
 
             var dialog = new TerminalFontSettingsDialog(store);
+            dialog.Show();
+            Assert.Equal("Terminal font settings", AutomationProperties.GetName(dialog));
+            Assert.NotEmpty(FindNamedElement(dialog, "Terminal font face"));
             Assert.Equal(patched, store.EffectiveSelection);
 
             dialog.RestoreSystemDefault();
@@ -141,6 +147,22 @@ public sealed class TerminalFontPreferenceTests
         var directory = Path.Combine(Path.GetTempPath(), "gabcode-font-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, "terminal-font.json");
+    }
+
+    private static string FindNamedElement(DependencyObject root, string name)
+    {
+        if (AutomationProperties.GetName(root) == name) return name;
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var found = FindNamedElement(VisualTreeHelper.GetChild(root, index), name);
+            if (found.Length != 0) return found;
+        }
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+        {
+            var found = FindNamedElement(child, name);
+            if (found.Length != 0) return found;
+        }
+        return string.Empty;
     }
 
     private static void RunOnSta(Action action)
