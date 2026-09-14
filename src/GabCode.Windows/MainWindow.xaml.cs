@@ -6,7 +6,6 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using GabCode.Windows.Projects;
@@ -294,21 +293,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void FileMenuItem_Loaded(object sender, RoutedEventArgs e)
-    {
-        if (FileMenuItem.Template.FindName("PART_Popup", FileMenuItem) is Popup popup)
-        {
-            popup.PlacementTarget = FileMenuItem;
-            popup.Placement = PlacementMode.Custom;
-            popup.CustomPopupPlacementCallback = (_, targetSize, _) =>
-                [new CustomPopupPlacement(new Point(0, targetSize.Height), PopupPrimaryAxis.Vertical)];
-            popup.Opened += (_, _) =>
-            {
-                if (popup.Child is Border border) border.Background = System.Windows.Media.Brushes.Black;
-            };
-        }
-    }
-
     private void CancelDiscoveryButton_Click(object sender, RoutedEventArgs e)
     {
         discoveryCancellation?.Cancel();
@@ -341,7 +325,11 @@ public partial class MainWindow : Window
     {
         terminalFontSettingsDialog ??= new TerminalFontSettingsDialog(terminalFontPreference);
         terminalFontSettingsDialog.Owner = this;
-        terminalFontSettingsDialog.Closed += (_, _) => terminalFontSettingsDialog = null;
+        terminalFontSettingsDialog.Closed += (_, _) =>
+        {
+            terminalFontSettingsDialog = null;
+            Activate();
+        };
         terminalFontSettingsDialog.Show();
         terminalFontSettingsDialog.Activate();
     }

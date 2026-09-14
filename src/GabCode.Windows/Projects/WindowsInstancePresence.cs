@@ -15,11 +15,12 @@ internal sealed class WindowsInstancePresence : IDisposable
 
     internal bool IsFirstInstance => ownsMutex;
 
-    internal static WindowsInstancePresence Acquire()
+    internal static WindowsInstancePresence Acquire(string? isolationScope = null)
     {
         var sid = WindowsIdentity.GetCurrent().User?.Value
             ?? throw new InvalidOperationException("gabCode could not determine the current Windows user identity.");
-        var mutex = new Mutex(initiallyOwned: true, $"Local\\gabCode.instance.{sid}", out var createdNew);
+        var suffix = isolationScope is null ? string.Empty : $".{isolationScope}";
+        var mutex = new Mutex(initiallyOwned: true, $"Local\\gabCode.instance.{sid}{suffix}", out var createdNew);
         return new WindowsInstancePresence(mutex, createdNew);
     }
 

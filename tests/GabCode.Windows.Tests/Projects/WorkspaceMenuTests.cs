@@ -18,7 +18,7 @@ public sealed class WorkspaceMenuTests
         Assert.DoesNotContain("ApplicationMenuItemStyle", xaml);
         Assert.DoesNotContain("CompactMenuCommand", xaml);
         Assert.DoesNotContain("<Popup x:Name=\"PART_Popup\"", xaml);
-        Assert.Contains("<MenuItem x:Name=\"FileMenuItem\" Header=\"_File\" Loaded=\"FileMenuItem_Loaded\"", xaml);
+        Assert.Contains("<MenuItem x:Name=\"FileMenuItem\" Header=\"_File\" AutomationProperties.Name=\"File\"", xaml);
         Assert.Contains("<MenuItem Header=\"_Open Workspace…\" Click=\"OpenWorkspaceButton_Click\"", xaml);
         Assert.Contains("CreateWorkspaceButton_Click", xaml);
         Assert.Contains("Header=\"_View\"", xaml);
@@ -32,6 +32,9 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("x:Name=\"WorktreeList\" Background=\"Black\" Foreground=\"White\"", xaml);
 
         var code = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows", "MainWindow.xaml.cs"));
+        Assert.DoesNotContain("PART_Popup", code);
+        Assert.DoesNotContain("CustomPopupPlacement", code);
+        Assert.DoesNotContain("popup.Child", code);
         Assert.Contains("CreateTerminalWorkspace();\n        UpdateSidebarIndicators();", code.Replace("\r\n", "\n"));
     }
 

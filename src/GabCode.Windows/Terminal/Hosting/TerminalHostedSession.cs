@@ -59,6 +59,8 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
 
     internal Exception? Failure => connection.Failure;
 
+    internal TerminalFontSelection? AppliedFontSelection { get; private set; }
+
     internal bool IsActive => State is TerminalSessionState.Starting or TerminalSessionState.Running or TerminalSessionState.Closing;
 
     internal Task StartAsync() => startTask ??= StartCoreAsync();
@@ -76,6 +78,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     internal void ApplyFont(TerminalFontSelection selection)
     {
         Control.SetTheme(TerminalThemeFactory.CreateDefault(), selection.FaceId!, checked((short)Math.Round(selection.PointSize)));
+        AppliedFontSelection = selection;
     }
 
     internal void RefreshLayout()
