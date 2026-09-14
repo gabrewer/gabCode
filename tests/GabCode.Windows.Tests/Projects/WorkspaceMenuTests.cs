@@ -13,12 +13,13 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("Header=\"_Open Workspace…\"", xaml);
         Assert.Contains("Header=\"_Create Workspace…\"", xaml);
         Assert.Contains("OpenWorkspaceButton_Click", xaml);
-        Assert.Contains("<Menu Background=\"#242424\" Foreground=\"White\"", xaml);
-        Assert.Contains("SystemColors.MenuBrushKey", xaml);
+        Assert.Contains("<Menu AutomationProperties.Name=\"Application menu\">", xaml);
+        Assert.DoesNotContain("SystemColors.MenuBrushKey", xaml);
+        Assert.DoesNotContain("ApplicationMenuItemStyle", xaml);
         Assert.DoesNotContain("CompactMenuCommand", xaml);
         Assert.DoesNotContain("<Popup x:Name=\"PART_Popup\"", xaml);
-        Assert.Contains("<MenuItem x:Name=\"FileMenuItem\" Header=\"_File\" Background=\"#242424\" Foreground=\"White\" Loaded=\"FileMenuItem_Loaded\"", xaml);
-        Assert.Contains("<MenuItem Header=\"_Open Workspace…\" Background=\"#242424\" Foreground=\"White\" Click=\"OpenWorkspaceButton_Click\"", xaml);
+        Assert.Contains("<MenuItem x:Name=\"FileMenuItem\" Header=\"_File\" Loaded=\"FileMenuItem_Loaded\"", xaml);
+        Assert.Contains("<MenuItem Header=\"_Open Workspace…\" Click=\"OpenWorkspaceButton_Click\"", xaml);
         Assert.Contains("CreateWorkspaceButton_Click", xaml);
         Assert.Contains("Header=\"_View\"", xaml);
         Assert.Contains("Move Sidebar _Right", xaml);
@@ -48,6 +49,7 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("Delete worktree", xaml);
         Assert.Contains("Open in VS Code", xaml);
         Assert.Contains("Reveal in Explorer", xaml);
+        Assert.DoesNotContain("<ContextMenu.Resources>", xaml);
         Assert.Contains("CreateWorktreeFromMain", code);
         Assert.Contains("CreateWorktreeFromSelectedBranch", code);
         Assert.Contains("CreateWorktreeFromExistingBranch", code);
