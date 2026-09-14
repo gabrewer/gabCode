@@ -4,15 +4,5 @@
              xmlns:local="clr-namespace:GabCode.Windows"
              ShutdownMode="OnMainWindowClose">
     <Application.Resources>
-        <SolidColorBrush x:Key="ApplicationMenuBackgroundBrush" Color="#242424" />
-        <SolidColorBrush x:Key="ApplicationMenuForegroundBrush" Color="White" />
-        <SolidColorBrush x:Key="ApplicationMenuHighlightBrush" Color="#3A3A3A" />
-        <SolidColorBrush x:Key="ApplicationMenuHighlightTextBrush" Color="White" />
-        <Style x:Key="ApplicationMenuItemStyle" TargetType="MenuItem">
-            <Setter Property="Background" Value="{StaticResource ApplicationMenuBackgroundBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource ApplicationMenuForegroundBrush}" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-        </Style>
     </Application.Resources>
 </Application>

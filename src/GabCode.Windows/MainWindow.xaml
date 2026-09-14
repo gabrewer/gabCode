@@ -17,36 +17,24 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Padding="12,6" Background="#242424" BorderBrush="#3A3A3A" BorderThickness="0,0,0,1">
+        <Border Background="#242424" BorderBrush="#3A3A3A" BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                <Menu Background="#242424" Foreground="White" AutomationProperties.Name="Application menu">
-                    <Menu.Resources>
-                        <SolidColorBrush x:Key="{x:Static SystemColors.MenuBrushKey}" Color="#242424" />
-                        <SolidColorBrush x:Key="{x:Static SystemColors.MenuTextBrushKey}" Color="White" />
-                        <SolidColorBrush x:Key="{x:Static SystemColors.MenuHighlightBrushKey}" Color="#3A3A3A" />
-                        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="White" />
-                        <Style TargetType="MenuItem">
-                            <Setter Property="Background" Value="#242424" />
-                            <Setter Property="Foreground" Value="White" />
-                            <Setter Property="BorderThickness" Value="0" />
-                            <Setter Property="BorderBrush" Value="Transparent" />
-                        </Style>
-                    </Menu.Resources>
-                    <MenuItem x:Name="FileMenuItem" Header="_File" Background="#242424" Foreground="White" Loaded="FileMenuItem_Loaded" AutomationProperties.Name="File">
-                        <MenuItem Header="_Open Workspace…" Background="#242424" Foreground="White" Click="OpenWorkspaceButton_Click" AutomationProperties.Name="Open workspace" />
-                        <MenuItem Header="_Create Workspace…" Background="#242424" Foreground="White" Click="CreateWorkspaceButton_Click" AutomationProperties.Name="Create workspace" />
+                <Menu AutomationProperties.Name="Application menu">
+                    <MenuItem x:Name="FileMenuItem" Header="_File" Loaded="FileMenuItem_Loaded" AutomationProperties.Name="File">
+                        <MenuItem Header="_Open Workspace…" Click="OpenWorkspaceButton_Click" AutomationProperties.Name="Open workspace" />
+                        <MenuItem Header="_Create Workspace…" Click="CreateWorkspaceButton_Click" AutomationProperties.Name="Create workspace" />
                         <Separator />
-                        <MenuItem Header="_Settings…" Background="#242424" Foreground="White" Click="OpenTerminalFontSettings_Click" AutomationProperties.Name="Open terminal font settings" />
+                        <MenuItem Header="_Settings…" Click="OpenTerminalFontSettings_Click" AutomationProperties.Name="Open terminal font settings" />
                     </MenuItem>
-                    <MenuItem Header="_View" Background="#242424" Foreground="White" AutomationProperties.Name="View">
+                    <MenuItem Header="_View" AutomationProperties.Name="View">
                         <MenuItem Header="Move Sidebar _Right" Click="MoveSidebarRight_Click" AutomationProperties.Name="Move sidebar right" />
                         <MenuItem Header="Move Sidebar _Left" Click="MoveSidebarLeft_Click" AutomationProperties.Name="Move sidebar left" />
                         <MenuItem Header="_Refresh Worktrees" InputGestureText="F5" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" />
                         <MenuItem Header="VS Code _Settings…" Click="OpenVisualStudioCodeSettings_Click" AutomationProperties.Name="Open VS Code settings" />
                     </MenuItem>
                 </Menu>
-                <Grid Grid.Row="1">
+                <Grid Grid.Row="1" Margin="12,6">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -65,14 +53,6 @@
                 <DockPanel><StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8"><Button x:Name="RefreshWorktreesButton" Background="Black" Foreground="White" Content="Refresh Worktrees" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" /><Button x:Name="CancelRefreshButton" Background="Black" Foreground="White" Margin="8,0,0,0" Content="Cancel" Click="CancelRefresh_Click" Visibility="Collapsed" AutomationProperties.Name="Cancel worktree refresh" /></StackPanel><StackPanel DockPanel.Dock="Top"><TextBlock x:Name="RefreshStatusText" Margin="0,0,0,4" Foreground="White" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /><WrapPanel><Button x:Name="RetryCleanupButton" Content="Retry cleanup" Margin="0,0,8,4" Visibility="Collapsed" Click="RetryRetainedWorktreeCleanup_Click" AutomationProperties.Name="Retry cleanup" /><Button x:Name="OpenRetainedFolderButton" Content="Open folder" Margin="0,0,0,4" Visibility="Collapsed" Click="OpenRetainedFolder_Click" AutomationProperties.Name="Open retained worktree folder" /></WrapPanel></StackPanel><ListBox x:Name="WorktreeList" Background="Black" Foreground="White" SelectionChanged="WorktreeList_SelectionChanged" PreviewMouseRightButtonDown="WorktreeList_PreviewMouseRightButtonDown" ContextMenuOpening="WorktreeList_ContextMenuOpening" AutomationProperties.Name="Worktrees and orphaned terminals">
                     <ListBox.Resources>
                         <ContextMenu x:Key="WorktreeContextMenu" x:Shared="False" AutomationProperties.Name="Worktree actions">
-                            <ContextMenu.Resources>
-                                <Style TargetType="MenuItem">
-                                    <Setter Property="Background" Value="#242424" />
-                                    <Setter Property="Foreground" Value="White" />
-                                    <Setter Property="BorderThickness" Value="0" />
-                                    <Setter Property="BorderBrush" Value="Transparent" />
-                                </Style>
-                            </ContextMenu.Resources>
                             <MenuItem Header="Create worktree from main" Click="CreateWorktreeFromMain_Click" AutomationProperties.Name="Create worktree from main" />
                             <MenuItem Header="Create worktree from selected branch" Click="CreateWorktreeFromSelectedBranch_Click" AutomationProperties.Name="Create worktree from selected branch" />
                             <MenuItem Header="Create worktree from existing branch" Click="CreateWorktreeFromExistingBranch_Click" AutomationProperties.Name="Create worktree from existing branch" />
