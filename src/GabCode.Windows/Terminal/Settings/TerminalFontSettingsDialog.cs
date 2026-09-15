@@ -60,7 +60,7 @@ internal sealed class TerminalFontSettingsDialog : Window
             var dialog = new OpenFileDialog { Filter = "VS Code executable (Code.exe)|Code.exe|Executable files|*.exe", CheckFileExists = true };
             if (dialog.ShowDialog(this) == true) visualStudioCodePath.Text = dialog.FileName;
         };
-        var saveCode = new Button { Content = "Save VS Code Path", Margin = new Thickness(0, 8, 0, 0) };
+        var saveCode = new Button { Content = "Save VS Code Path", Width = 140, HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 12, 0, 0) };
         saveCode.Click += (_, _) =>
         {
             if (File.Exists(visualStudioCodePath.Text.Trim())) this.visualStudioCodePreference.Write(visualStudioCodePath.Text.Trim());
@@ -77,6 +77,7 @@ internal sealed class TerminalFontSettingsDialog : Window
                     Header = "Terminal",
                     Content = new StackPanel
                     {
+                        Margin = new Thickness(16),
                         Children =
                         {
                             new TextBlock { Text = "Terminal font", FontSize = 18, FontWeight = FontWeights.SemiBold },
@@ -96,6 +97,7 @@ internal sealed class TerminalFontSettingsDialog : Window
                     Header = "VS Code",
                     Content = new StackPanel
                     {
+                        Margin = new Thickness(16),
                         Children =
                         {
                             new TextBlock { Text = "VS Code executable", FontSize = 18, FontWeight = FontWeights.SemiBold },
