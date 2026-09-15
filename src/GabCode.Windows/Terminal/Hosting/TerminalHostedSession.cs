@@ -101,6 +101,7 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
     {
         await WaitUntilLoadedAsync(Control);
         ApplyFont(fontSelection);
+        QueueMeasuredGeometryForInitialConnection();
         Control.Connection = connection;
         controlConnected = true;
         nativePasteInterceptor = new TerminalNativePasteInterceptor(
@@ -124,6 +125,16 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
 
         await connection.CloseAsync();
         connection.StateChanged -= Connection_StateChanged;
+    }
+
+    private void QueueMeasuredGeometryForInitialConnection()
+    {
+        if (Control.Rows <= 0 || Control.Columns <= 0)
+        {
+            return;
+        }
+
+        connection.Resize(checked((uint)Control.Rows), checked((uint)Control.Columns));
     }
 
     private void PasteClipboardSnapshot(string clipboardSnapshot)
