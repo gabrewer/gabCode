@@ -323,7 +323,7 @@ public partial class MainWindow : Window
 
     private void OpenTerminalFontSettings_Click(object sender, RoutedEventArgs e)
     {
-        terminalFontSettingsDialog ??= new TerminalFontSettingsDialog(terminalFontPreference);
+        terminalFontSettingsDialog ??= new TerminalFontSettingsDialog(terminalFontPreference, visualStudioCodePreference);
         terminalFontSettingsDialog.Owner = this;
         terminalFontSettingsDialog.Closed += (_, _) =>
         {
@@ -658,11 +658,7 @@ public partial class MainWindow : Window
         return Path.Combine(parent, "wt");
     }
 
-    private void OpenVisualStudioCodeSettings_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new VisualStudioCodeSettingsDialog(visualStudioCodePreference.Resolve()) { Owner = this };
-        if (dialog.ShowDialog() == true) visualStudioCodePreference.Write(dialog.ExecutablePath);
-    }
+    private void OpenVisualStudioCodeSettings_Click(object sender, RoutedEventArgs e) => OpenTerminalFontSettings_Click(sender, e);
 
     private void OpenWorktreeInCode_Click(object sender, RoutedEventArgs e)
     {
