@@ -26,6 +26,9 @@ public sealed class WorkspaceMenuTests
         var settings = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows", "Terminal", "Settings", "TerminalFontSettingsDialog.cs"));
         Assert.Contains("VS Code", settings);
         Assert.Contains("visualStudioCodePreference", settings);
+        Assert.Contains("new TabControl", settings);
+        Assert.Contains("Header = \"Terminal\"", settings);
+        Assert.Contains("Header = \"VS Code\"", settings);
         Assert.Contains("Move Sidebar _Right", xaml);
         Assert.Contains("Move Sidebar _Left", xaml);
         Assert.Contains("Refresh Worktrees", xaml);

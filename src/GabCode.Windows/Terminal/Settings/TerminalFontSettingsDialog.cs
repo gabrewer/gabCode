@@ -24,8 +24,9 @@ internal sealed class TerminalFontSettingsDialog : Window
         this.preferences = preferences ?? throw new ArgumentNullException(nameof(preferences));
         this.visualStudioCodePreference = visualStudioCodePreference ?? new VisualStudioCodePreference();
         Title = "Settings";
-        Width = 560;
-        SizeToContent = SizeToContent.Height;
+        Width = 600;
+        Height = 560;
+        MinHeight = 480;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         AutomationProperties.SetName(this, "Terminal font settings");
 
@@ -66,25 +67,50 @@ internal sealed class TerminalFontSettingsDialog : Window
             else MessageBox.Show(this, "Choose an existing Code.exe path.", "Invalid VS Code path", MessageBoxButton.OK, MessageBoxImage.Warning);
         };
 
-        Content = new StackPanel
+        Content = new TabControl
         {
             Margin = new Thickness(20),
-            Children =
+            Items =
             {
-                new TextBlock { Text = "Terminal font", FontSize = 18, FontWeight = FontWeights.SemiBold },
-                new TextBlock { Text = "Font face", Margin = new Thickness(0, 14, 0, 4) },
-                facePicker,
-                new TextBlock { Text = "Point size (8–72)", Margin = new Thickness(0, 12, 0, 4) },
-                sizeBox,
-                effective,
-                reset,
-                new TextBlock { Text = "Preview", FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 18, 0, 6) },
-                preview,
-                new TextBlock { Text = "VS Code", FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 18, 0, 6) },
-                new StackPanel { Orientation = Orientation.Horizontal, Children = { visualStudioCodePath, browseCode } },
-                saveCode,
+                new TabItem
+                {
+                    Header = "Terminal",
+                    Content = new StackPanel
+                    {
+                        Children =
+                        {
+                            new TextBlock { Text = "Terminal font", FontSize = 18, FontWeight = FontWeights.SemiBold },
+                            new TextBlock { Text = "Font face", Margin = new Thickness(0, 14, 0, 4) },
+                            facePicker,
+                            new TextBlock { Text = "Point size (8–72)", Margin = new Thickness(0, 12, 0, 4) },
+                            sizeBox,
+                            effective,
+                            reset,
+                            new TextBlock { Text = "Preview", FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 18, 0, 6) },
+                            preview,
+                        }
+                    }
+                },
+                new TabItem
+                {
+                    Header = "VS Code",
+                    Content = new StackPanel
+                    {
+                        Children =
+                        {
+                            new TextBlock { Text = "VS Code executable", FontSize = 18, FontWeight = FontWeights.SemiBold },
+                            new TextBlock { Text = "gabCode uses this executable for Open in VS Code actions.", Margin = new Thickness(0, 6, 0, 10), TextWrapping = TextWrapping.Wrap },
+                            new StackPanel { Orientation = Orientation.Horizontal, Children = { visualStudioCodePath, browseCode } },
+                            saveCode,
+                        }
+                    }
+                }
             }
         };
+        AutomationProperties.SetName((DependencyObject)Content, "Settings categories");
+        var tabs = (TabControl)Content;
+        AutomationProperties.SetName((DependencyObject)tabs.Items[0], "Terminal settings");
+        AutomationProperties.SetName((DependencyObject)tabs.Items[1], "VS Code settings");
         Refresh();
     }
 
