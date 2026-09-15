@@ -1,23 +1,29 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using Microsoft.Win32;
+using GabCode.Windows.Projects;
 
 namespace GabCode.Windows.Terminal.Settings;
 
 internal sealed class TerminalFontSettingsDialog : Window
 {
     private readonly TerminalFontPreferenceStore preferences;
+    private readonly VisualStudioCodePreference visualStudioCodePreference;
     private readonly ComboBox facePicker = new() { MinWidth = 280 };
     private readonly TextBox sizeBox = new() { Width = 80 };
     private readonly TextBlock effective = new();
     private readonly TextBlock preview = new() { TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono") };
+    private readonly TextBox visualStudioCodePath = new() { MinWidth = 360 };
     private bool refreshing;
 
-    internal TerminalFontSettingsDialog(TerminalFontPreferenceStore preferences)
+    internal TerminalFontSettingsDialog(TerminalFontPreferenceStore preferences, VisualStudioCodePreference? visualStudioCodePreference = null)
     {
         this.preferences = preferences ?? throw new ArgumentNullException(nameof(preferences));
-        Title = "Terminal Settings";
+        this.visualStudioCodePreference = visualStudioCodePreference ?? new VisualStudioCodePreference();
+        Title = "Settings";
         Width = 560;
         SizeToContent = SizeToContent.Height;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -45,6 +51,20 @@ internal sealed class TerminalFontSettingsDialog : Window
         AutomationProperties.SetName(sizeBox, "Terminal font point size");
         AutomationProperties.SetName(effective, "Effective terminal font");
         AutomationProperties.SetName(preview, "Terminal font preview: ordinary text, numbers, Unicode, and representative Powerline glyphs");
+        visualStudioCodePath.Text = this.visualStudioCodePreference.Resolve();
+        AutomationProperties.SetName(visualStudioCodePath, "VS Code executable path");
+        var browseCode = new Button { Content = "Browse…", Margin = new Thickness(8, 0, 0, 0) };
+        browseCode.Click += (_, _) =>
+        {
+            var dialog = new OpenFileDialog { Filter = "VS Code executable (Code.exe)|Code.exe|Executable files|*.exe", CheckFileExists = true };
+            if (dialog.ShowDialog(this) == true) visualStudioCodePath.Text = dialog.FileName;
+        };
+        var saveCode = new Button { Content = "Save VS Code Path", Margin = new Thickness(0, 8, 0, 0) };
+        saveCode.Click += (_, _) =>
+        {
+            if (File.Exists(visualStudioCodePath.Text.Trim())) this.visualStudioCodePreference.Write(visualStudioCodePath.Text.Trim());
+            else MessageBox.Show(this, "Choose an existing Code.exe path.", "Invalid VS Code path", MessageBoxButton.OK, MessageBoxImage.Warning);
+        };
 
         Content = new StackPanel
         {
@@ -60,6 +80,9 @@ internal sealed class TerminalFontSettingsDialog : Window
                 reset,
                 new TextBlock { Text = "Preview", FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 18, 0, 6) },
                 preview,
+                new TextBlock { Text = "VS Code", FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 18, 0, 6) },
+                new StackPanel { Orientation = Orientation.Horizontal, Children = { visualStudioCodePath, browseCode } },
+                saveCode,
             }
         };
         Refresh();

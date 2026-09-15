@@ -22,6 +22,10 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("<MenuItem Header=\"_Open Workspace…\" Click=\"OpenWorkspaceButton_Click\"", xaml);
         Assert.Contains("CreateWorkspaceButton_Click", xaml);
         Assert.Contains("Header=\"_View\"", xaml);
+        Assert.Contains("Header=\"VS Code _Settings…\"", xaml);
+        var settings = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows", "Terminal", "Settings", "TerminalFontSettingsDialog.cs"));
+        Assert.Contains("VS Code", settings);
+        Assert.Contains("visualStudioCodePreference", settings);
         Assert.Contains("Move Sidebar _Right", xaml);
         Assert.Contains("Move Sidebar _Left", xaml);
         Assert.Contains("Refresh Worktrees", xaml);
