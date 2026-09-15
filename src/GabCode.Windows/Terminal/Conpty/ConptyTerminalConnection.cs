@@ -34,6 +34,8 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
     private Task? waitTask;
     private Exception? failure;
     private int? processId;
+    private (short Columns, short Rows)? pendingInitialSize;
+    private bool nativeSessionReady;
     private int pendingUiOutputDispatches;
     private int maximumPendingUiOutputDispatches;
 
@@ -215,11 +217,36 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
                 throw new DirectoryNotFoundException($"Terminal working directory does not exist: {options.WorkingDirectory}");
             }
 
-            var createdSession = await Task.Run(() => NativeSession.Create(options)).ConfigureAwait(false);
-            lock (sync)
+            var requestedSize = GetInitialSize();
+            var createdSession = await Task.Run(() => NativeSession.Create(options, requestedSize.Columns, requestedSize.Rows)).ConfigureAwait(false);
+            try
             {
-                session = createdSession;
-                processId = checked((int)createdSession.ProcessId);
+                lock (sync)
+                {
+                    session = createdSession;
+                    processId = checked((int)createdSession.ProcessId);
+                    var initialSize = pendingInitialSize ?? requestedSize;
+                    createdSession.Resize(initialSize.Columns, initialSize.Rows);
+                    createdSession.Resume();
+                    pendingInitialSize = null;
+                    nativeSessionReady = true;
+                }
+            }
+            catch
+            {
+                createdSession.Dispose();
+                lock (sync)
+                {
+                    if (ReferenceEquals(session, createdSession))
+                    {
+                        session = null;
+                        processId = null;
+                        pendingInitialSize = null;
+                        nativeSessionReady = false;
+                    }
+                }
+
+                throw;
             }
 
             inputTask = Task.Run(() => PumpInputAsync(createdSession));
@@ -506,15 +533,29 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
         NativeSession? nativeSession;
         lock (sync)
         {
+            if (state is TerminalSessionState.Closing or TerminalSessionState.Closed)
+            {
+                return;
+            }
+
+            if (session is null || !nativeSessionReady)
+            {
+                pendingInitialSize = (checked((short)columns), checked((short)rows));
+                return;
+            }
+
             nativeSession = session;
         }
 
-        if (nativeSession is null)
-        {
-            return;
-        }
-
         nativeSession.Resize(checked((short)columns), checked((short)rows));
+    }
+
+    private (short Columns, short Rows) GetInitialSize()
+    {
+        lock (sync)
+        {
+            return pendingInitialSize ?? (80, 24);
+        }
     }
 
     private async Task PublishOutputAsync(string data)
@@ -619,6 +660,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
         private readonly object disposeSync = new();
         private IntPtr pseudoConsole;
         private SafeKernelObjectHandle? process;
+        private SafeKernelObjectHandle? thread;
         private SafeKernelObjectHandle? job;
         private SafeFileHandle? pseudoConsoleInput;
         private SafeFileHandle? pseudoConsoleOutput;
@@ -627,6 +669,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
         private NativeSession(
             IntPtr pseudoConsole,
             SafeKernelObjectHandle process,
+            SafeKernelObjectHandle thread,
             SafeKernelObjectHandle job,
             SafeFileHandle input,
             SafeFileHandle output,
@@ -636,6 +679,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
         {
             this.pseudoConsole = pseudoConsole;
             this.process = process;
+            this.thread = thread;
             this.job = job;
             this.pseudoConsoleInput = pseudoConsoleInput;
             this.pseudoConsoleOutput = pseudoConsoleOutput;
@@ -650,7 +694,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
 
         internal uint ProcessId { get; }
 
-        internal static NativeSession Create(TerminalProcessOptions options)
+        internal static NativeSession Create(TerminalProcessOptions options, short columns, short rows)
         {
             SafeFileHandle? inputRead = null;
             SafeFileHandle? inputWrite = null;
@@ -671,7 +715,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
                 }
 
                 var result = ConptyNativeMethods.CreatePseudoConsole(
-                    new ConptyNativeMethods.Coord(80, 24),
+                    new ConptyNativeMethods.Coord(columns, rows),
                     inputRead!,
                     outputWrite!,
                     0,
@@ -740,14 +784,10 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
                     ConptyNativeMethods.ThrowLastWin32Error("Could not assign terminal process to its cleanup job.");
                 }
 
-                if (ConptyNativeMethods.ResumeThread(thread) == uint.MaxValue)
-                {
-                    ConptyNativeMethods.ThrowLastWin32Error("Could not resume terminal process.");
-                }
-
                 var created = new NativeSession(
                     pseudoConsole,
                     process,
+                    thread,
                     job,
                     inputWrite!,
                     outputRead!,
@@ -756,6 +796,7 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
                     processInformation.ProcessId);
                 pseudoConsole = IntPtr.Zero;
                 process = null;
+                thread = null;
                 job = null;
                 inputWrite = null;
                 outputRead = null;
@@ -805,6 +846,21 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
             }
 
             return unchecked((int)exitCode);
+        }
+
+        internal void Resume()
+        {
+            lock (disposeSync)
+            {
+                var localThread = thread ?? throw new ObjectDisposedException(nameof(NativeSession));
+                if (ConptyNativeMethods.ResumeThread(localThread) == uint.MaxValue)
+                {
+                    ConptyNativeMethods.ThrowLastWin32Error("Could not resume terminal process.");
+                }
+
+                localThread.Dispose();
+                thread = null;
+            }
         }
 
         internal void Resize(short columns, short rows)
@@ -869,6 +925,8 @@ internal sealed class ConptyTerminalConnection : ITerminalConnection, IAsyncDisp
                 pseudoConsoleOutput = null;
                 process?.Dispose();
                 process = null;
+                thread?.Dispose();
+                thread = null;
                 job?.Dispose();
                 job = null;
             }
