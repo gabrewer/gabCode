@@ -658,8 +658,6 @@ public partial class MainWindow : Window
         return Path.Combine(parent, "wt");
     }
 
-    private void OpenVisualStudioCodeSettings_Click(object sender, RoutedEventArgs e) => OpenTerminalFontSettings_Click(sender, e);
-
     private void OpenWorktreeInCode_Click(object sender, RoutedEventArgs e)
     {
         var entry = ContextEntry(sender);
