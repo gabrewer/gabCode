@@ -6,7 +6,7 @@ final class WorkspacePreference {
     static let sidebarOnRightKey = "worktreeSidebarOnRight"
     static let selectedWorktreeKeyPrefix = "workspaceSelectedWorktree."
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

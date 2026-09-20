@@ -43,6 +43,14 @@ struct WorkspaceProjectView: View {
     @State private var selectedWorktreePath: URL?
     @State private var closedWorktreePaths: Set<URL> = []
     @State private var deletingWorktreePaths: Set<URL> = []
+    private struct IssueAssignmentPresentation: Identifiable {
+        let workspace: URL
+        let path: URL
+        var id: String { "\(workspace.standardizedFileURL.path)|\(path.standardizedFileURL.path)" }
+    }
+
+    @State private var issueAssignmentPresentation: IssueAssignmentPresentation?
+    @State private var referenceRevision = 0
     private struct WorktreeCreationPresentation: Identifiable {
         let id = UUID()
         let base: WorktreeCreationBase
@@ -76,6 +84,24 @@ struct WorkspaceProjectView: View {
                                 .accessibilityLabel("Orphaned terminal. Git worktree unavailable.")
                         }
                         let activePath = selectedWorktreePath ?? descriptor.resolvedFolder
+                        if isRecognizedWorktree(activePath) {
+                            WorktreeReferencesBar(
+                                references: currentReferences(for: activePath),
+                                onChooseMarkdown: { chooseMarkdown(for: activePath) },
+                                onReplaceMarkdown: { chooseMarkdown(for: activePath) },
+                                onOpenMarkdown: { openMarkdownReference(for: activePath) },
+                                onRemoveMarkdown: { removeMarkdownReference(for: activePath) },
+                                onAddIssue: { presentIssueAssignment(for: activePath) },
+                                onReplaceIssue: { presentIssueAssignment(for: activePath) },
+                                onOpenIssue: { openIssueReference(for: activePath) },
+                                onRemoveIssue: { removeIssueReference(for: activePath) }
+                            )
+                        } else {
+                            Text("References unavailable — Git no longer recognizes this worktree.")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .accessibilityLabel("References unavailable. Git no longer recognizes this worktree.")
+                        }
                         if closedWorktreePaths.contains(activePath.standardizedFileURL) {
                             closedWorkspaceSurface(for: activePath)
                         } else {
@@ -112,6 +138,17 @@ struct WorkspaceProjectView: View {
                 emptyOrRecoverySurface
             }
         }
+        .sheet(item: $issueAssignmentPresentation) { presentation in
+            GitHubIssueEntrySheet { issue in
+                guard isActiveRecognizedWorktree(workspace: presentation.workspace, path: presentation.path) else {
+                    showAlert(title: "Worktree Unavailable", message: "Git no longer recognizes this worktree. The issue reference was not saved.")
+                    return
+                }
+                WorktreeReferenceStore(defaults: controller.preference.defaults)
+                    .setIssue(issue, for: presentation.workspace, worktreeURL: presentation.path)
+                referenceRevision += 1
+            }
+        }
         .sheet(item: $creationPresentation) { presentation in
             WorktreeCreationSheet(
                 controller: controller,
@@ -145,7 +182,7 @@ struct WorkspaceProjectView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeRefreshWorktrees)) { notification in
             guard handles(notification), !hasConflictingWorkspaceOperation else { return }
-            Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) }
+            Task { await refreshWorktreesAndCleanupReferences() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeMoveSidebar)) { notification in
             guard handles(notification) else { return }
@@ -232,7 +269,7 @@ struct WorkspaceProjectView: View {
                         .controlSize(.small)
                         .accessibilityIdentifier("cancel-refresh-worktrees")
                 } else {
-                    Button { Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) } } label: { Image(systemName: "arrow.clockwise") }
+                    Button { Task { await refreshWorktreesAndCleanupReferences() } } label: { Image(systemName: "arrow.clockwise") }
                         .disabled(terminalRegistry.isClosing || !deletingWorktreePaths.isEmpty)
                         .accessibilityLabel("Refresh Worktrees")
                         .accessibilityIdentifier("refresh-worktrees")
@@ -280,6 +317,8 @@ struct WorkspaceProjectView: View {
                                 .disabled(hasConflictingWorkspaceOperation || terminalRegistry.existingPresentation(for: worktree.path)?.isMutationLocked == true)
                                 .accessibilityLabel("Close Workspace for \(worktree.path.lastPathComponent), \(worktree.branch), \(worktree.path.path)")
                             Button("Open in VS Code") { openInVSCode(worktree.path) }
+                            Divider()
+                            referenceContextActions(for: worktree.path)
                             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([worktree.path]) }
                             if !worktree.isPrimary {
                                 Divider()
@@ -386,6 +425,7 @@ struct WorkspaceProjectView: View {
                 if !deleted {
                     if case let .localBranchDeletionFailed(branch, _) = controller.worktreeActionError {
                         terminalRegistry.remove(worktree.path)
+                        removeReferences(for: worktree.path)
                         confirmForceBranchDeletion(branch, path: path, presentation: presentation)
                     } else if isDirty {
                         confirmForceDeletion(
@@ -399,6 +439,7 @@ struct WorkspaceProjectView: View {
                     }
                 } else {
                     terminalRegistry.remove(worktree.path)
+                    removeReferences(for: worktree.path)
                     finishDeletion(path: path, presentation: presentation)
                 }
             }
@@ -465,6 +506,7 @@ struct WorkspaceProjectView: View {
                 if !deleted {
                     if case let .localBranchDeletionFailed(branch, _) = controller.worktreeActionError {
                         terminalRegistry.remove(worktree.path)
+                        removeReferences(for: worktree.path)
                         confirmForceBranchDeletion(branch, path: path, presentation: presentation)
                     } else {
                         showAlert(title: "Worktree was not deleted", message: "Git rejected force removal. Resolve the reported blocker and try again.")
@@ -472,6 +514,7 @@ struct WorkspaceProjectView: View {
                     }
                 } else {
                     terminalRegistry.remove(worktree.path)
+                    removeReferences(for: worktree.path)
                     if selectedWorktreePath == path { selectedWorktreePath = controller.worktrees.first?.path }
                     finishDeletion(path: path, presentation: presentation)
                 }
@@ -561,6 +604,118 @@ struct WorkspaceProjectView: View {
                 if selectedWorktreePath == path.standardizedFileURL { selectedWorktreePath = nil }
             }
         }
+    }
+
+    private var referenceStore: WorktreeReferenceStore {
+        WorktreeReferenceStore(defaults: controller.preference.defaults)
+    }
+
+    private func currentReferences(for path: URL) -> WorktreeReferences {
+        _ = referenceRevision
+        guard let workspace = controller.preference.lastWorkspaceURL else { return .empty }
+        return referenceStore.references(for: workspace, worktreeURL: path)
+    }
+
+    @ViewBuilder
+    private func referenceContextActions(for path: URL) -> some View {
+        let references = currentReferences(for: path)
+        if let markdown = references.markdownURL {
+            let missing = !WorktreeReferenceLauncher.isExistingMarkdownFile(markdown)
+            Button("Open Markdown") { openMarkdownReference(for: path) }
+                .disabled(missing)
+            Button(missing ? "Locate Markdown…" : "Replace Markdown…") { chooseMarkdown(for: path) }
+            Button("Remove Markdown", role: .destructive) { removeMarkdownReference(for: path) }
+        } else {
+            Button("Choose Markdown…") { chooseMarkdown(for: path) }
+        }
+        if references.issue != nil {
+            Button("Open GitHub Issue") { openIssueReference(for: path) }
+            Button("Replace GitHub Issue…") { presentIssueAssignment(for: path) }
+            Button("Remove GitHub Issue", role: .destructive) { removeIssueReference(for: path) }
+        } else {
+            Button("Add GitHub Issue…") { presentIssueAssignment(for: path) }
+        }
+    }
+
+    private func chooseMarkdown(for path: URL) {
+        guard let workspace = controller.preference.lastWorkspaceURL?.standardizedFileURL,
+              isRecognizedWorktree(path),
+              let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Choose Markdown File"
+        panel.prompt = "Choose Markdown"
+        panel.allowedFileTypes = ["md", "markdown"]
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.beginSheetModal(for: window) { [self] response in
+            guard response == .OK, let url = panel.url else { return }
+            guard isActiveRecognizedWorktree(workspace: workspace, path: path) else {
+                showAlert(title: "Worktree Unavailable", message: "Git no longer recognizes this worktree. The Markdown reference was not saved.")
+                return
+            }
+            guard referenceStore.setMarkdownURL(url, for: workspace, worktreeURL: path) else {
+                showAlert(title: "Markdown File Unavailable", message: "Choose an existing regular .md or .markdown file.")
+                return
+            }
+            referenceRevision += 1
+        }
+    }
+
+    private func presentIssueAssignment(for path: URL) {
+        guard let workspace = controller.preference.lastWorkspaceURL?.standardizedFileURL,
+              isRecognizedWorktree(path) else { return }
+        issueAssignmentPresentation = IssueAssignmentPresentation(workspace: workspace, path: path.standardizedFileURL)
+    }
+
+    private func isRecognizedWorktree(_ path: URL) -> Bool {
+        controller.worktrees.contains { $0.path.standardizedFileURL == path.standardizedFileURL }
+    }
+
+    private func isActiveRecognizedWorktree(workspace: URL, path: URL) -> Bool {
+        controller.preference.lastWorkspaceURL?.standardizedFileURL == workspace.standardizedFileURL
+            && isRecognizedWorktree(path)
+    }
+
+    private func removeMarkdownReference(for path: URL) {
+        guard let workspace = controller.preference.lastWorkspaceURL else { return }
+        referenceStore.removeMarkdown(for: workspace, worktreeURL: path)
+        referenceRevision += 1
+    }
+
+    private func removeIssueReference(for path: URL) {
+        guard let workspace = controller.preference.lastWorkspaceURL else { return }
+        referenceStore.removeIssue(for: workspace, worktreeURL: path)
+        referenceRevision += 1
+    }
+
+    private func openMarkdownReference(for path: URL) {
+        guard let reference = currentReferences(for: path).markdownURL else { return }
+        WorktreeReferenceLauncher.system.openMarkdown(reference) { error in
+            guard let error else { return }
+            Task { @MainActor in showAlert(title: "Cannot Open Markdown", message: error) }
+        }
+    }
+
+    private func openIssueReference(for path: URL) {
+        guard let issue = currentReferences(for: path).issue else { return }
+        if let error = WorktreeReferenceLauncher.system.openIssue(issue) {
+            showAlert(title: "Cannot Open Issue", message: error)
+        }
+    }
+
+    private func refreshWorktreesAndCleanupReferences() async {
+        let before = Set(controller.worktrees.map { $0.path.standardizedFileURL })
+        await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths)
+        let after = Set(controller.worktrees.map { $0.path.standardizedFileURL })
+        let confirmedRemoved = before.subtracting(after)
+        for path in confirmedRemoved { removeReferences(for: path) }
+    }
+
+    private func removeReferences(for path: URL) {
+        guard let workspace = controller.preference.lastWorkspaceURL else { return }
+        referenceStore.removeConfirmedWorktrees([path], for: workspace)
+        referenceRevision += 1
     }
 
     private func presentation(for path: URL) -> TerminalWorkspacePresentation {
