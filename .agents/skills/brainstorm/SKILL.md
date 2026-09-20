@@ -70,7 +70,7 @@ When they say yes, create the PRD as a durable Markdown document under `Document
 
 `YYYY-MM-DD-[document-name]-prd.md`
 
-Use the date the document is added to GitHub (the first commit/PR addition date), not the date of a later edit. Use a lowercase kebab-case document name, preserve `-prd.md`, and include the date in the document's metadata. If the GitHub addition date cannot be established, stop and ask rather than inventing one. After creating the file, update repository references when the document is renamed and report the exact path.
+Always use today's local date when creating the document. Use a lowercase kebab-case document name, preserve `-prd.md`, and include the same date in the document's metadata. After creating the file, update repository references when the document is renamed and report the exact path.
 
 When they say yes, produce a clean, practical product requirements document. Use the following structure with markdown formatting — this is the one time structure is appropriate, because the output needs to be a reference document:
 
