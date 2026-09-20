@@ -35,6 +35,73 @@ final class WorkspaceTerminalRegistryTests: XCTestCase {
         await registry.stopAll(gracePeriod: .milliseconds(250))
     }
 
+    func testCloseWithoutPresentationDoesNotCreateOrStartTerminals() async throws {
+        let directory = try makeTemporaryDirectory(name: "no presentation")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let registry = WorkspaceTerminalRegistry(environment: ["SHELL": "/bin/sh"])
+        let closed = await registry.close(
+            path: directory,
+            expectedPresentation: nil,
+            gracePeriod: .milliseconds(250)
+        )
+
+        XCTAssertTrue(closed)
+        XCTAssertNil(registry.existingPresentation(for: directory))
+        XCTAssertEqual(registry.retainedPresentations.count, 0)
+    }
+
+    func testCloseStopsAndRemovesOnlyExpectedPresentation() async throws {
+        let firstDirectory = try makeTemporaryDirectory(name: "close first")
+        let secondDirectory = try makeTemporaryDirectory(name: "keep second")
+        defer {
+            try? FileManager.default.removeItem(at: firstDirectory)
+            try? FileManager.default.removeItem(at: secondDirectory)
+        }
+
+        let registry = WorkspaceTerminalRegistry(environment: ["SHELL": "/bin/sh"])
+        let firstStarted = await registry.ensureStarted(for: firstDirectory)
+        let first = try XCTUnwrap(firstStarted)
+        let secondStarted = await registry.ensureStarted(for: secondDirectory)
+        let second = try XCTUnwrap(secondStarted)
+        let secondPID = try XCTUnwrap(second.workspace.terminal1.processIdentifier)
+
+        let closed = await registry.close(
+            path: firstDirectory,
+            expectedPresentation: first,
+            gracePeriod: .milliseconds(250)
+        )
+
+        XCTAssertTrue(closed)
+        XCTAssertNil(registry.existingPresentation(for: firstDirectory))
+        XCTAssertTrue(registry.existingPresentation(for: secondDirectory) === second)
+        XCTAssertEqual(second.workspace.terminal1.processIdentifier, secondPID)
+        XCTAssertEqual(first.workspace.terminal1.state, .closed)
+        XCTAssertEqual(first.workspace.terminal2.state, .closed)
+        await registry.stopAll(gracePeriod: .milliseconds(250))
+    }
+
+    func testCloseDoesNotRemoveReplacementPresentationAfterAwait() async throws {
+        let directory = try makeTemporaryDirectory(name: "replacement race")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let registry = WorkspaceTerminalRegistry(environment: ["SHELL": "/bin/sh"])
+        let originalStarted = await registry.ensureStarted(for: directory)
+        let original = try XCTUnwrap(originalStarted)
+        registry.remove(directory)
+        let replacement = registry.presentation(for: directory)
+
+        let closed = await registry.close(
+            path: directory,
+            expectedPresentation: original,
+            gracePeriod: .milliseconds(250)
+        )
+
+        XCTAssertFalse(closed)
+        XCTAssertTrue(registry.existingPresentation(for: directory) === replacement)
+        await registry.stopAll(gracePeriod: .milliseconds(250))
+    }
+
     func testSwitchingBetweenPathsRetainsExactlyOnePairPerPath() async throws {
         let firstDirectory = try makeTemporaryDirectory(name: "first")
         let secondDirectory = try makeTemporaryDirectory(name: "second")

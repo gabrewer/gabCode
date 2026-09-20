@@ -41,6 +41,7 @@ struct WorkspaceProjectView: View {
     @State private var isPresentingPanel = false
     @State private var windowNumber: Int?
     @State private var selectedWorktreePath: URL?
+    @State private var closedWorktreePaths: Set<URL> = []
     private struct WorktreeCreationPresentation: Identifiable {
         let id = UUID()
         let base: WorktreeCreationBase
@@ -73,24 +74,39 @@ struct WorkspaceProjectView: View {
                                 .background(.yellow.opacity(0.2))
                                 .accessibilityLabel("Orphaned terminal. Git worktree unavailable.")
                         }
-                        WorkspaceTerminalStackView(
-                            registry: terminalRegistry,
-                            selectedPath: selectedWorktreePath ?? descriptor.resolvedFolder
-                        )
+                        let activePath = selectedWorktreePath ?? descriptor.resolvedFolder
+                        if closedWorktreePaths.contains(activePath.standardizedFileURL) {
+                            closedWorkspaceSurface(for: activePath)
+                        } else {
+                            WorkspaceTerminalStackView(
+                                registry: terminalRegistry,
+                                selectedPath: activePath
+                            )
+                        }
                     }
                     if controller.preference.sidebarOnRight { worktreeSidebar }
                 }
                 .onAppear { selectedWorktreePath = descriptor.resolvedFolder }
-                .onChange(of: selectedWorktreePath) { _, path in
+                .onChange(of: selectedWorktreePath) { previousPath, path in
+                    if let previousPath,
+                       previousPath.standardizedFileURL != path?.standardizedFileURL {
+                        closedWorktreePaths.remove(previousPath.standardizedFileURL)
+                    }
                     if let path {
                         controller.persistSelectedWorktree(path: path)
-                        presentation(for: path).focusMainTerminal()
+                        if !closedWorktreePaths.contains(path.standardizedFileURL) {
+                            presentation(for: path).focusMainTerminal()
+                        }
                     }
                 }
                 .onChange(of: controller.requestedSelectionPath) { _, path in
                     if let path { selectedWorktreePath = path }
                 }
                 .background(WindowTitleBridge(title: selectedWorktreePath.map { "\(controller.activeDescriptor?.name ?? "gabCode") — \($0.lastPathComponent) — gabCode" } ?? controller.windowTitle))
+                .background(WindowCloseInterceptor(
+                    registry: terminalRegistry,
+                    selectedPath: selectedWorktreePath
+                ))
             } else {
                 emptyOrRecoverySurface
             }
@@ -127,7 +143,7 @@ struct WorkspaceProjectView: View {
             chooseProjectFolderAndCreateWorkspace()
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeRefreshWorktrees)) { notification in
-            guard handles(notification) else { return }
+            guard handles(notification), !terminalRegistry.isClosing else { return }
             Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeMoveSidebar)) { notification in
@@ -216,6 +232,7 @@ struct WorkspaceProjectView: View {
                         .accessibilityIdentifier("cancel-refresh-worktrees")
                 } else {
                     Button { Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) } } label: { Image(systemName: "arrow.clockwise") }
+                        .disabled(terminalRegistry.isClosing)
                         .accessibilityLabel("Refresh Worktrees")
                         .accessibilityIdentifier("refresh-worktrees")
                 }
@@ -258,6 +275,9 @@ struct WorkspaceProjectView: View {
                                 presentCreation(.existingLocalBranch(""), selectedBranch: nil)
                             }
                             Divider()
+                            Button("Close Workspace…") { requestCloseWorkspace(worktree) }
+                                .disabled(terminalRegistry.isClosing)
+                                .accessibilityLabel("Close Workspace for \(worktree.path.lastPathComponent), \(worktree.branch), \(worktree.path.path)")
                             Button("Open in VS Code") { openInVSCode(worktree.path) }
                             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([worktree.path]) }
                             if !worktree.isPrimary {
@@ -265,6 +285,7 @@ struct WorkspaceProjectView: View {
                                 Button("Delete Worktree ‘\(worktree.branch)’…", role: .destructive) {
                                     requestDeletion(worktree)
                                 }
+                                .disabled(terminalRegistry.isClosing)
                             }
                         }
                     }
@@ -299,7 +320,7 @@ struct WorkspaceProjectView: View {
     }
 
     private func requestDeletion(_ worktree: WorktreeNavigationEntry) {
-        guard !worktree.isPrimary else { return }
+        guard !worktree.isPrimary, !terminalRegistry.isClosing else { return }
         Task { @MainActor in
             guard let isDirty = await controller.worktreeIsDirty(path: worktree.path) else { return }
             confirmDeletion(worktree, isDirty: isDirty)
@@ -396,6 +417,54 @@ struct WorkspaceProjectView: View {
                 } else {
                     terminalRegistry.remove(worktree.path)
                     if selectedWorktreePath == worktree.path.standardizedFileURL { selectedWorktreePath = controller.worktrees.first?.path }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func closedWorkspaceSurface(for path: URL) -> some View {
+        VStack(spacing: 14) {
+            ContentUnavailableView {
+                Label("Workspace closed", systemImage: "terminal")
+            } description: {
+                Text("gabCode terminals for \(path.lastPathComponent) are closed. Git files and this worktree remain unchanged.")
+            }
+            Button("Open Workspace") {
+                closedWorktreePaths.remove(path.standardizedFileURL)
+            }
+            .accessibilityLabel("Open Workspace")
+            .accessibilityIdentifier("open-closed-workspace")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("workspace-closed-surface")
+    }
+
+    private func requestCloseWorkspace(_ worktree: WorktreeNavigationEntry) {
+        guard !terminalRegistry.isClosing else { return }
+        let capturedPresentation = terminalRegistry.existingPresentation(for: worktree.path)
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+        let activeCount = capturedPresentation?.activeTerminalCount ?? 0
+        let alert = NSAlert()
+        alert.messageText = "Close workspace \(worktree.path.lastPathComponent)?"
+        alert.informativeText = "Branch: \(worktree.branch)\nPath: \(worktree.path.path)\nOnly gabCode-owned terminals for this worktree will close. Git files, branch, and folder remain unchanged.\(activeCount > 0 ? "\n\(activeCount) active terminal process\(activeCount == 1 ? "" : "es") will be interrupted." : "")"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Close Workspace")
+        alert.beginSheetModal(for: window) { [self] response in
+            guard response == .alertSecondButtonReturn else { return }
+            Task { @MainActor in
+                let closed = await terminalRegistry.close(
+                    path: worktree.path,
+                    expectedPresentation: capturedPresentation,
+                    gracePeriod: .milliseconds(500)
+                )
+                guard closed else {
+                    showAlert(title: "Terminal cleanup did not complete", message: "The workspace remains open because an owned terminal process could not be verified as stopped.")
+                    return
+                }
+                if selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL {
+                    closedWorktreePaths.insert(worktree.path.standardizedFileURL)
                 }
             }
         }

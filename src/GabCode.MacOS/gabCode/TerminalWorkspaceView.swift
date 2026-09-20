@@ -18,7 +18,6 @@ struct WorkspaceTerminalStackView: View {
                 .accessibilityHidden(presentation.workingDirectory.standardizedFileURL != selectedPath.standardizedFileURL)
             }
         }
-        .background(WindowCloseInterceptor(registry: registry, selectedPath: selectedPath))
         .task(id: selectedPath.standardizedFileURL.path) {
             guard let presentation = await registry.ensureStarted(for: selectedPath) else { return }
             await Task.yield()
