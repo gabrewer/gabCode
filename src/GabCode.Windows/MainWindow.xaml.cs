@@ -572,7 +572,7 @@ public partial class MainWindow : Window
     {
         if (worktreeActionCancellation is not null) return;
         worktreeActionCancellation = new CancellationTokenSource();
-        WorktreeList.IsEnabled = false;
+        SetWorktreeInteractionEnabled(false);
         RefreshWorktreesButton.IsEnabled = false;
         CancelRefreshButton.Visibility = Visibility.Visible;
         RefreshStatusText.Text = progress;
@@ -592,9 +592,20 @@ public partial class MainWindow : Window
             worktreeActionCancellation.Dispose();
             worktreeActionCancellation = null;
             worktreeActionRepositoryPath = null;
-            WorktreeList.IsEnabled = true;
+            SetWorktreeInteractionEnabled(true);
             RefreshWorktreesButton.IsEnabled = true;
             CancelRefreshButton.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void SetWorktreeInteractionEnabled(bool enabled)
+    {
+        WorktreeList.IsHitTestVisible = enabled;
+        WorktreeList.Focusable = enabled;
+        if (!enabled)
+        {
+            foreach (var item in WorktreeList.Items.OfType<ListBoxItem>()) item.ContextMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false);
+            CancelRefreshButton.Focus();
         }
     }
 
@@ -945,7 +956,7 @@ public partial class MainWindow : Window
 
     private void WorktreeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (applyingWorktreeSelection || WorktreeList.SelectedItem is not ListBoxItem { Tag: WorktreeNavigationEntry entry }) return;
+        if (applyingWorktreeSelection || worktreeActionCancellation is not null || WorktreeList.SelectedItem is not ListBoxItem { Tag: WorktreeNavigationEntry entry }) return;
         var availability = GitWorktreeDiscovery.GetPathAvailability(entry.Path);
         if (entry.Availability != WorktreeAvailability.Available || availability != WorktreePathAvailability.Present)
         {

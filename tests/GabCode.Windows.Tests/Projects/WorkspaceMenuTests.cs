@@ -92,6 +92,10 @@ public sealed class WorkspaceMenuTests
         var code = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows", "MainWindow.xaml.cs"));
         Assert.Contains("RunWorktreeActionAsync", code);
         Assert.Contains("worktreeActionCancellation", code);
+        Assert.Contains("SetWorktreeInteractionEnabled(false)", code);
+        Assert.Contains("SetWorktreeInteractionEnabled(true)", code);
+        Assert.DoesNotContain("WorktreeList.IsEnabled = false", code);
+        Assert.DoesNotContain("WorktreeList.IsEnabled = true", code);
         Assert.Contains("Worktree action cancelled.", code);
         Assert.Contains("ReconcileWorktrees", code);
     }
