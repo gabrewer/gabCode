@@ -448,6 +448,12 @@ public partial class MainWindow : Window
         pair.SessionChanged += TerminalPair_SessionChanged;
     }
 
+    private void UnobserveTerminalPair(WorktreeTerminalPair pair)
+    {
+        if (!observedTerminalPairs.Remove(pair)) return;
+        pair.SessionChanged -= TerminalPair_SessionChanged;
+    }
+
     private void TerminalPair_SessionChanged(object? sender, EventArgs e)
     {
         if (closeInProgress || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
@@ -811,6 +817,7 @@ public partial class MainWindow : Window
                 return;
             }
 
+            if (pair is not null) UnobserveTerminalPair(pair);
             worktreeState?.MarkTerminalPairRemoved(path);
             if (WorktreePath.Comparer.Equals(project?.ProjectFolder, path))
             {
