@@ -50,6 +50,7 @@ public partial class MainWindow : Window
     private WorktreeNavigationEntry? blockedWorktreeEntry;
     private readonly HashSet<WorktreeTerminalPair> observedTerminalPairs = [];
     private readonly HashSet<string> closingWorkspacePaths = new(WorktreePath.Comparer);
+    private readonly WorkspaceMutationGate workspaceMutationGate = new();
     private static readonly RoutedCommand RefreshWorktreesCommand = new("Refresh Worktrees", typeof(MainWindow));
 
     public MainWindow()
@@ -167,7 +168,7 @@ public partial class MainWindow : Window
 
     internal async Task<bool> OpenWorkspaceAsync(string workspacePath)
     {
-        if (workspaceOpenCancellation is not null || worktreeActionCancellation is not null) return false;
+        if (workspaceOpenCancellation is not null || worktreeActionCancellation is not null || workspaceMutationGate.IsEntered) return false;
         if (discoveryCancellation is not null)
         {
             if (refreshCompletion is not { } completion) return false;
@@ -350,7 +351,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshWorktreesAsync()
     {
-        if (project is null || discoveryCancellation is not null || workspaceOpenCancellation is not null || worktreeActionCancellation is not null) return;
+        if (project is null || discoveryCancellation is not null || workspaceOpenCancellation is not null || worktreeActionCancellation is not null || workspaceMutationGate.IsEntered) return;
         discoveryCancellation = new CancellationTokenSource();
         var completion = refreshCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var generation = refreshCoordinator?.BeginRefresh() ?? 0;
@@ -570,7 +571,7 @@ public partial class MainWindow : Window
 
     private async Task RunWorktreeActionAsync(string progress, Func<CancellationToken, Task> action)
     {
-        if (worktreeActionCancellation is not null) return;
+        if (worktreeActionCancellation is not null || workspaceMutationGate.IsEntered) return;
         worktreeActionCancellation = new CancellationTokenSource();
         SetWorktreeInteractionEnabled(false);
         RefreshWorktreesButton.IsEnabled = false;
@@ -795,13 +796,15 @@ public partial class MainWindow : Window
             var dialog = new CloseWorkspaceDialog(entry, activeTerminals) { Owner = this };
             if (dialog.ShowDialog() != true) return;
 
-            if (worktreeActionCancellation is not null || discoveryCancellation is not null || workspaceOpenCancellation is not null || closeInProgress)
+            if (worktreeActionCancellation is not null || discoveryCancellation is not null || workspaceOpenCancellation is not null || closeInProgress || !workspaceMutationGate.TryEnter())
             {
                 RefreshStatusText.Text = "Workspace close is unavailable while another workspace operation is running.";
                 return;
             }
 
-            var removed = pair is null || await terminalRegistry!.CloseAndRemoveAsync(path, pair);
+            try
+            {
+                var removed = pair is null || await terminalRegistry!.CloseAndRemoveAsync(path, pair);
             if (!removed)
             {
                 RefreshStatusText.Text = $"Could not close workspace {entry.FolderName}; its terminal workspace changed while closing.";
@@ -820,8 +823,10 @@ public partial class MainWindow : Window
                 ClosedWorkspaceSurface.Visibility = Visibility.Visible;
                 OpenClosedWorkspaceButton.Focus();
             }
-            RefreshStatusText.Text = $"Workspace closed: {entry.FolderName}.";
-            UpdateSidebarIndicators();
+                RefreshStatusText.Text = $"Workspace closed: {entry.FolderName}.";
+                UpdateSidebarIndicators();
+            }
+            finally { workspaceMutationGate.Exit(); }
         }
         catch (Exception exception)
         {
@@ -1017,6 +1022,12 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        if (workspaceMutationGate.IsEntered)
+        {
+            e.Cancel = true;
+            RefreshStatusText.Text = "Workspace close is in progress.";
+            return;
+        }
         if (allowClose || ActiveTerminalCount == 0) return;
         e.Cancel = true;
         if (closeInProgress) return;
