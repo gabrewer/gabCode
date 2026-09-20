@@ -67,6 +67,8 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("CreateWorktreeFromExistingBranch", code);
         Assert.Contains("DeleteWorktree", code);
         Assert.Contains("CloseWorkspace", code);
+        Assert.Contains("UnobserveTerminalPair(pair);", code);
+        Assert.Contains("pair.SessionChanged -= TerminalPair_SessionChanged;", code);
     }
 
     [Fact]
