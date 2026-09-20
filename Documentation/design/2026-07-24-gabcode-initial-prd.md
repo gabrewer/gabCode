@@ -118,16 +118,17 @@ For worktrees created by gabCode, the creation point may be recorded as addition
 
 gabCode does not stage, commit, amend, rebase, merge, push, or otherwise mutate repository history through this interface.
 
-### 6. User-Selected PRD and GitHub Issue Associations — Must-have
+### 6. User-Selected Worktree References — Must-have
 
-The user can associate one or more PRDs and GitHub issues with a worktree.
+The user can associate exactly one arbitrary local Markdown file and one GitHub issue URL with a worktree.
 
-- PRDs are selected from files under `Documentation/design` in that worktree.
-- GitHub issues are selected from the repository's read-only GitHub issue data.
+- The Markdown file may be anywhere on the local machine; it is not restricted to `Documentation/design` or the repository.
+- The issue is selected by user-provided URL and need not belong to the worktree's repository.
 - Associations are stored as local gabCode metadata.
-- gabCode does not infer, create, or maintain associations automatically.
-- gabCode does not modify PRD files or GitHub issues when an association changes.
-- Associated PRDs, issue bodies, and issue comments are readable inside gabCode.
+- gabCode does not infer, create, sync, or maintain associations automatically.
+- Assignment changes do not modify the repository, Markdown file, or GitHub issue.
+- The references bar and worktree context menu expose assignment, replacement, opening, and removal.
+- In-app Markdown editing and live issue viewing are defined by the follow-up PRDs `2026-09-20-markdown-review-editing-prd.md` and `2026-09-20-github-issue-viewer-prd.md`.
 - Associations are discarded when their worktree is removed.
 
 Explicit links already present in PRDs and GitHub issues may be rendered as links, but gabCode does not treat them as workflow instructions.
@@ -137,8 +138,8 @@ Explicit links already present in PRDs and GitHub issues may be rendered as link
 The selected worktree provides read-only navigation for:
 
 - Repository files and directories.
-- Markdown PRDs.
-- Associated GitHub issues and comments.
+- The explicitly associated Markdown file.
+- The explicitly associated GitHub issue and comments.
 - Uncommitted changes.
 - Commits and diffs.
 
@@ -172,11 +173,11 @@ Single-line clipboard text is pasted immediately. Multiline clipboard text requi
 
 gabCode will not:
 
-- Edit source files or PRDs.
+- Edit source files through the general file explorer or edit unassociated files. The explicitly associated Markdown file may be edited only through the focused Markdown Review and Editing feature.
 - Interpret CLI coding-harness output, prompts, skills, or session history.
 - Start or resume CLI coding-harness sessions automatically.
 - Understand or enforce product-design, sprint, review, or release workflows.
-- Infer which PRD or GitHub issue belongs to a worktree.
+- Infer which Markdown file or GitHub issue belongs to a worktree.
 - Create, update, close, or comment on GitHub issues.
 - Create, review, merge, or otherwise mutate pull requests.
 - Stage, commit, amend, rebase, merge, or push.
