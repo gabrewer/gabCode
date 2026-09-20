@@ -98,6 +98,11 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("SetWorktreeInteractionEnabled(true)", code);
         Assert.DoesNotContain("WorktreeList.IsEnabled = false", code);
         Assert.DoesNotContain("WorktreeList.IsEnabled = true", code);
+        var operation = code[code.IndexOf("private async Task RunWorktreeActionAsync", StringComparison.Ordinal)..];
+        Assert.True(
+            operation.IndexOf("CancelRefreshButton.Visibility = Visibility.Visible;", StringComparison.Ordinal) <
+            operation.IndexOf("SetWorktreeInteractionEnabled(false);", StringComparison.Ordinal),
+            "Cancel must become visible before it receives focus while sidebar interaction is disabled.");
         Assert.Contains("Worktree action cancelled.", code);
         Assert.Contains("ReconcileWorktrees", code);
     }
