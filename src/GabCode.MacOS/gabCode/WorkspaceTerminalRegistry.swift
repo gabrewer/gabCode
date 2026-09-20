@@ -71,7 +71,9 @@ final class WorkspaceTerminalRegistry: ObservableObject {
         let normalizedPath = path.standardizedFileURL
         guard !closingPaths.contains(normalizedPath) else { return false }
         guard let expectedPresentation else { return presentationsByPath[normalizedPath] == nil }
-        guard presentationsByPath[normalizedPath] === expectedPresentation else { return false }
+        guard presentationsByPath[normalizedPath] === expectedPresentation,
+              !expectedPresentation.isMutationLocked
+        else { return false }
 
         closingPaths.insert(normalizedPath)
         expectedPresentation.setMutationLocked(true)
