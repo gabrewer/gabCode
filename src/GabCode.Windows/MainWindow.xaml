@@ -56,11 +56,11 @@
                             <MenuItem Header="Create worktree from selected branch" Click="CreateWorktreeFromSelectedBranch_Click" AutomationProperties.Name="Create worktree from selected branch" />
                             <MenuItem Header="Create worktree from existing branch" Click="CreateWorktreeFromExistingBranch_Click" AutomationProperties.Name="Create worktree from existing branch" />
                             <Separator />
-                            <MenuItem Header="Delete worktree" Click="DeleteWorktree_Click" AutomationProperties.Name="Delete worktree" />
                             <MenuItem Header="Close Workspace" Click="CloseWorkspace_Click" AutomationProperties.Name="Close selected workspace terminals" />
-                            <Separator />
                             <MenuItem Header="Open in VS Code" Click="OpenWorktreeInCode_Click" AutomationProperties.Name="Open worktree in VS Code" />
                             <MenuItem Header="Reveal in Explorer" Click="RevealWorktree_Click" AutomationProperties.Name="Reveal worktree in Explorer" />
+                            <Separator />
+                            <MenuItem Header="Delete worktree" Click="DeleteWorktree_Click" AutomationProperties.Name="Delete worktree" />
                         </ContextMenu>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="ContextMenu" Value="{StaticResource WorktreeContextMenu}" />
