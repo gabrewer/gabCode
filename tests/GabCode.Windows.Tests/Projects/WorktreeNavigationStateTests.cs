@@ -29,6 +29,21 @@ public sealed class WorktreeNavigationStateTests
     }
 
     [Fact]
+    public void Closing_a_terminal_pair_prevents_a_later_missing_worktree_from_becoming_an_orphan()
+    {
+        var primary = new RegisteredWorktree("C:\\repo\\main", "trunk", true);
+        var feature = new RegisteredWorktree("C:\\repo\\wt\\feature", "feature/demo", false);
+        var state = new WorktreeNavigationState([primary, feature]);
+        state.MarkTerminalPairCreated(feature.Path);
+
+        state.MarkTerminalPairRemoved(feature.Path);
+        state.Reconcile([primary]);
+        state.Reconcile([primary]);
+
+        Assert.Empty(state.Orphaned);
+    }
+
+    [Fact]
     public void Explicit_orphan_close_removes_only_the_orphan_entry()
     {
         var primary = new RegisteredWorktree("C:\\repo\\main", "trunk", true);
