@@ -15,6 +15,7 @@ final class TerminalShutdownCoordinator: ObservableObject {
     func requestWindowClose(_ window: NSWindow) -> Bool {
         if permitsWindowClose { return true }
         let presentations = WindowWorkspaceRegistry.shared.presentations(for: window)
+        guard !presentations.contains(where: \.isMutationLocked) else { return false }
         guard presentations.contains(where: { $0.activeTerminalCount > 0 }) else {
             WindowWorkspaceRegistry.shared.unregister(window)
             return true
@@ -31,6 +32,7 @@ final class TerminalShutdownCoordinator: ObservableObject {
     func requestApplicationTermination(_ application: NSApplication) -> NSApplication.TerminateReply {
         guard pendingWindow == nil, !isStopping else { return .terminateCancel }
         let presentations = WindowWorkspaceRegistry.shared.presentations
+        guard !presentations.contains(where: \.isMutationLocked) else { return .terminateCancel }
         guard WindowWorkspaceRegistry.shared.activeTerminalCount > 0 else { return .terminateNow }
         guard let window = application.keyWindow ?? application.windows.first else { return .terminateCancel }
         requestConfirmation(for: window, presentations: presentations) { cleanedUp in
@@ -150,7 +152,7 @@ final class GabCodeAppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 struct WindowCloseInterceptor: NSViewRepresentable {
     let registry: WorkspaceTerminalRegistry
-    let selectedPath: URL
+    let selectedPath: URL?
 
     func makeCoordinator() -> Coordinator { Coordinator(registry: registry) }
 
@@ -170,11 +172,14 @@ struct WindowCloseInterceptor: NSViewRepresentable {
 
         init(registry: WorkspaceTerminalRegistry) { self.registry = registry }
 
-        func install(on view: NSView, selectedPath: URL) {
+        func install(on view: NSView, selectedPath: URL?) {
             DispatchQueue.main.async { [weak self, weak view] in
                 guard let self, let window = view?.window else { return }
-                WindowWorkspaceRegistry.shared.register(self.registry.retainedPresentations, for: window)
-                WindowWorkspaceRegistry.shared.select(self.registry.presentation(for: selectedPath), for: window)
+                WindowWorkspaceRegistry.shared.synchronize(self.registry.retainedPresentations, for: window)
+                if let selectedPath,
+                   let presentation = self.registry.existingPresentation(for: selectedPath) {
+                    WindowWorkspaceRegistry.shared.select(presentation, for: window)
+                }
                 if self.window !== window {
                     self.window = window
                     window.delegate = self

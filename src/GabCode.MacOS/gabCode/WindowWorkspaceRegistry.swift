@@ -73,6 +73,22 @@ final class WindowWorkspaceRegistry {
         if window.isKeyWindow { focusedPresentation = presentation(for: window) }
     }
 
+    func synchronize(_ presentations: [TerminalWorkspacePresentation], for window: NSWindow) {
+        prune()
+        if let index = entries.firstIndex(where: { $0.window === window }) {
+            entries[index].presentations = presentations
+            if let selected = entries[index].selectedPresentation,
+               presentations.contains(where: { $0 === selected }) {
+                // The selected retained presentation remains authoritative.
+            } else {
+                entries[index].selectedPresentation = presentations.last
+            }
+        } else {
+            entries.append(Entry(window: window, presentations: presentations, selectedPresentation: presentations.last))
+        }
+        if window.isKeyWindow { focusedPresentation = presentation(for: window) }
+    }
+
     func select(_ presentation: TerminalWorkspacePresentation, for window: NSWindow) {
         register(presentation, for: window)
         guard let index = entries.firstIndex(where: { $0.window === window }) else { return }

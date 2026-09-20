@@ -147,11 +147,89 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testReturningToClosedWorkspaceStartsFreshTerminalsAutomatically() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+
+        let terminalPath = app.staticTexts["terminal-directory-path"]
+        XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
+        let primaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "primary")).firstMatch
+        XCTAssertTrue(primaryRow.waitForExistence(timeout: 5))
+        primaryRow.rightClick()
+        let closeWorkspace = app.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Close Workspace")).firstMatch
+        XCTAssertTrue(closeWorkspace.waitForExistence(timeout: 3))
+        closeWorkspace.click()
+
+        XCTAssertTrue(app.sheets.buttons["Close Workspace"].waitForExistence(timeout: 3))
+        app.sheets.buttons["Close Workspace"].click()
+        XCTAssertTrue(app.staticTexts["Workspace closed"].waitForExistence(timeout: 8))
+
+        let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+        XCTAssertTrue(secondaryRow.waitForExistence(timeout: 5))
+        secondaryRow.click()
+        XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
+        primaryRow.click()
+        XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Workspace closed"].exists)
+        XCTAssertEqual(terminalPath.value as? String, fixture.primary.path)
+    }
+
+    @MainActor
     func testCloseWithoutWorkspaceDoesNotOfferTerminalCleanup() throws {
         app.launch()
         XCTAssertTrue(app.buttons["open-workspace"].waitForExistence(timeout: 5))
         app.typeKey("w", modifierFlags: .command)
         XCTAssertFalse(app.staticTexts["Stop 2 active terminals?"].waitForExistence(timeout: 2))
+    }
+
+    private struct WorkspaceFixture {
+        let root: URL
+        let primary: URL
+        let descriptor: URL
+    }
+
+    private func makeWorkspaceFixture() throws -> WorkspaceFixture {
+        let root = try makeTemporaryDirectory()
+        let primary = root.appendingPathComponent("primary ünicode", isDirectory: true)
+        let secondary = primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        try FileManager.default.createDirectory(at: primary, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        try run(git, ["init", "-b", "main", primary.path])
+        try Data("fixture\n".utf8).write(to: primary.appendingPathComponent("README.md"))
+        try run(git, ["-C", primary.path, "add", "README.md"])
+        try run(git, ["-C", primary.path, "-c", "user.name=gabCode UI Tests", "-c", "user.email=ui-tests@example.invalid", "commit", "-m", "fixture"])
+        try run(git, ["-C", primary.path, "worktree", "add", "-b", "secondary", secondary.path])
+
+        let descriptor = root.appendingPathComponent("fixture.gabcode-workspace")
+        let encodedPath = primary.path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        try Data("{\"version\":1,\"name\":\"Close Workspace UI\",\"project\":{\"path\":\"\(encodedPath)\",\"mainBranch\":\"main\"}}".utf8).write(to: descriptor)
+        return WorkspaceFixture(root: root, primary: primary.standardizedFileURL, descriptor: descriptor)
+    }
+
+    private func developerToolPath(_ tool: String) throws -> String {
+        let xcodeSelect = URL(fileURLWithPath: "/usr/bin/xcode-select")
+        let output = try run(xcodeSelect, ["-p"])
+        return URL(fileURLWithPath: output.trimmingCharacters(in: .whitespacesAndNewlines), isDirectory: true)
+            .appendingPathComponent("usr/bin/\(tool)").path
+    }
+
+    @discardableResult
+    private func run(_ executable: URL, _ arguments: [String]) throws -> String {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "gabCodeUITests", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: text])
+        }
+        return text
     }
 
     private var loginHomeDirectory: URL {

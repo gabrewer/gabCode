@@ -50,6 +50,21 @@ final class WindowWorkspaceRegistryTests: XCTestCase {
         XCTAssertTrue(registry.presentations(for: window).isEmpty)
     }
 
+    func testRegisterReplacesRemovedPresentationInsteadOfRetainingItForWindowShutdown() throws {
+        let registry = WindowWorkspaceRegistry()
+        let window = NSWindow()
+        let first = try presentation()
+        let second = try presentation()
+
+        registry.register([first, second], for: window)
+        registry.select(first, for: window)
+        registry.synchronize([second], for: window)
+
+        XCTAssertEqual(registry.presentations(for: window).count, 1)
+        XCTAssertTrue(registry.presentations(for: window).first === second)
+        XCTAssertTrue(registry.presentation(for: window) === second)
+    }
+
     func testSelectedPresentationRoutesFocusedWindowCommands() throws {
         let registry = WindowWorkspaceRegistry()
         let window = NSWindow()
