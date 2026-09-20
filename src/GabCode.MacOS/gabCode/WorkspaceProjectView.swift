@@ -42,6 +42,7 @@ struct WorkspaceProjectView: View {
     @State private var windowNumber: Int?
     @State private var selectedWorktreePath: URL?
     @State private var closedWorktreePaths: Set<URL> = []
+    @State private var deletingWorktreePaths: Set<URL> = []
     private struct WorktreeCreationPresentation: Identifiable {
         let id = UUID()
         let base: WorktreeCreationBase
@@ -143,7 +144,7 @@ struct WorkspaceProjectView: View {
             chooseProjectFolderAndCreateWorkspace()
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeRefreshWorktrees)) { notification in
-            guard handles(notification), !terminalRegistry.isClosing else { return }
+            guard handles(notification), !hasConflictingWorkspaceOperation else { return }
             Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeMoveSidebar)) { notification in
@@ -232,7 +233,7 @@ struct WorkspaceProjectView: View {
                         .accessibilityIdentifier("cancel-refresh-worktrees")
                 } else {
                     Button { Task { await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) } } label: { Image(systemName: "arrow.clockwise") }
-                        .disabled(terminalRegistry.isClosing)
+                        .disabled(terminalRegistry.isClosing || !deletingWorktreePaths.isEmpty)
                         .accessibilityLabel("Refresh Worktrees")
                         .accessibilityIdentifier("refresh-worktrees")
                 }
@@ -276,7 +277,7 @@ struct WorkspaceProjectView: View {
                             }
                             Divider()
                             Button("Close Workspace…") { requestCloseWorkspace(worktree) }
-                                .disabled(terminalRegistry.isClosing)
+                                .disabled(hasConflictingWorkspaceOperation || terminalRegistry.existingPresentation(for: worktree.path)?.isMutationLocked == true)
                                 .accessibilityLabel("Close Workspace for \(worktree.path.lastPathComponent), \(worktree.branch), \(worktree.path.path)")
                             Button("Open in VS Code") { openInVSCode(worktree.path) }
                             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([worktree.path]) }
@@ -285,7 +286,7 @@ struct WorkspaceProjectView: View {
                                 Button("Delete Worktree ‘\(worktree.branch)’…", role: .destructive) {
                                     requestDeletion(worktree)
                                 }
-                                .disabled(terminalRegistry.isClosing)
+                                .disabled(hasConflictingWorkspaceOperation || terminalRegistry.existingPresentation(for: worktree.path)?.isMutationLocked == true)
                             }
                         }
                     }
@@ -319,17 +320,39 @@ struct WorkspaceProjectView: View {
         creationPresentation = WorktreeCreationPresentation(base: base, selectedBranch: selectedBranch)
     }
 
+    private var hasConflictingWorkspaceOperation: Bool {
+        terminalRegistry.isClosing || !deletingWorktreePaths.isEmpty || controller.isRefreshing
+    }
+
     private func requestDeletion(_ worktree: WorktreeNavigationEntry) {
-        guard !worktree.isPrimary, !terminalRegistry.isClosing else { return }
+        let presentation = terminalRegistry.existingPresentation(for: worktree.path)
+        guard !worktree.isPrimary,
+              !hasConflictingWorkspaceOperation,
+              presentation?.isMutationLocked != true
+        else { return }
+
+        let path = worktree.path.standardizedFileURL
+        deletingWorktreePaths.insert(path)
+        presentation?.setMutationLocked(true)
         Task { @MainActor in
-            guard let isDirty = await controller.worktreeIsDirty(path: worktree.path) else { return }
-            confirmDeletion(worktree, isDirty: isDirty)
+            guard let isDirty = await controller.worktreeIsDirty(path: worktree.path) else {
+                finishDeletion(path: path, presentation: presentation)
+                return
+            }
+            confirmDeletion(worktree, isDirty: isDirty, presentation: presentation)
         }
     }
 
-    private func confirmDeletion(_ worktree: WorktreeNavigationEntry, isDirty: Bool) {
-        guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
-        let presentation = terminalRegistry.existingPresentation(for: worktree.path)
+    private func confirmDeletion(
+        _ worktree: WorktreeNavigationEntry,
+        isDirty: Bool,
+        presentation: TerminalWorkspacePresentation?
+    ) {
+        let path = worktree.path.standardizedFileURL
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else {
+            finishDeletion(path: path, presentation: presentation)
+            return
+        }
         let activeCount = presentation?.activeTerminalCount ?? 0
         let alert = NSAlert()
         alert.messageText = "Delete worktree \(worktree.path.lastPathComponent)?"
@@ -341,12 +364,16 @@ struct WorkspaceProjectView: View {
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: activeCount > 0 ? "Stop Terminals and Delete" : "Delete")
         alert.beginSheetModal(for: window) { [self] response in
-            guard response == .alertSecondButtonReturn else { return }
+            guard response == .alertSecondButtonReturn else {
+                finishDeletion(path: path, presentation: presentation)
+                return
+            }
             Task { @MainActor in
                 if let presentation, presentation.activeTerminalCount > 0 {
                     let results = await presentation.workspace.stopResults(gracePeriod: .milliseconds(500))
                     guard results.allSatisfy({ $0 != .failed }) else {
                         showAlert(title: "Terminal cleanup did not complete", message: "The worktree was not deleted because an owned process could not be verified as stopped.")
+                        finishDeletion(path: path, presentation: presentation)
                         return
                     }
                 }
@@ -359,21 +386,34 @@ struct WorkspaceProjectView: View {
                 if !deleted {
                     if case let .localBranchDeletionFailed(branch, _) = controller.worktreeActionError {
                         terminalRegistry.remove(worktree.path)
-                        confirmForceBranchDeletion(branch)
+                        confirmForceBranchDeletion(branch, path: path, presentation: presentation)
                     } else if isDirty {
-                        confirmForceDeletion(worktree, deleteLocalBranch: branchCheckbox.state == .on)
+                        confirmForceDeletion(
+                            worktree,
+                            deleteLocalBranch: branchCheckbox.state == .on,
+                            presentation: presentation
+                        )
                     } else {
                         showAlert(title: "Worktree was not deleted", message: "Git rejected safe removal. Resolve the reported blocker and try again.")
+                        finishDeletion(path: path, presentation: presentation)
                     }
                 } else {
                     terminalRegistry.remove(worktree.path)
+                    finishDeletion(path: path, presentation: presentation)
                 }
             }
         }
     }
 
-    private func confirmForceBranchDeletion(_ branch: String) {
-        guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+    private func confirmForceBranchDeletion(
+        _ branch: String,
+        path: URL,
+        presentation: TerminalWorkspacePresentation?
+    ) {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else {
+            finishDeletion(path: path, presentation: presentation)
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "Force delete unmerged branch \(branch)?"
         alert.informativeText = "The worktree was removed, but Git reported that the local branch is unmerged. Force deletion permanently discards the branch reference."
@@ -381,17 +421,29 @@ struct WorkspaceProjectView: View {
         alert.addButton(withTitle: "Keep Branch")
         alert.addButton(withTitle: "Force Delete Branch")
         alert.beginSheetModal(for: window) { [self] response in
-            guard response == .alertSecondButtonReturn else { return }
+            guard response == .alertSecondButtonReturn else {
+                finishDeletion(path: path, presentation: presentation)
+                return
+            }
             Task { @MainActor in
                 if !(await controller.deleteLocalBranch(branch, force: true)) {
                     showAlert(title: "Branch was not deleted", message: "Git rejected force deletion of the local branch.")
                 }
+                finishDeletion(path: path, presentation: presentation)
             }
         }
     }
 
-    private func confirmForceDeletion(_ worktree: WorktreeNavigationEntry, deleteLocalBranch: Bool) {
-        guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+    private func confirmForceDeletion(
+        _ worktree: WorktreeNavigationEntry,
+        deleteLocalBranch: Bool,
+        presentation: TerminalWorkspacePresentation?
+    ) {
+        let path = worktree.path.standardizedFileURL
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first else {
+            finishDeletion(path: path, presentation: presentation)
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "Force delete this worktree?"
         alert.informativeText = "Safe removal was blocked. Force deletion may permanently lose uncommitted or untracked files. This cannot be undone."
@@ -399,7 +451,10 @@ struct WorkspaceProjectView: View {
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Force Delete")
         alert.beginSheetModal(for: window) { [self] response in
-            guard response == .alertSecondButtonReturn else { return }
+            guard response == .alertSecondButtonReturn else {
+                finishDeletion(path: path, presentation: presentation)
+                return
+            }
             Task { @MainActor in
                 let deleted = await controller.removeWorktree(
                     path: worktree.path,
@@ -410,16 +465,23 @@ struct WorkspaceProjectView: View {
                 if !deleted {
                     if case let .localBranchDeletionFailed(branch, _) = controller.worktreeActionError {
                         terminalRegistry.remove(worktree.path)
-                        confirmForceBranchDeletion(branch)
+                        confirmForceBranchDeletion(branch, path: path, presentation: presentation)
                     } else {
                         showAlert(title: "Worktree was not deleted", message: "Git rejected force removal. Resolve the reported blocker and try again.")
+                        finishDeletion(path: path, presentation: presentation)
                     }
                 } else {
                     terminalRegistry.remove(worktree.path)
-                    if selectedWorktreePath == worktree.path.standardizedFileURL { selectedWorktreePath = controller.worktrees.first?.path }
+                    if selectedWorktreePath == path { selectedWorktreePath = controller.worktrees.first?.path }
+                    finishDeletion(path: path, presentation: presentation)
                 }
             }
         }
+    }
+
+    private func finishDeletion(path: URL, presentation: TerminalWorkspacePresentation?) {
+        presentation?.setMutationLocked(false)
+        deletingWorktreePaths.remove(path.standardizedFileURL)
     }
 
     @ViewBuilder
@@ -441,9 +503,11 @@ struct WorkspaceProjectView: View {
     }
 
     private func requestCloseWorkspace(_ worktree: WorktreeNavigationEntry) {
-        guard !terminalRegistry.isClosing else { return }
         let capturedPresentation = terminalRegistry.existingPresentation(for: worktree.path)
-        guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+        guard !hasConflictingWorkspaceOperation,
+              capturedPresentation?.isMutationLocked != true,
+              let window = NSApp.keyWindow ?? NSApp.windows.first
+        else { return }
         let activeCount = capturedPresentation?.activeTerminalCount ?? 0
         let alert = NSAlert()
         alert.messageText = "Close workspace \(worktree.path.lastPathComponent)?"
@@ -454,6 +518,7 @@ struct WorkspaceProjectView: View {
         alert.beginSheetModal(for: window) { [self] response in
             guard response == .alertSecondButtonReturn else { return }
             Task { @MainActor in
+                guard !controller.isRefreshing, deletingWorktreePaths.isEmpty else { return }
                 let closed = await terminalRegistry.close(
                     path: worktree.path,
                     expectedPresentation: capturedPresentation,

@@ -81,6 +81,28 @@ final class WorkspaceTerminalRegistryTests: XCTestCase {
         await registry.stopAll(gracePeriod: .milliseconds(250))
     }
 
+    func testCloseRejectsPresentationOwnedByAnotherLifecycleOperation() async throws {
+        let directory = try makeTemporaryDirectory(name: "mutation locked")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let registry = WorkspaceTerminalRegistry(environment: ["SHELL": "/bin/sh"])
+        let started = await registry.ensureStarted(for: directory)
+        let presentation = try XCTUnwrap(started)
+        presentation.setMutationLocked(true)
+
+        let closed = await registry.close(
+            path: directory,
+            expectedPresentation: presentation,
+            gracePeriod: .milliseconds(250)
+        )
+
+        XCTAssertFalse(closed)
+        XCTAssertTrue(registry.existingPresentation(for: directory) === presentation)
+        XCTAssertGreaterThan(presentation.activeTerminalCount, 0)
+        presentation.setMutationLocked(false)
+        await registry.stopAll(gracePeriod: .milliseconds(250))
+    }
+
     func testCloseDoesNotRemoveReplacementPresentationAfterAwait() async throws {
         let directory = try makeTemporaryDirectory(name: "replacement race")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -88,14 +110,21 @@ final class WorkspaceTerminalRegistryTests: XCTestCase {
         let registry = WorkspaceTerminalRegistry(environment: ["SHELL": "/bin/sh"])
         let originalStarted = await registry.ensureStarted(for: directory)
         let original = try XCTUnwrap(originalStarted)
+        let closeTask = Task { @MainActor in
+            await registry.close(
+                path: directory,
+                expectedPresentation: original,
+                gracePeriod: .milliseconds(250)
+            )
+        }
+        for _ in 0..<100 where !registry.isClosing {
+            await Task.yield()
+        }
+        XCTAssertTrue(registry.isClosing)
+
         registry.remove(directory)
         let replacement = registry.presentation(for: directory)
-
-        let closed = await registry.close(
-            path: directory,
-            expectedPresentation: original,
-            gracePeriod: .milliseconds(250)
-        )
+        let closed = await closeTask.value
 
         XCTAssertFalse(closed)
         XCTAssertTrue(registry.existingPresentation(for: directory) === replacement)
