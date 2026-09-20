@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Windows.Threading;
 using GabCode.Windows.Terminal.Hosting;
@@ -24,6 +25,9 @@ public sealed class WorktreeTerminalRegistryTests
             Assert.NotSame(first, second);
             Assert.Equal(2, registry.Pairs.Count());
             Assert.Equal(0, registry.ActiveTerminalCount);
+            Assert.Contains(
+                typeof(WorktreeTerminalRegistry).GetMethods(BindingFlags.Instance | BindingFlags.NonPublic),
+                method => method.Name == "CloseAndRemoveAsync" && method.GetParameters().Length == 2);
             return Task.CompletedTask;
         });
     }

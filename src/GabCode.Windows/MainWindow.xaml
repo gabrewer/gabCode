@@ -57,6 +57,7 @@
                             <MenuItem Header="Create worktree from existing branch" Click="CreateWorktreeFromExistingBranch_Click" AutomationProperties.Name="Create worktree from existing branch" />
                             <Separator />
                             <MenuItem Header="Delete worktree" Click="DeleteWorktree_Click" AutomationProperties.Name="Delete worktree" />
+                            <MenuItem Header="Close Workspace" Click="CloseWorkspace_Click" AutomationProperties.Name="Close selected workspace terminals" />
                             <Separator />
                             <MenuItem Header="Open in VS Code" Click="OpenWorktreeInCode_Click" AutomationProperties.Name="Open worktree in VS Code" />
                             <MenuItem Header="Reveal in Explorer" Click="RevealWorktree_Click" AutomationProperties.Name="Reveal worktree in Explorer" />
@@ -72,6 +73,13 @@
                 <Border Margin="12,12,12,3" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="3"><ContentControl x:Name="MainTerminalRegion" AutomationProperties.Name="Main terminal region" /></Border>
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#555555" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="Resize main and bottom terminal regions" />
                 <Border Grid.Row="2" Margin="12,3,12,12" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="3"><ContentControl x:Name="BottomTerminalRegion" AutomationProperties.Name="Bottom terminal region" /></Border>
+                <Border x:Name="ClosedWorkspaceSurface" Grid.RowSpan="3" Margin="12" Padding="28" Background="#242424" BorderBrush="#5A5A5A" BorderThickness="1" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440">
+                        <TextBlock FontSize="22" FontWeight="SemiBold" Foreground="White" Text="Workspace closed" AutomationProperties.LiveSetting="Assertive" />
+                        <TextBlock x:Name="ClosedWorkspaceMessage" Margin="0,12,0,16" Foreground="#D0D0D0" TextWrapping="Wrap" />
+                        <Button x:Name="OpenClosedWorkspaceButton" HorizontalAlignment="Left" Padding="12,6" Content="Open Workspace" Click="OpenClosedWorkspaceButton_Click" AutomationProperties.Name="Open closed workspace" />
+                    </StackPanel>
+                </Border>
             </Grid>
         </Grid>
 

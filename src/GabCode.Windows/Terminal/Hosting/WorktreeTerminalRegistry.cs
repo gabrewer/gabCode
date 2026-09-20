@@ -83,8 +83,17 @@ internal sealed class WorktreeTerminalRegistry
     {
         var path = WorktreePath.Normalize(worktreePath);
         if (!pairs.TryGetValue(path, out var pair)) return;
+        await CloseAndRemoveAsync(path, pair);
+    }
+
+    internal async Task<bool> CloseAndRemoveAsync(string worktreePath, WorktreeTerminalPair expectedPair)
+    {
+        ArgumentNullException.ThrowIfNull(expectedPair);
+        var path = WorktreePath.Normalize(worktreePath);
+        if (!pairs.TryGetValue(path, out var pair) || !ReferenceEquals(pair, expectedPair)) return false;
         await pair.CloseAsync();
-        pairs.Remove(path);
+        if (!pairs.TryGetValue(path, out pair) || !ReferenceEquals(pair, expectedPair)) return false;
+        return pairs.Remove(path);
     }
 
     internal async Task CloseAllAsync() => await Task.WhenAll(pairs.Values.Select(pair => pair.CloseAsync()));

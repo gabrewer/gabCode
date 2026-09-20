@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private string? retainedWorktreeRepositoryPath;
     private WorktreeNavigationEntry? blockedWorktreeEntry;
     private readonly HashSet<WorktreeTerminalPair> observedTerminalPairs = [];
+    private readonly HashSet<string> closingWorkspacePaths = new(WorktreePath.Comparer);
     private static readonly RoutedCommand RefreshWorktreesCommand = new("Refresh Worktrees", typeof(MainWindow));
 
     public MainWindow()
@@ -138,6 +139,7 @@ public partial class MainWindow : Window
 
     private void CreateTerminalWorkspace()
     {
+        ClosedWorkspaceSurface.Visibility = Visibility.Collapsed;
         var pair = (terminalRegistry ??= new WorktreeTerminalRegistry(profileResolver.Resolve, () => terminalFontPreference.EffectiveSelection)).GetOrCreate(project!.ProjectFolder);
         ObserveTerminalPair(pair);
         MarkTerminalPairOwned(pair);
@@ -766,6 +768,61 @@ public partial class MainWindow : Window
         catch (Exception exception) { RefreshStatusText.Text = $"Could not open retained folder: {exception.Message}"; }
     }
 
+    private async void CloseWorkspace_Click(object sender, RoutedEventArgs e)
+    {
+        if (ContextEntry(sender) is { } entry) await CloseWorkspaceAsync(entry);
+    }
+
+    private async Task CloseWorkspaceAsync(WorktreeNavigationEntry entry)
+    {
+        var path = WorktreePath.Normalize(entry.Path);
+        if (!closingWorkspacePaths.Add(path)) return;
+        try
+        {
+            var pair = terminalRegistry?.Pairs.FirstOrDefault(item => WorktreePath.Comparer.Equals(item.Path, path));
+            var activeTerminals = pair?.ActiveTerminalCount ?? 0;
+            var dialog = new CloseWorkspaceDialog(entry, activeTerminals) { Owner = this };
+            if (dialog.ShowDialog() != true) return;
+
+            var removed = pair is null || await terminalRegistry!.CloseAndRemoveAsync(path, pair);
+            if (!removed)
+            {
+                RefreshStatusText.Text = $"Could not close workspace {entry.FolderName}; its terminal workspace changed while closing.";
+                return;
+            }
+
+            if (WorktreePath.Comparer.Equals(project?.ProjectFolder, path))
+            {
+                MainTerminalRegion.Content = null;
+                BottomTerminalRegion.Content = null;
+                piTerminal = null;
+                commandsTerminal = null;
+                terminalLayout = null;
+                ClosedWorkspaceMessage.Text = $"Terminals for {entry.FolderName} were closed. The Git worktree, branch, and files remain.";
+                ClosedWorkspaceSurface.Visibility = Visibility.Visible;
+                OpenClosedWorkspaceButton.Focus();
+            }
+            RefreshStatusText.Text = $"Workspace closed: {entry.FolderName}.";
+            UpdateSidebarIndicators();
+        }
+        catch (Exception exception)
+        {
+            RefreshStatusText.Text = $"Could not close workspace {entry.FolderName}: {exception.Message}";
+        }
+        finally
+        {
+            closingWorkspacePaths.Remove(path);
+        }
+    }
+
+    private void OpenClosedWorkspaceButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null || piTerminal is not null || commandsTerminal is not null) return;
+        CreateTerminalWorkspace();
+        UpdateSidebarIndicators();
+        piTerminal?.FocusTerminal();
+    }
+
     private async void DeleteWorktree_Click(object sender, RoutedEventArgs e)
     {
         if (ContextEntry(sender) is { } entry) await DeleteWorktreeAsync(entry);
@@ -942,7 +999,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
-        if (allowClose || piTerminal is null || commandsTerminal is null || (!piTerminal.HasStarted && !commandsTerminal.HasStarted)) return;
+        if (allowClose || ActiveTerminalCount == 0) return;
         e.Cancel = true;
         if (closeInProgress) return;
 

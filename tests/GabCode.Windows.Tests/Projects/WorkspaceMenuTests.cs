@@ -57,6 +57,8 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("Create worktree from selected branch", xaml);
         Assert.Contains("Create worktree from existing branch", xaml);
         Assert.Contains("Delete worktree", xaml);
+        Assert.Contains("Close Workspace", xaml);
+        Assert.Contains("CloseWorkspace_Click", xaml);
         Assert.Contains("Open in VS Code", xaml);
         Assert.Contains("Reveal in Explorer", xaml);
         Assert.DoesNotContain("<ContextMenu.Resources>", xaml);
@@ -64,6 +66,7 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("CreateWorktreeFromSelectedBranch", code);
         Assert.Contains("CreateWorktreeFromExistingBranch", code);
         Assert.Contains("DeleteWorktree", code);
+        Assert.Contains("CloseWorkspace", code);
     }
 
     [Fact]
