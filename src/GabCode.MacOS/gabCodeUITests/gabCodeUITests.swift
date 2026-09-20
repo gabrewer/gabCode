@@ -147,6 +147,26 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testReferencesBarAssignsCanonicalIssueWithoutReplacingTerminalSurface() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+
+        let terminalPath = app.staticTexts["terminal-directory-path"]
+        XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["Add issue…"].waitForExistence(timeout: 5))
+        app.buttons["Add issue…"].click()
+        let issueURL = app.textFields["GitHub issue URL"]
+        XCTAssertTrue(issueURL.waitForExistence(timeout: 3))
+        issueURL.typeText("https://github.com/gabrewer/gabCode/issues/92?source=ui")
+        app.buttons["Add"].click()
+
+        XCTAssertTrue(app.staticTexts["gabrewer/gabCode#92"].waitForExistence(timeout: 3))
+        XCTAssertEqual(terminalPath.value as? String, fixture.primary.path)
+    }
+
+    @MainActor
     func testReturningToClosedWorkspaceStartsFreshTerminalsAutomatically() throws {
         let fixture = try makeWorkspaceFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
