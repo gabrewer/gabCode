@@ -579,9 +579,9 @@ public partial class MainWindow : Window
     {
         if (worktreeActionCancellation is not null || workspaceMutationGate.IsEntered) return;
         worktreeActionCancellation = new CancellationTokenSource();
+        CancelRefreshButton.Visibility = Visibility.Visible;
         SetWorktreeInteractionEnabled(false);
         RefreshWorktreesButton.IsEnabled = false;
-        CancelRefreshButton.Visibility = Visibility.Visible;
         RefreshStatusText.Text = progress;
         try { await action(worktreeActionCancellation.Token); }
         catch (OperationCanceledException)
