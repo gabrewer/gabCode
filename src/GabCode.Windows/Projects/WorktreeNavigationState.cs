@@ -60,6 +60,13 @@ internal sealed class WorktreeNavigationState
         orphaned.Remove(WorktreePath.Normalize(path));
     }
 
+    internal void MarkTerminalPairRemoved(string path)
+    {
+        var normalized = WorktreePath.Normalize(path);
+        if (entries.TryGetValue(normalized, out var entry)) entries[normalized] = entry with { HasTerminalPair = false };
+        if (orphaned.TryGetValue(normalized, out entry)) orphaned[normalized] = entry with { HasTerminalPair = false };
+    }
+
     internal void Reconcile(IEnumerable<RegisteredWorktree> discovered)
     {
         var current = discovered

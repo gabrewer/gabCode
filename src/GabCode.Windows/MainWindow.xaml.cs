@@ -784,6 +784,12 @@ public partial class MainWindow : Window
             var dialog = new CloseWorkspaceDialog(entry, activeTerminals) { Owner = this };
             if (dialog.ShowDialog() != true) return;
 
+            if (worktreeActionCancellation is not null || discoveryCancellation is not null || workspaceOpenCancellation is not null || closeInProgress)
+            {
+                RefreshStatusText.Text = "Workspace close is unavailable while another workspace operation is running.";
+                return;
+            }
+
             var removed = pair is null || await terminalRegistry!.CloseAndRemoveAsync(path, pair);
             if (!removed)
             {
@@ -791,6 +797,7 @@ public partial class MainWindow : Window
                 return;
             }
 
+            worktreeState?.MarkTerminalPairRemoved(path);
             if (WorktreePath.Comparer.Equals(project?.ProjectFolder, path))
             {
                 MainTerminalRegion.Content = null;
