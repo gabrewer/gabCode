@@ -155,8 +155,11 @@ final class gabCodeUITests: XCTestCase {
 
         let terminalPath = app.staticTexts["terminal-directory-path"]
         XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["Add issue…"].waitForExistence(timeout: 5))
-        app.buttons["Add issue…"].click()
+        let issueMenu = app.buttons["GitHub issue"]
+        XCTAssertTrue(issueMenu.waitForExistence(timeout: 5))
+        issueMenu.click()
+        XCTAssertTrue(app.menuItems["Add issue…"].waitForExistence(timeout: 3))
+        app.menuItems["Add issue…"].click()
         let issueURL = app.textFields["GitHub issue URL"]
         XCTAssertTrue(issueURL.waitForExistence(timeout: 3))
         issueURL.typeText("https://github.com/gabrewer/gabCode/issues/92?source=ui")

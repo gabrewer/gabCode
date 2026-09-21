@@ -34,23 +34,32 @@ struct WorktreeReferencesBar: View {
     private var markdownSlot: some View {
         Group {
             if let url = references.markdownURL {
-                HStack(spacing: 6) {
-                    let missing = !WorktreeReferenceLauncher.isExistingMarkdownFile(url)
-                    Label(url.lastPathComponent, systemImage: "doc.text")
-                        .lineLimit(1)
-                        .accessibilityValue(missing ? "Missing" : "Available")
-                    if missing {
-                        Text("Missing")
-                            .foregroundStyle(.red)
-                            .accessibilityLabel("Markdown file missing")
-                    }
+                let missing = !WorktreeReferenceLauncher.isExistingMarkdownFile(url)
+                Menu {
                     Button("Open") { onOpenMarkdown() }
                         .disabled(missing)
                     Button(missing ? "Locate…" : "Replace") { onReplaceMarkdown() }
                     Button("Remove", role: .destructive) { onRemoveMarkdown() }
+                } label: {
+                    referenceLabel(
+                        text: url.lastPathComponent,
+                        icon: "doc.text",
+                        status: missing ? "Missing" : "Available"
+                    )
                 }
+                .menuStyle(.borderlessButton)
+                .disabled(false)
+                .accessibilityLabel("Markdown reference")
+                .accessibilityValue("\(url.lastPathComponent), \(missing ? "Missing" : "Available")")
             } else {
-                Button("Choose Markdown…") { onChooseMarkdown() }
+                Menu {
+                    Button("Choose Markdown…") { onChooseMarkdown() }
+                } label: {
+                    referenceLabel(text: "Markdown", icon: "doc.text", status: "Not assigned")
+                }
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("Markdown reference")
+                .accessibilityValue("Not assigned")
             }
         }
         .accessibilityIdentifier("markdown-reference")
@@ -59,18 +68,43 @@ struct WorktreeReferencesBar: View {
     private var issueSlot: some View {
         Group {
             if let issue = references.issue {
-                HStack(spacing: 6) {
-                    Label(issue.displayIdentity, systemImage: "link")
-                        .lineLimit(1)
+                Menu {
                     Button("Open") { onOpenIssue() }
                     Button("Replace") { onReplaceIssue() }
                     Button("Remove", role: .destructive) { onRemoveIssue() }
+                } label: {
+                    referenceLabel(text: issue.displayIdentity, icon: "link", status: nil)
                 }
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("GitHub issue reference")
+                .accessibilityValue(issue.displayIdentity)
             } else {
-                Button("Add issue…") { onAddIssue() }
+                Menu {
+                    Button("Add issue…") { onAddIssue() }
+                } label: {
+                    referenceLabel(text: "GitHub issue", icon: "link", status: "Not assigned")
+                }
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("GitHub issue reference")
+                .accessibilityValue("Not assigned")
             }
         }
         .accessibilityIdentifier("issue-reference")
+    }
+
+    private func referenceLabel(text: String, icon: String, status: String?) -> some View {
+        HStack(spacing: 5) {
+            Label(text, systemImage: icon)
+                .lineLimit(1)
+            if let status {
+                Text(status)
+                    .foregroundStyle(status == "Missing" ? .red : .secondary)
+            }
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
     }
 }
 
