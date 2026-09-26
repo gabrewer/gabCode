@@ -35,8 +35,8 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("InputGestureText=\"F5\"", xaml);
         Assert.Contains("WorktreeSidebar", xaml);
         Assert.Contains("WorktreeList", xaml);
-        Assert.Contains("x:Name=\"WorktreeSidebar\" Background=\"Black\"", xaml);
-        Assert.Contains("x:Name=\"WorktreeList\" Background=\"Black\" Foreground=\"White\"", xaml);
+        Assert.Contains("x:Name=\"WorktreeSidebar\" Background=\"#1D1E24\"", xaml);
+        Assert.Contains("x:Name=\"WorktreeList\" Background=\"#1D1E24\" Foreground=\"#E5E7EB\"", xaml);
 
         var code = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GabCode.Windows", "MainWindow.xaml.cs"));
         Assert.DoesNotContain("PART_Popup", code);
