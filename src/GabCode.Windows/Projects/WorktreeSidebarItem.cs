@@ -34,7 +34,7 @@ internal sealed class WorktreeSidebarItem : Border
             ToolTip = entry.Branch,
         });
 
-        var content = new Grid { Background = Brushes.Black };
+        var content = new Grid { Background = Brushes.Transparent };
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumn(RunningIcon, 0);
@@ -43,7 +43,8 @@ internal sealed class WorktreeSidebarItem : Border
         content.Children.Add(labels);
 
         Padding = new Thickness(4, 3, 4, 3);
-        Background = Brushes.Black;
+        BorderThickness = new Thickness(0);
+        Background = Brushes.Transparent;
         Child = content;
         UpdateState(isSelected, hasRunningTerminals);
     }
@@ -56,6 +57,9 @@ internal sealed class WorktreeSidebarItem : Border
     internal void UpdateState(bool selected, bool hasRunningTerminals)
     {
         RunningIcon.Visibility = hasRunningTerminals ? Visibility.Visible : Visibility.Collapsed;
+        BorderBrush = selected ? new SolidColorBrush(Color.FromRgb(0, 120, 212)) : Brushes.Transparent;
+        BorderThickness = selected ? new Thickness(1) : new Thickness(0);
+        Background = selected ? new SolidColorBrush(Color.FromArgb(24, 0, 120, 212)) : Brushes.Transparent;
         AutomationProperties.SetName(this, BuildAccessibleName(entry, selected, hasRunningTerminals));
     }
 

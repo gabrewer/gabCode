@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private readonly WorkspaceProjectLoader projectLoader = new();
     private readonly WorkspaceProjectCreator projectCreator = new();
     private readonly WorkspaceSelectionPreference selectionPreference = new();
+    private readonly WorktreeReferenceStore worktreeReferences = new();
     private string? activeWorkspacePath;
     private readonly GitWorktreeDiscovery worktreeDiscovery = new();
     private readonly IGabCodeInstanceLauncher instanceLauncher;
@@ -194,6 +195,7 @@ public partial class MainWindow : Window
             }
             ActivateProject(nextProject);
             activeWorkspacePath = Path.GetFullPath(workspacePath);
+            _ = UpdateWorktreeReferencesAsync();
             await new LastWorkspacePreference().WriteAsync(activeWorkspacePath);
             if (nextProject.UsedPrimaryFallback)
                 RefreshStatusText.Text = $"The previously selected worktree is no longer available. Opened {Path.GetFileName(nextProject.ProjectFolder)} instead.";
@@ -386,12 +388,15 @@ public partial class MainWindow : Window
 
     private void ReconcileWorktrees(IReadOnlyList<GitWorktreeEntry> entries, long generation = 0, bool confirmedRemoval = false)
     {
+        var previousPaths = worktreeState?.Entries.Select(entry => entry.Path).ToArray() ?? [];
         var registered = entries.Where(entry => entry.Branch is not null).Select(entry => new RegisteredWorktree(entry.Path, entry.Branch!, entry.IsPrimary));
         worktreeState ??= new WorktreeNavigationState(registered);
         foreach (var pair in terminalRegistry?.Pairs ?? []) MarkTerminalPairOwned(pair);
         refreshCoordinator ??= new WorktreeRefreshCoordinator(worktreeState);
         if (generation == 0) generation = refreshCoordinator.BeginRefresh();
         if (!refreshCoordinator.TryReconcile(generation, registered)) return;
+        var retainedPaths = worktreeState.Entries.Concat(worktreeState.Orphaned).Select(entry => entry.Path).ToHashSet(WorktreePath.Comparer);
+        foreach (var removedPath in previousPaths.Where(path => !retainedPaths.Contains(path))) _ = RemoveWorktreeReferencesAsync(removedPath);
         if (confirmedRemoval)
         {
             var confirmedGeneration = refreshCoordinator.BeginRefresh();
@@ -665,6 +670,7 @@ public partial class MainWindow : Window
         CreateTerminalWorkspace();
         PopulateWorktrees();
         FocusWorktreeListItem(path);
+        _ = UpdateWorktreeReferencesAsync();
     }
 
     private void FocusWorktreeListItem(string path)
@@ -907,6 +913,7 @@ public partial class MainWindow : Window
                 if (retained) ShowWorktreeRecovery(outcome.Path, $"Worktree removed; local folder remains at {outcome.Path}.", repositoryPath: primaryPath);
 
                 if (hasTerminalPair && activeTerminals == 0) await terminalRegistry!.CloseAndRemoveAsync(entry.Path);
+                await RemoveWorktreeReferencesAsync(entry.Path);
                 ReconcileWorktrees(outcome.Entries, confirmedRemoval: true);
                 SelectRemainingWorktree(outcome.Entries);
                 if (outcome.Attempt == GitWorktreeRemovalAttempt.Cancelled)
@@ -999,6 +1006,106 @@ public partial class MainWindow : Window
         Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
         CreateTerminalWorkspace();
         UpdateSidebarIndicators();
+        _ = UpdateWorktreeReferencesAsync();
+    }
+
+    private string? ReferenceWorkspacePath => activeWorkspacePath;
+
+    private async Task UpdateWorktreeReferencesAsync()
+    {
+        var workspacePath = ReferenceWorkspacePath;
+        var worktreePath = project?.ProjectFolder;
+        if (string.IsNullOrWhiteSpace(workspacePath) || string.IsNullOrWhiteSpace(worktreePath))
+        {
+            MarkdownReferenceText.Text = string.Empty;
+            IssueReferenceText.Text = string.Empty;
+            MarkdownReferenceButton.Content = "▣  Markdown ▾";
+            IssueReferenceButton.Content = "⌁  GitHub issue ▾";
+            return;
+        }
+        try
+        {
+            var references = await worktreeReferences.ReadAsync(workspacePath, worktreePath);
+            if (!WorktreePath.Comparer.Equals(project?.ProjectFolder, worktreePath)) return;
+            var markdown = references.MarkdownPath is null ? "none" : File.Exists(references.MarkdownPath) ? WorktreeReferenceDisplay.MarkdownFileName(references.MarkdownPath) : $"missing — {WorktreeReferenceDisplay.MarkdownFileName(references.MarkdownPath)}";
+            var issue = references.Issue is null ? "none" : references.Issue.DisplayName;
+            MarkdownReferenceText.Text = markdown;
+            MarkdownReferenceButton.Content = $"▣  {(references.MarkdownPath is null ? "Markdown" : markdown)} ▾";
+            MarkdownReferenceButton.ToolTip = references.MarkdownPath ?? "Choose a Markdown reference";
+            MarkdownReferenceText.ToolTip = references.MarkdownPath;
+            AutomationProperties.SetName(MarkdownReferenceText, references.MarkdownPath is null ? "No Markdown reference" : $"Markdown reference: {references.MarkdownPath}");
+            IssueReferenceText.Text = issue;
+            IssueReferenceButton.Content = $"⌁  {(references.Issue is null ? "GitHub issue" : issue)} ▾";
+            IssueReferenceButton.ToolTip = references.Issue?.Url ?? "Add a GitHub issue reference";
+            IssueReferenceText.ToolTip = references.Issue?.Url;
+            AutomationProperties.SetName(IssueReferenceText, references.Issue is null ? "No GitHub issue reference" : $"GitHub issue reference: {references.Issue.Url}");
+        }
+        catch (Exception exception) { MarkdownReferenceText.Text = $"Could not load references: {exception.Message}"; IssueReferenceText.Text = string.Empty; }
+    }
+
+    private void ReferenceActions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { ContextMenu: { } menu }) { menu.PlacementTarget = (Button)sender; menu.IsOpen = true; }
+    }
+
+    private async Task RemoveWorktreeReferencesAsync(string worktreePath)
+    {
+        if (ReferenceWorkspacePath is not { } workspacePath) return;
+        try { await worktreeReferences.RemoveWorktreeAsync(workspacePath, worktreePath); }
+        catch (Exception exception) { MarkdownReferenceText.Text = $"Worktree was removed, but its references could not be removed: {exception.Message}"; }
+    }
+
+    private async void AssignMarkdown_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null || ReferenceWorkspacePath is not { } workspacePath) return;
+        var worktreePath = ContextEntry(sender)?.Path ?? project.ProjectFolder;
+        var dialog = new OpenFileDialog { Filter = "Markdown files|*.md;*.markdown", CheckFileExists = true };
+        if (dialog.ShowDialog(this) != true) return;
+        try { await worktreeReferences.SaveMarkdownAsync(workspacePath, worktreePath, dialog.FileName); await UpdateWorktreeReferencesAsync(); }
+        catch (Exception exception) { MarkdownReferenceText.Text = $"Could not save Markdown reference: {exception.Message}"; }
+    }
+
+    private async void AssignIssue_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null || ReferenceWorkspacePath is not { } workspacePath) return;
+        var worktreePath = ContextEntry(sender)?.Path ?? project.ProjectFolder;
+        var current = await worktreeReferences.ReadAsync(workspacePath, worktreePath);
+        var dialog = new GitHubIssueDialog(current.Issue) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.Issue is null) return;
+        try { await worktreeReferences.SaveIssueAsync(workspacePath, worktreePath, dialog.Issue); await UpdateWorktreeReferencesAsync(); }
+        catch (Exception exception) { IssueReferenceText.Text = $"Could not save issue reference: {exception.Message}"; }
+    }
+
+    private async void RemoveMarkdown_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null || ReferenceWorkspacePath is not { } workspacePath) return;
+        await worktreeReferences.RemoveMarkdownAsync(workspacePath, ContextEntry(sender)?.Path ?? project.ProjectFolder);
+        await UpdateWorktreeReferencesAsync();
+    }
+
+    private async void RemoveIssue_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null || ReferenceWorkspacePath is not { } workspacePath) return;
+        await worktreeReferences.RemoveIssueAsync(workspacePath, ContextEntry(sender)?.Path ?? project.ProjectFolder);
+        await UpdateWorktreeReferencesAsync();
+    }
+
+    private async void OpenMarkdown_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null || ReferenceWorkspacePath is not { } workspacePath) return;
+        var markdown = (await worktreeReferences.ReadAsync(workspacePath, ContextEntry(sender)?.Path ?? project.ProjectFolder)).MarkdownPath;
+        if (markdown is null || !File.Exists(markdown)) { MarkdownReferenceText.Text = "Choose or locate a Markdown file before opening it."; return; }
+        try { OpenInVsCode(markdown); }
+        catch (Exception exception) { MarkdownReferenceText.Text = $"Could not open Markdown in VS Code: {exception.Message}"; }
+    }
+
+    private async void OpenIssue_Click(object sender, RoutedEventArgs e)
+    {
+        if (project is null || ReferenceWorkspacePath is not { } workspacePath) return;
+        var issue = (await worktreeReferences.ReadAsync(workspacePath, ContextEntry(sender)?.Path ?? project.ProjectFolder)).Issue;
+        if (issue is null) { IssueReferenceText.Text = "Add a GitHub issue before opening it."; return; }
+        try { _ = Process.Start(new ProcessStartInfo(issue.Url) { UseShellExecute = true }) ?? throw new InvalidOperationException("The default browser could not be started."); }
+        catch (Exception exception) { IssueReferenceText.Text = $"Could not open GitHub issue: {exception.Message}"; }
     }
 
     private static string DescribeWorkspaceOpenFailure(Exception exception) => exception switch
@@ -1022,8 +1129,9 @@ public partial class MainWindow : Window
     private void MoveSidebarLeft_Click(object sender, RoutedEventArgs e) => ApplySidebarSide(SidebarSide.Left);
     private void ApplySidebarSide(SidebarSide side)
     {
-        if (side == SidebarSide.Right) { Grid.SetColumn(WorktreeSidebar, 1); Grid.SetColumn(TerminalGrid, 0); SidebarColumn.Width = new GridLength(1, GridUnitType.Star); TerminalColumn.Width = new GridLength(250); }
-        else { Grid.SetColumn(WorktreeSidebar, 0); Grid.SetColumn(TerminalGrid, 1); SidebarColumn.Width = new GridLength(250); TerminalColumn.Width = new GridLength(1, GridUnitType.Star); }
+        if (side == SidebarSide.Right) { Grid.SetColumn(WorktreeSidebar, 2); Grid.SetColumn(TerminalGrid, 0); SidebarColumn.Width = new GridLength(1, GridUnitType.Star); TerminalColumn.Width = new GridLength(270); }
+        else { Grid.SetColumn(WorktreeSidebar, 0); Grid.SetColumn(TerminalGrid, 2); SidebarColumn.Width = new GridLength(270); TerminalColumn.Width = new GridLength(1, GridUnitType.Star); }
+        Grid.SetColumn(SidebarSplitter, 1);
         sidebarPreference.Write(side);
     }
 
