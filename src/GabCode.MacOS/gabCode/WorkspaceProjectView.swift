@@ -303,6 +303,12 @@ struct WorkspaceProjectView: View {
                         .accessibilityLabel("\(worktree.path.lastPathComponent), \(worktree.branch)\(selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL ? ", selected" : "")\((terminalRegistry.existingPresentation(for: worktree.path)?.activeTerminalCount ?? 0) > 0 ? ", running terminals" : "")\(worktree.availability == .unavailable ? ", unavailable" : "")")
                         .tag(worktree.path)
                         .contextMenu {
+                            Button("Close Workspace…") { requestCloseWorkspace(worktree) }
+                                .disabled(hasConflictingWorkspaceOperation || terminalRegistry.existingPresentation(for: worktree.path)?.isMutationLocked == true)
+                                .accessibilityLabel("Close Workspace for \(worktree.path.lastPathComponent), \(worktree.branch), \(worktree.path.path)")
+                            Button("Open in VS Code") { openInVSCode(worktree.path) }
+                            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([worktree.path]) }
+                            Divider()
                             Button("Create Worktree from \(controller.descriptorBranch ?? "Unknown")") {
                                 presentCreation(.workspaceSelectedBranch, selectedBranch: nil)
                             }
@@ -313,13 +319,7 @@ struct WorkspaceProjectView: View {
                                 presentCreation(.existingLocalBranch(""), selectedBranch: nil)
                             }
                             Divider()
-                            Button("Close Workspace…") { requestCloseWorkspace(worktree) }
-                                .disabled(hasConflictingWorkspaceOperation || terminalRegistry.existingPresentation(for: worktree.path)?.isMutationLocked == true)
-                                .accessibilityLabel("Close Workspace for \(worktree.path.lastPathComponent), \(worktree.branch), \(worktree.path.path)")
-                            Button("Open in VS Code") { openInVSCode(worktree.path) }
-                            Divider()
                             referenceContextActions(for: worktree.path)
-                            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([worktree.path]) }
                             if !worktree.isPrimary {
                                 Divider()
                                 Button("Delete Worktree ‘\(worktree.branch)’…", role: .destructive) {
