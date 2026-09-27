@@ -43,5 +43,7 @@ Read the approved sprint record and the task-named files before changing code.
 - Do not use filesystem-backed orchestration state unless a human explicitly changes this repository policy.
 - Keep `.pi/tmp/` drafts and tool runtime state untracked.
 - Never close GitHub issues or apply final completion labels; prepare evidence for human disposition.
+- Shared requirements, fixtures, and related configuration land together through one reviewed PR to mainline before dependent platform implementation. Reuse the existing shared feature branch; do not require fixture-only branches, manual SHA handoffs, or routine cherry-picks. Agents own synchronization using the shared-first workflow in `TEAM-ORCHESTRATION.md`.
+- Before dependent Windows/macOS increments, fetch mainline and rebase the platform feature branch onto it while preserving uncommitted work. Record each platform's synchronization and conformance-test status in the parent issue; do not claim the other machine is updated without evidence.
 - Never push directly to `main` or `master`. Use a feature branch and follow repository rebase-only synchronization rules.
 - Passing tests and commits are implementation evidence, not human acceptance.
