@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "clean-worktree",
+      "kind": "working",
+      "given": {"worktreeId": "wtA", "head": "feature1", "status": []},
+      "expected": {"entries": [], "workingMessage": "Working tree clean"}
+    },
+    {
+      "id": "index-and-worktree-both-modified",
+      "kind": "working",
+      "given": {"worktreeId": "wtA", "head": "feature1", "status": [{"xy": "MM", "path": "src/app.cs"}]},
+      "expected": {"entries": [
+        {"group": "Staged", "path": "src/app.cs", "status": "modified", "identity": "wtA:staged:src/app.cs", "comparison": "HEAD → index"},
+        {"group": "Unstaged", "path": "src/app.cs", "status": "modified", "identity": "wtA:unstaged:src/app.cs", "comparison": "index → worktree"}
+      ]}
+    },
+    {
+      "id": "staged-add-and-unstaged-delete",
+      "kind": "working",
+      "given": {"worktreeId": "wtA", "head": "feature1", "status": [{"xy": "A.", "path": "new ünicode.txt"}, {"xy": ".D", "path": "old.txt"}]},
+      "expected": {"entries": [
+        {"group": "Staged", "path": "new ünicode.txt", "status": "added", "identity": "wtA:staged:new ünicode.txt", "comparison": "HEAD → index"},
+        {"group": "Unstaged", "path": "old.txt", "status": "deleted", "identity": "wtA:unstaged:old.txt", "comparison": "index → worktree"}
+      ]}
+    },
+    {
+      "id": "staged-rename-with-worktree-edit",
+      "kind": "working",
+      "given": {"worktreeId": "wtA", "head": "feature1", "status": [{"xy": "RM", "oldPath": "old name.txt", "path": "new name.txt"}]},
+      "expected": {"entries": [
+        {"group": "Staged", "path": "new name.txt", "oldPath": "old name.txt", "status": "renamed", "identity": "wtA:staged:old name.txt→new name.txt", "comparison": "HEAD → index"},
+        {"group": "Unstaged", "path": "new name.txt", "status": "modified", "identity": "wtA:unstaged:new name.txt", "comparison": "index → worktree"}
+      ]}
+    },
+    {
+      "id": "nested-untracked-and-ignored",
+      "kind": "working",
+      "given": {"worktreeId": "wtA", "head": "feature1", "status": [{"xy": "??", "path": "nested/one.txt"}, {"xy": "??", "path": "nested/deeper/two.txt"}, {"xy": "!!", "path": "build/ignored.log"}]},
+      "expected": {"entries": [
+        {"group": "Unstaged", "path": "nested/deeper/two.txt", "status": "untracked", "identity": "wtA:unstaged:nested/deeper/two.txt", "comparison": "empty → worktree"},
+        {"group": "Unstaged", "path": "nested/one.txt", "status": "untracked", "identity": "wtA:unstaged:nested/one.txt", "comparison": "empty → worktree"}
+      ]}
+    },
+    {
+      "id": "unmerged-conflict-only-once",
+      "kind": "working",
+      "given": {"worktreeId": "wtA", "head": "feature1", "status": [{"xy": "UU", "path": "conflicted.txt"}]},
+      "expected": {"entries": [
+        {"group": "Unstaged", "path": "conflicted.txt", "status": "conflicted", "identity": "wtA:conflict:conflicted.txt", "comparison": "unmerged stages", "state": "conflict"}
+      ]}
+    },
+    {
+      "id": "add-add-conflict-only-once",
+      "kind": "working",
+      "given": {"worktreeId": "wtA", "head": "feature1", "status": [{"xy": "AA", "path": "shared.txt"}]},
+      "expected": {"entries": [
+        {"group": "Unstaged", "path": "shared.txt", "status": "conflicted", "identity": "wtA:conflict:shared.txt", "comparison": "unmerged stages", "state": "conflict"}
+      ]}
+    },
+    {
+      "id": "linear-branch-unique-history",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": "feature2", "mainReachable": ["main0"], "commits": [
+        {"id": "main0", "parents": [], "time": 1}, {"id": "feature1", "parents": ["main0"], "time": 2}, {"id": "feature2", "parents": ["feature1"], "time": 3}
+      ]},
+      "expected": {"unique": ["feature2", "feature1"], "excluded": ["main0"], "rowMetadata": ["fullSha", "subject", "author", "timestamp", "fileSummary", "parents"], "initialFileListsLoaded": false}
+    },
+    {
+      "id": "selected-head-is-main",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": "main0", "mainReachable": ["main0"], "commits": [{"id": "main0", "parents": [], "time": 1}]},
+      "expected": {"unique": [], "historyMessage": "No commits unique to this branch", "initialFileListsLoaded": false}
+    },
+    {
+      "id": "merge-is-visible-first-parent-basis",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": "merge", "mainReachable": ["main0"], "commits": [
+        {"id": "main0", "parents": [], "time": 1}, {"id": "first", "parents": ["main0"], "time": 3},
+        {"id": "second", "parents": ["main0"], "time": 2}, {"id": "merge", "parents": ["first", "second"], "time": 4}
+      ]},
+      "expected": {"unique": ["merge", "second", "first"], "excluded": ["main0"], "mergeLabel": "Compared with first parent", "mergeComparison": "first → merge", "initialFileListsLoaded": false}
+    },
+    {
+      "id": "parent-before-child-by-time-is-still-topological",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": "child", "mainReachable": ["main0"], "commits": [
+        {"id": "main0", "parents": [], "time": 1}, {"id": "parent", "parents": ["main0"], "time": 99}, {"id": "child", "parents": ["parent"], "time": 2}
+      ]},
+      "expected": {"unique": ["child", "parent"], "initialFileListsLoaded": false}
+    },
+    {
+      "id": "root-commit-when-main-is-unrelated",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": "rootA", "mainReachable": ["rootB"], "commits": [
+        {"id": "rootA", "parents": [], "time": 2}, {"id": "rootB", "parents": [], "time": 1}
+      ]},
+      "expected": {"unique": ["rootA"], "rootComparison": "empty tree → rootA", "initialFileListsLoaded": false}
+    },
+    {
+      "id": "missing-configured-main-is-unavailable",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": "feature1", "localMainAvailable": false, "remoteTrackingMainAvailable": true},
+      "expected": {"state": "unavailable", "reason": "configured local main reference unavailable", "unique": null, "staleIfPreviousSnapshot": true}
+    },
+    {
+      "id": "head-unavailable-is-not-clean-history",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": null, "localMainAvailable": true},
+      "expected": {"state": "unavailable", "reason": "selected HEAD unavailable", "unique": null, "staleIfPreviousSnapshot": true}
+    },
+    {
+      "id": "large-history-page-stays-on-ref-snapshot",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": "tip250", "mainHead": "main0", "commitPattern": "tip1..tip250 (single-parent linear chain from main0)", "request": "next page", "firstPageFetched": true},
+      "expected": {"totalUnique": 250, "ordering": "topological newest-first", "pageRule": "bounded incremental rows; no duplicate or skipped SHA across pages at the same tip250/main0 snapshot", "initialFileListsLoaded": false}
+    },
+    {
+      "id": "history-page-invalidated-by-main-move",
+      "kind": "history",
+      "given": {"worktreeId": "wtA", "mainBranch": "trunk", "selectedHead": "tip250", "initialMainHead": "main0", "nextPageMainHead": "main1", "firstPageFetched": true},
+      "expected": {"state": "restart", "pageRule": "discard pagination cursor and recompute unique rows against main1; do not append old-snapshot rows"}
+    },
+    {
+      "id": "staged-one-sided-add-diff",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "target": "wtA:staged:new.txt", "fileKind": "text", "currentFileExists": true},
+      "expected": {"state": "patch", "comparison": "HEAD → index", "oldPath": null, "path": "new.txt", "readOnly": true, "openCurrentFileInVsCode": true}
+    },
+    {
+      "id": "unstaged-deletion-is-one-sided",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "target": "wtA:unstaged:removed.txt", "fileKind": "text", "currentFileExists": false},
+      "expected": {"state": "patch", "comparison": "index → worktree", "path": "removed.txt", "readOnly": true, "openCurrentFileInVsCode": false}
+    },
+    {
+      "id": "untracked-content-compared-with-empty",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "target": "wtA:unstaged:notes.txt", "fileKind": "untracked", "currentFileExists": true},
+      "expected": {"state": "patch", "comparison": "empty → worktree", "path": "notes.txt", "readOnly": true, "openCurrentFileInVsCode": true}
+    },
+    {
+      "id": "commit-rename-keeps-both-paths",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "commit": "feature2", "firstParent": "feature1", "oldPath": "old.txt", "path": "new.txt", "status": "renamed", "currentFileExists": true},
+      "expected": {"state": "patch", "identity": "wtA:commit:feature2:old.txt→new.txt", "comparison": "feature1 → feature2", "oldPath": "old.txt", "path": "new.txt", "readOnly": true, "openCurrentFileInVsCode": true}
+    },
+    {
+      "id": "merge-file-diff-compares-first-parent",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "commit": "merge", "parents": ["first", "second"], "path": "merged.txt", "currentFileExists": true},
+      "expected": {"state": "patch", "comparison": "first → merge", "comparisonLabel": "Compared with first parent", "readOnly": true, "openCurrentFileInVsCode": true}
+    },
+    {
+      "id": "root-file-diff-compares-empty-tree",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "commit": "rootA", "parents": [], "path": "initial.txt", "currentFileExists": true},
+      "expected": {"state": "patch", "comparison": "empty tree → rootA", "readOnly": true, "openCurrentFileInVsCode": true}
+    },
+    {
+      "id": "historical-deletion-does-not-open-current-file",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "commit": "feature2", "parents": ["feature1"], "path": "removed.txt", "status": "deleted", "currentFileExists": false},
+      "expected": {"state": "patch", "comparison": "feature1 → feature2", "readOnly": true, "openCurrentFileInVsCode": false}
+    },
+    {
+      "id": "conflict-is-not-normal-patch",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "target": "wtA:conflict:conflicted.txt", "fileKind": "unmerged"},
+      "expected": {"state": "conflict", "comparison": "unmerged stages", "readOnly": true}
+    },
+    {
+      "id": "binary-diff-is-explicit",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "target": "wtA:staged:picture.png", "fileKind": "binary"},
+      "expected": {"state": "binary", "comparison": "HEAD → index", "readOnly": true}
+    },
+    {
+      "id": "oversized-diff-is-explicit",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "target": "wtA:unstaged:big.txt", "fileKind": "text", "exceedsConfiguredPatchLimit": true},
+      "expected": {"state": "oversized", "comparison": "index → worktree", "readOnly": true}
+    },
+    {
+      "id": "truncated-and-timed-out-are-not-complete-patches",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "target": "wtA:staged:slow.txt", "attempts": ["output ceiling exceeded", "process timeout"]},
+      "expected": {"statesInOrder": ["truncated", "timeout"], "completePatchDisplayed": false, "readOnly": true}
+    },
+    {
+      "id": "unavailable-git-diff-preserves-error",
+      "kind": "diff",
+      "given": {"worktreeId": "wtA", "target": "wtA:staged:file.txt", "gitResult": "executable unavailable"},
+      "expected": {"state": "unavailable", "completePatchDisplayed": false, "readOnly": true}
+    },
+    {
+      "id": "unrelated-refresh-preserves-review-context",
+      "kind": "reconcile",
+      "given": {"worktreeId": "wtA", "before": {"selected": "wtA:commit:feature2:old.txt→new.txt", "expandedCommits": ["feature2"], "documentOpen": true}, "after": {"history": ["feature2", "feature1"], "filesAtFeature2": ["old.txt→new.txt"], "unrelatedWorkingFileChanged": true}},
+      "expected": {"selected": "wtA:commit:feature2:old.txt→new.txt", "expandedCommits": ["feature2"], "documentOpen": true, "stale": false, "stealsFocus": false}
+    },
+    {
+      "id": "selected-file-disappears-on-refresh",
+      "kind": "reconcile",
+      "given": {"worktreeId": "wtA", "before": {"selected": "wtA:unstaged:file.txt", "documentOpen": true}, "after": {"workingTargets": []}},
+      "expected": {"selected": null, "documentOpen": false, "terminalRestoreTarget": "terminalPreviouslyInMain", "announcesInvalidation": true}
+    },
+    {
+      "id": "rewritten-history-drops-old-selection",
+      "kind": "reconcile",
+      "given": {"worktreeId": "wtA", "before": {"selected": "wtA:commit:oldSha:file.txt", "expandedCommits": ["oldSha"], "documentOpen": true}, "after": {"history": ["newSha"]}},
+      "expected": {"selected": null, "expandedCommits": [], "documentOpen": false, "announcesInvalidation": true}
+    },
+    {
+      "id": "query-failure-retains-stale-snapshot",
+      "kind": "reconcile",
+      "given": {"worktreeId": "wtA", "before": {"workingTargets": ["wtA:staged:file.txt"], "history": ["feature2"], "stale": false}, "after": {"gitResult": "failure"}},
+      "expected": {"workingTargets": ["wtA:staged:file.txt"], "history": ["feature2"], "stale": true, "refreshAvailable": true, "errorVisible": true}
+    },
+    {
+      "id": "switch-worktree-rejects-late-result",
+      "kind": "reconcile",
+      "given": {"before": {"worktreeId": "wtA", "selected": "wtA:unstaged:file.txt", "documentOpen": true}, "after": {"selectedWorktreeId": "wtB", "lateResultFor": "wtA", "wtBHasSameRelativePath": true}},
+      "expected": {"visibleWorktreeId": "wtB", "selected": null, "documentOpen": false, "oldResultApplied": false, "terminalRestoreTarget": "wtB:selectedWorktreeTerminalLayout"}
+    },
+    {
+      "id": "superseded-generation-cannot-overwrite-new",
+      "kind": "reconcile",
+      "given": {"worktreeId": "wtA", "before": {"generation": 1, "history": ["oldSha"]}, "after": {"newerGeneration": 2, "newResult": ["newSha"], "lateOlderResult": ["oldSha"]}},
+      "expected": {"history": ["newSha"], "oldResultApplied": false}
+    },
+    {
+      "id": "watcher-overflow-recovers-from-focus-or-explicit-refresh",
+      "kind": "reconcile",
+      "given": {"worktreeId": "wtA", "before": {"stale": false}, "after": {"watcherResult": "overflow", "fallbackTriggers": ["focus", "periodic", "explicit Refresh"]}},
+      "expected": {"errorVisible": true, "refreshAvailable": true, "requeryGitOnFallback": true, "staleUntilRequerySucceeds": true}
+    }
+  ]
+}
