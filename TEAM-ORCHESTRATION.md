@@ -197,6 +197,18 @@ Record the configured backend in the epic issue:
 - Durable product, architecture, migration, or API documentation may still live under `docs/` when it is a real deliverable rather than sprint status.
 - **Never close GitHub issues. Never apply final completion/disposition labels such as `done`, `complete`, or `shipped`.** Agents may only post final summary / ready-for-human-disposition comments and update non-final progress markers in the issue body/title when requested by the workflow.
 
+### Shared-first synchronization for native platform work
+
+Use the mainline (`main`, or `master` where applicable) as the distribution point for shared requirements, fixtures, and relevant orchestration configuration. GitHub Issues remains the source of execution state; a local commit or an issue attachment does not make shared files available to the other machine.
+
+1. **One shared prerequisite PR.** Keep a feature's PRD, conformance fixtures, and related shared configuration together in one reviewable PR to mainline. Reuse its existing feature branch when suitable; do not create a fixture-only branch merely because it contains both a PRD and fixtures. Apply the normal review-size checkpoints if this scope grows.
+2. **Merge before dependent implementation.** Obtain the usual review and human merge authorization, then land the shared PR through the hosting provider. Never push directly to mainline. Merging this prerequisite does not approve or accept either platform implementation.
+3. **Platform branches start from updated mainline.** Before each dependent implementation increment, the team-lead fetches mainline and rebases the platform feature branch onto it, preserving uncommitted work with autostash or an explicit stash. Never merge mainline into a feature branch. After a rebase, any authorized update to a previously pushed feature branch uses `--force-with-lease`, never plain `--force`.
+4. **Shared behavior changes use the same path.** Update requirements/fixtures together in a shared PR first, identify affected Windows/macOS tasks in the parent issue, and have each platform consume the merged revision and rerun its own conformance tests. Do not silently fork the expected behavior in a platform branch. Unaffected work may continue while the shared update is reviewed.
+5. **Agents own synchronization.** Record the shared PR link, whether it is merged, and each platform's synchronization/test status in the existing parent issue. Capture SHAs as evidence, but do not require the user to distribute SHAs, copy files, or routinely cherry-pick between platform branches. No extra tracking issue or file is needed. If another machine cannot be updated from the current session, record it as pending for that machine's team-lead preflight rather than claiming it is synchronized.
+
+The default flow is **shared PR → mainline → independently rebased Windows and macOS branches**. Separate platform implementations and target-OS evidence remain mandatory. A different dependency topology requires an explicit human decision. Agents handle the mechanics within granted Git permissions; this rule does not grant blanket permission to push or merge PRs.
+
 ### Filesystem Mode (not enabled in this repository)
 
 The following layout is retained only as portability guidance if a future explicit policy change enables filesystem state. Do not create these orchestration files under the current repository policy:

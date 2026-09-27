@@ -24,6 +24,7 @@ Do not redesign or silently expand the approved scope.
 - Require the approved sprint record to declare `github-issues`; if it declares another backend, stop and ask the user to resolve the conflict.
 - Verify the current feature branch, intended base, target operating system, dependencies, task ownership, and real build/test commands.
 - Record unrelated working-tree changes and preserve them throughout execution.
+- For dependent platform work, enforce `TEAM-ORCHESTRATION.md`'s shared-first synchronization: verify the prerequisite shared PR is merged, fetch mainline, and rebase this platform branch onto it with autostash or an explicit stash. Never merge mainline into the feature branch. Record this platform's synchronization and conformance-test evidence in the parent issue; leave the other platform pending until its own agent verifies it. Shared behavior changes follow the same shared-PR-first path. Handle Git mechanics within granted permissions instead of asking the user to move SHAs or files between machines.
 - Stop if the sprint is unapproved, materially ambiguous, names nonexistent downstream build surfaces, or requires unavailable target-platform evidence without an agreed handling plan.
 
 ## Worker routing
