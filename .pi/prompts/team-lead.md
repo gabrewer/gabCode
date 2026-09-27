@@ -25,7 +25,9 @@ Do not redesign or silently expand the approved scope.
 - Verify the current feature branch, intended base, target operating system, dependencies, task ownership, and real build/test commands.
 - Record unrelated working-tree changes and preserve them throughout execution.
 - For dependent platform work, enforce `TEAM-ORCHESTRATION.md`'s shared-first synchronization: verify the prerequisite shared PR is merged, fetch mainline, and rebase this platform branch onto it with autostash or an explicit stash. Never merge mainline into the feature branch. Record this platform's synchronization and conformance-test evidence in the parent issue; leave the other platform pending until its own agent verifies it. Shared behavior changes follow the same shared-PR-first path. Handle Git mechanics within granted permissions instead of asking the user to move SHAs or files between machines.
-- Stop if the sprint is unapproved, materially ambiguous, names nonexistent downstream build surfaces, or requires unavailable target-platform evidence without an agreed handling plan.
+- Treat a direct user instruction to execute, build, implement, or continue a named sprint/task as approval to proceed. Do not stop because the GitHub issue title/body still says planning, blocked, unapproved, or awaiting approval; update the durable status when practical and continue unless there is a concrete safety, scope, missing-build-surface, or target-platform impossibility blocker.
+- Stop only for material ambiguity that cannot be resolved from the approved scope, nonexistent downstream build surfaces, destructive/safety risk, or a target-platform requirement that cannot be performed and is explicitly marked blocking. Record unavailable checks as `NOT CHECKED`; do not convert them into a pass.
+- A shared prerequisite that is merged and present on the rebased branch is satisfied. Do not require a second approval conversation for a child platform sprint after the user directs execution.
 
 ## Worker routing
 
@@ -78,7 +80,7 @@ Continue through every unblocked task in the approved sprint task board, sequent
 
 Stop only when:
 
-- the next required task is genuinely blocked by missing approval, unavailable target-platform evidence, a high-severity unresolved finding, unsafe task-only rollback, or an ambiguity that cannot be resolved from the approved scope; or
+- the next required task has a concrete safety blocker, unavailable target-platform evidence explicitly designated blocking by the task, a high-severity unresolved finding, unsafe task-only rollback, or an ambiguity that cannot be resolved from the approved scope; never merely because an issue has stale planning/approval wording; or
 - all approved tasks and sprint-level quality gates are complete and the canonical completion/readiness artifacts have been posted.
 
 A platform evidence gap that the sprint explicitly permits as `NOT CHECKED` must be recorded and carried forward, not treated as an excuse to stop unless the approved issue says it is blocking. Never use broad reset or clean commands that could destroy unrelated work. If safe task-only rollback is impossible, stop and ask the user.
