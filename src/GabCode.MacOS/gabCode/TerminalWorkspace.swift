@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-enum TerminalWorkspaceTerminal: Equatable {
+enum TerminalWorkspaceTerminal: Hashable {
     case terminal1
     case terminal2
 }

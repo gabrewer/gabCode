@@ -32,15 +32,20 @@ struct WorkspaceTerminalStackView: View {
 struct TerminalWorkspaceView: View {
     @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
     @ObservedObject private var presentation: TerminalWorkspacePresentation
+    @ObservedObject private var document: ReadOnlyDiffDocumentState
+    private let reviewService = WorktreeChangeReviewService()
     private let isActive: Bool
 
     init(workingDirectory: URL, font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular), isActive: Bool = true) {
-        _presentation = ObservedObject(wrappedValue: TerminalWorkspacePresentation(workspace: TerminalWorkspace(workingDirectory: workingDirectory, font: font), workingDirectory: workingDirectory))
+        let presentation = TerminalWorkspacePresentation(workspace: TerminalWorkspace(workingDirectory: workingDirectory, font: font), workingDirectory: workingDirectory)
+        _presentation = ObservedObject(wrappedValue: presentation)
+        _document = ObservedObject(wrappedValue: presentation.reviewDocument)
         self.isActive = isActive
     }
 
     init(presentation: TerminalWorkspacePresentation, isActive: Bool = true) {
         _presentation = ObservedObject(wrappedValue: presentation)
+        _document = ObservedObject(wrappedValue: presentation.reviewDocument)
         self.isActive = isActive
     }
 
@@ -49,21 +54,33 @@ struct TerminalWorkspaceView: View {
             workspaceHeader
             Divider()
             VSplitView {
-                TerminalRegionView(
-                    presentation: presentation,
-                    terminal: presentation.mainTerminal,
-                    placementName: "Main",
-                    placementIdentifier: "main-terminal-label"
-                )
+                Group {
+                    if document.isOpen {
+                        readOnlyDiffSurface
+                    } else {
+                        TerminalRegionView(
+                            presentation: presentation,
+                            terminal: presentation.mainTerminal,
+                            placementName: "Main",
+                            placementIdentifier: "main-terminal-label"
+                        )
+                    }
+                }
                 .frame(minHeight: 220, idealHeight: 390)
                 .background(NativeSplitInitialPosition(mainFraction: 2.0 / 3.0))
 
-                TerminalRegionView(
-                    presentation: presentation,
-                    terminal: presentation.bottomTerminal,
-                    placementName: "Bottom",
-                    placementIdentifier: "bottom-terminal-label"
-                )
+                Group {
+                    if document.isOpen {
+                        retainedTerminalTabs
+                    } else {
+                        TerminalRegionView(
+                            presentation: presentation,
+                            terminal: presentation.bottomTerminal,
+                            placementName: "Bottom",
+                            placementIdentifier: "bottom-terminal-label"
+                        )
+                    }
+                }
                 .frame(minHeight: 140, idealHeight: 195)
             }
         }
@@ -78,6 +95,17 @@ struct TerminalWorkspaceView: View {
                 TerminalCommandRouter.shared.disconnect(presentation)
             }
         }
+        .task(id: document.selectedFile?.id) {
+            guard let file = document.selectedFile, isActive else { return }
+            do {
+                let result = try await reviewService.diff(for: file, in: presentation.workingDirectory)
+                guard !Task.isCancelled, document.selectedFile?.id == file.id else { return }
+                document.apply(result)
+            } catch {
+                guard !Task.isCancelled, document.selectedFile?.id == file.id else { return }
+                document.fail(error.localizedDescription)
+            }
+        }
         .onReceive(fontPreference.$effectiveSelection) { _ in
             if isActive { presentation.apply(font: fontPreference.effectiveFont) }
         }
@@ -87,6 +115,74 @@ struct TerminalWorkspaceView: View {
         .onDisappear {
             TerminalCommandRouter.shared.disconnect(presentation)
         }
+    }
+
+    @ViewBuilder
+    private var readOnlyDiffSurface: some View {
+        if let file = document.selectedFile {
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
+                            .lineLimit(1).truncationMode(.middle).font(.headline)
+                        Text("\(file.status.rawValue.capitalized) · \(file.comparison)\(file.commitSHA.map { " · \($0.prefix(12))" } ?? "")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let currentFile = validCurrentFile(for: file) {
+                        Button("Open in VS Code") { openCurrentFileInVSCode(currentFile) }
+                            .accessibilityIdentifier("review-open-current-file-vscode")
+                    }
+                    Button("Close Diff") { presentation.closeReviewDocument() }
+                        .accessibilityIdentifier("close-review-diff")
+                }.padding(8)
+                Divider()
+                if document.isLoading {
+                    ProgressView("Loading read-only diff")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = document.errorMessage {
+                    ContentUnavailableView("Diff unavailable", systemImage: "doc.text.magnifyingglass", description: Text(error))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ReadOnlyUnifiedDiffView(text: document.content, requestFocus: document.wantsFocus) {
+                        document.didFocus()
+                    }
+                    .accessibilityIdentifier("read-only-unified-diff")
+                }
+            }
+            .background(ReadOnlyDiffAnnouncement(message: document.isLoading
+                ? "Loading diff for \(file.path)"
+                : document.errorMessage.map { "Diff unavailable for \(file.path). \($0)" }
+                    ?? "Read-only diff ready for \(file.path)"))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Read-only diff for \(file.path), \(file.comparison)")
+            .accessibilityIdentifier("review-diff-document")
+        }
+    }
+
+    private func validCurrentFile(for file: ReviewFile) -> URL? {
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode") != nil else { return nil }
+        return ReviewCurrentFileLocator.existingFile(for: file, selectedWorktree: presentation.workingDirectory)
+    }
+
+    private func openCurrentFileInVSCode(_ url: URL) {
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode"),
+              let file = document.selectedFile, validCurrentFile(for: file) == url else { return }
+        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    private var retainedTerminalTabs: some View {
+        TabView(selection: Binding(
+            get: { document.selectedBottomTerminal },
+            set: { document.selectBottom($0) }
+        )) {
+            TerminalRegionView(presentation: presentation, terminal: .terminal1, placementName: "Bottom tab", placementIdentifier: "terminal-1-bottom-tab")
+                .tabItem { Text("Terminal 1") }.tag(TerminalWorkspaceTerminal.terminal1)
+            TerminalRegionView(presentation: presentation, terminal: .terminal2, placementName: "Bottom tab", placementIdentifier: "terminal-2-bottom-tab")
+                .tabItem { Text("Terminal 2") }.tag(TerminalWorkspaceTerminal.terminal2)
+        }
+        .accessibilityLabel("Retained terminal tabs")
+        .accessibilityIdentifier("review-terminal-tabs")
     }
 
     private var workspaceHeader: some View {
