@@ -19,6 +19,8 @@ Load only the relevant platform, concurrency, native-testing, accessibility, or 
 
 ## Triage
 
+Only raise review items that materially affect the implementation.
+
 For each actionable finding:
 
 - confirm it is reproducible and critical/high severity;
