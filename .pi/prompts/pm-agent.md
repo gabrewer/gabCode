@@ -38,6 +38,8 @@ When the `activate_orchestration_resource` tool is available, use it before each
 
 ## Planning standard
 
+Only raise review items that materially affect the implementation.
+
 - Do not invent source projects, test projects, package paths, commands, issue numbers, scripts, or task mappings.
 - For a greenfield workstream, make establishing a real build/test/launch surface the first increment before planning dependent work.
 - Keep Windows and macOS implementation in separate platform increments with target-machine evidence.
