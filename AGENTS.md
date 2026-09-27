@@ -39,11 +39,12 @@ Read the approved sprint record and the task-named files before changing code.
 
 - This repository's orchestration state backend is always `github-issues`.
 - Planning and execution must use `github-issues` without prompting for a backend.
+- A direct user instruction to execute, build, implement, continue, or review a named sprint/task is sufficient authorization for that action. Do not require a second approval conversation or treat stale issue wording such as `planning`, `blocked`, or `unapproved` as a blocker; reconcile the issue status as part of the work when practical.
 - Create one GitHub sprint/control issue per PRD by default. For a genuinely cross-platform PRD, use that parent control sprint plus linked Windows and macOS implementation sprints; the parent owns combined acceptance/parity and neither child proves the other. Do not create empty triads for platform-only, documentation-only, or insufficiently shaped work. Record every split's reason/link and apply the canonical review-size checkpoints.
 - Do not use filesystem-backed orchestration state unless a human explicitly changes this repository policy.
 - Keep `.pi/tmp/` drafts and tool runtime state untracked.
 - Never close GitHub issues or apply final completion labels; prepare evidence for human disposition.
 - Shared requirements, fixtures, and related configuration land together through one reviewed PR to mainline before dependent platform implementation. Reuse the existing shared feature branch; do not require fixture-only branches, manual SHA handoffs, or routine cherry-picks. Agents own synchronization using the shared-first workflow in `TEAM-ORCHESTRATION.md`.
-- Before dependent Windows/macOS increments, fetch mainline and rebase the platform feature branch onto it while preserving uncommitted work. Record each platform's synchronization and conformance-test status in the parent issue; do not claim the other machine is updated without evidence.
+- Before dependent Windows/macOS increments, fetch mainline and rebase the platform feature branch onto it while preserving uncommitted work. Record each platform's synchronization and conformance-test status in the parent issue; do not claim the other machine is updated without evidence. Once shared prerequisites are merged and present on the rebased branch, both platform increments may proceed in parallel or sequence from the user's instruction without another approval gate.
 - Never push directly to `main` or `master`. Use a feature branch and follow repository rebase-only synchronization rules.
 - Passing tests and commits are implementation evidence, not human acceptance.
