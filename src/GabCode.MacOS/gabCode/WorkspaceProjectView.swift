@@ -118,6 +118,7 @@ struct WorkspaceProjectView: View {
                     if let previousPath,
                        previousPath.standardizedFileURL != path?.standardizedFileURL {
                         closedWorktreePaths.remove(previousPath.standardizedFileURL)
+                        terminalRegistry.existingPresentation(for: previousPath)?.closeReviewDocument(restoreFocus: false)
                     }
                     if let path {
                         controller.persistSelectedWorktree(path: path)
