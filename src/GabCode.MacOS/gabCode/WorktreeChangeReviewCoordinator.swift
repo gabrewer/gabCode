@@ -107,7 +107,9 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
                     selectedPresentation?.closeReviewDocument(restoreFocus: true)
                     self.selectedFile = nil
                     notice = "The selected diff is no longer available after Git changed."
-                } else {
+                } else if selectedFile.group != .commit || selectedPresentation?.reviewDocument.hasLoadedContent != true {
+                    // Historical patches are immutable, but a failed/unavailable load is retryable.
+                    // Working-file diffs can change without their row identity changing.
                     selectedPresentation?.reviewDocument.reload()
                 }
             }
