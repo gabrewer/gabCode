@@ -248,6 +248,55 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testBranchHistoryUsesCompactSingleLineRowsWithAccessibleExpandedDetails() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        let subjects = (1...4).map { "Compact history \($0): a deliberately long subject that must not wrap onto multiple lines" }
+        for (index, subject) in subjects.enumerated() {
+            try Data("version \(index)\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+            try run(git, ["-C", secondary.path, "add", "history.txt"])
+            try run(git, ["-C", secondary.path, "-c", "user.name=Reviewer", "-c", "user.email=reviewer@example.invalid", "commit", "-m", subject])
+        }
+        let head = try run(git, ["-C", secondary.path, "rev-parse", "HEAD"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+        let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+        XCTAssertTrue(secondaryRow.waitForExistence(timeout: 12))
+        secondaryRow.click()
+        let first = app.buttons["review-commit-\(head)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 12))
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-"))
+        XCTAssertEqual(rows.count, 4)
+        let second = rows.element(boundBy: 1)
+        let refresh = app.buttons["refresh-change-review"]
+        XCTAssertLessThanOrEqual(first.frame.maxX, refresh.frame.maxX + 10, "The row must fit the actual sidebar width")
+        XCTAssertLessThanOrEqual(first.frame.height, 42, "Collapsed history row should be a compact single line")
+        XCTAssertLessThanOrEqual(second.frame.minY - first.frame.minY, 43, "No per-row metadata block or large divider gap")
+        XCTAssertTrue(first.label.contains(subjects[3]), "Full subject remains available to accessibility when visually truncated")
+        XCTAssertTrue(first.label.contains("Reviewer"))
+        XCTAssertTrue(first.label.contains("HEAD"), "Identify only the actual current tip with a ref badge")
+        XCTAssertTrue(first.label.contains(String(head.prefix(8))), "Collapsed accessibility retains the abbreviated SHA")
+        XCTAssertFalse(second.label.contains("HEAD"))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Compact branch history, four collapsed commits"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let details = app.staticTexts["review-commit-details-\(head)"]
+        XCTAssertFalse(details.exists, "Metadata belongs in expanded details, not each collapsed row")
+        first.click()
+        XCTAssertTrue(details.waitForExistence(timeout: 8))
+        let detailText = "\(details.label) \(details.value as? String ?? "")"
+        XCTAssertTrue(detailText.contains(String(head.prefix(8))), "Expanded details were: \(details.debugDescription)")
+        XCTAssertTrue(detailText.contains("Reviewer"))
+        XCTAssertTrue(app.buttons["review-file-commit-history.txt"].waitForExistence(timeout: 8))
+        first.click()
+        XCTAssertFalse(details.exists)
+    }
+
+    @MainActor
     func testCleanWorktreeStillOpensCommittedFileFromBranchHistory() throws {
         let fixture = try makeWorkspaceFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
