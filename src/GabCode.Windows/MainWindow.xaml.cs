@@ -29,6 +29,11 @@ public partial class MainWindow : Window
     private readonly TerminalProfileResolver profileResolver;
     private readonly ITerminalExitConfirmationService exitConfirmation;
     private RetainedTerminalLayout? terminalLayout;
+    private readonly WorktreeChangeReviewService reviewService = new();
+    private CancellationTokenSource? diffCancellation;
+    private ReadOnlyDiffView? diffView;
+    private UIElement? diffReturnFocus;
+    private long diffGeneration;
     private WorktreeTerminalRegistry? terminalRegistry;
     private TerminalSessionView? piTerminal;
     private TerminalSessionView? commandsTerminal;
@@ -125,6 +130,7 @@ public partial class MainWindow : Window
 
     private void ActivateProject(ProjectContext nextProject)
     {
+        CloseReviewDiff(restoreFocus: false);
         project = nextProject;
         Title = nextProject.WindowTitle;
         AutomationProperties.SetName(this, Title);
@@ -346,7 +352,73 @@ public partial class MainWindow : Window
 
     private void SwapTerminalsButton_Click(object sender, RoutedEventArgs e)
     {
+        if (terminalLayout?.HasDocument is true) return;
         if (IsPiInMain) ShowCommandsInMain(); else ShowPiInMain();
+    }
+
+    internal async Task OpenReviewDiffAsync(ReviewFile file, UIElement? returnFocus = null)
+    {
+        if (project is null || terminalLayout is null || ClosedWorkspaceSurface.Visibility == Visibility.Visible) return;
+        var worktree = project.ProjectFolder;
+        diffCancellation?.Cancel();
+        diffCancellation?.Dispose();
+        diffCancellation = new CancellationTokenSource();
+        var token = diffCancellation.Token;
+        var generation = ++diffGeneration;
+        diffReturnFocus = returnFocus ?? diffReturnFocus;
+        var comparison = file.Group switch
+        {
+            ReviewGroup.Staged => "HEAD → index",
+            ReviewGroup.Unstaged when file.Status == ReviewStatus.Untracked => "empty → worktree",
+            ReviewGroup.Unstaged when file.Status == ReviewStatus.Conflicted => "unmerged stages",
+            ReviewGroup.Unstaged => "index → worktree",
+            _ => file.Comparison ?? "commit comparison"
+        };
+        var displayPath = file.OldPath is null ? file.Path : file.OldPath + " → " + file.Path;
+        var label = $"{displayPath} — {file.Status} — {comparison}{(file.CommitSha is null ? string.Empty : " — " + file.CommitSha)}";
+        var currentFile = ReadOnlyDiffView.CurrentFile(worktree, file);
+        var view = new ReadOnlyDiffView(label, currentFile);
+        view.CloseRequested += (_, _) => { if (ReferenceEquals(diffView, view)) CloseReviewDiff(); };
+        view.OpenCurrentFileRequested += (_, _) =>
+        {
+            if (!ReferenceEquals(diffView, view) || currentFile is null || project is null ||
+                !WorktreePath.Comparer.Equals(project.ProjectFolder, worktree) || ReadOnlyDiffView.CurrentFile(worktree, file) is null) return;
+            try { OpenInVsCode(currentFile); }
+            catch (Exception exception) { RefreshStatusText.Text = $"Could not open current file in VS Code: {exception.Message}"; }
+        };
+        var tabs = new TabControl { Background = System.Windows.Media.Brushes.Black };
+        var firstTab = new TabItem { Header = "Terminal 1" };
+        var secondTab = new TabItem { Header = "Terminal 2" };
+        AutomationProperties.SetName(firstTab, "First terminal");
+        AutomationProperties.SetName(secondTab, "Second terminal");
+        tabs.Items.Add(firstTab);
+        tabs.Items.Add(secondTab);
+        terminalLayout.OpenDocument(view, terminalLayout.HasDocument ? (TabControl)BottomTerminalRegion.Content : tabs);
+        diffView = view;
+        SwapTerminalsButton.IsEnabled = false;
+        view.FocusDocument();
+        try
+        {
+            var result = await reviewService.GetDiffAsync(worktree, file, token);
+            if (generation == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, worktree)) view.Show(result);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+    }
+
+    private void CloseReviewDiff(bool restoreFocus = true)
+    {
+        ++diffGeneration;
+        diffCancellation?.Cancel();
+        diffCancellation?.Dispose();
+        diffCancellation = null;
+        if (diffView is null) return;
+        diffView = null;
+        terminalLayout?.CloseDocument();
+        SwapTerminalsButton.IsEnabled = terminalLayout is not null;
+        var target = diffReturnFocus;
+        diffReturnFocus = null;
+        if (restoreFocus && target is { IsVisible: true }) target.Focus();
+        else if (restoreFocus) (IsPiInMain ? piTerminal : commandsTerminal)?.FocusTerminal();
     }
 
     private async void RefreshWorktrees_Click(object sender, RoutedEventArgs e) => await RefreshWorktreesAsync();
@@ -662,6 +734,7 @@ public partial class MainWindow : Window
     private void SelectWorktree(string path, string branch)
     {
         if (project is null) return;
+        CloseReviewDiff(restoreFocus: false);
         project = new ProjectContext(project.WorkspaceName, path, project.MainBranch);
         PersistSelectedWorktree(path);
         Title = project.WindowTitle;
@@ -827,6 +900,7 @@ public partial class MainWindow : Window
             worktreeState?.MarkTerminalPairRemoved(path);
             if (WorktreePath.Comparer.Equals(project?.ProjectFolder, path))
             {
+                CloseReviewDiff(restoreFocus: false);
                 MainTerminalRegion.Content = null;
                 BottomTerminalRegion.Content = null;
                 piTerminal = null;
@@ -981,6 +1055,7 @@ public partial class MainWindow : Window
         {
             if (entry.MissingRefreshes >= 2 && terminalRegistry?.Pairs.FirstOrDefault(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path)) is { } orphan)
             {
+                CloseReviewDiff(restoreFocus: false);
                 orphan.Attach(MainTerminalRegion, BottomTerminalRegion);
                 piTerminal = orphan.First;
                 commandsTerminal = orphan.Second;
@@ -1001,6 +1076,7 @@ public partial class MainWindow : Window
             RefreshStatusText.Text = $"Cannot activate worktree because its path is unavailable: {entry.Path}.";
             return;
         }
+        CloseReviewDiff(restoreFocus: false);
         project = new ProjectContext(project!.WorkspaceName, entry.Path, project.MainBranch);
         PersistSelectedWorktree(entry.Path);
         Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
@@ -1143,7 +1219,11 @@ public partial class MainWindow : Window
             RefreshStatusText.Text = "Workspace close is in progress.";
             return;
         }
-        if (allowClose || ActiveTerminalCount == 0) return;
+        if (allowClose || ActiveTerminalCount == 0)
+        {
+            CloseReviewDiff(restoreFocus: false);
+            return;
+        }
         e.Cancel = true;
         if (closeInProgress) return;
 
@@ -1156,6 +1236,7 @@ public partial class MainWindow : Window
         }
 
         closeInProgress = true;
+        CloseReviewDiff(restoreFocus: false);
         IsEnabled = false;
         _ = CloseSessionsAndWindowAsync();
     }
