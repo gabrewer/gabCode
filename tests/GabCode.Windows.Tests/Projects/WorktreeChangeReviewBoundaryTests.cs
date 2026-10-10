@@ -23,6 +23,55 @@ public sealed class WorktreeChangeReviewBoundaryTests
         Assert.DoesNotContain("+other-new", diff.Patch);
     }
 
+    [Theory]
+    [InlineData("Binary files are supported in this documentation.")]
+    [InlineData("GIT binary patch is a line of source text.")]
+    [InlineData("GIT binary patch")]
+    [InlineData("Binary files a/picture.png and b/picture.png differ")]
+    public async Task Marker_phrases_inside_text_hunks_do_not_hide_staged_unstaged_or_commit_patches(string phrase)
+    {
+        using var repo = new Repo(); await repo.Initialize();
+        var service = new WorktreeChangeReviewService();
+        var path = System.IO.Path.Combine(repo.Path, "base.txt");
+        await File.WriteAllTextAsync(path, phrase + "\n");
+        var unstaged = await service.GetDiffAsync(repo.Path, new("base.txt", null, ReviewGroup.Unstaged, ReviewStatus.Modified));
+        Assert.Equal(ReviewDiffState.Patch, unstaged.State);
+        Assert.Contains("+" + phrase, unstaged.Patch);
+        await repo.Git("add", "base.txt");
+        var staged = await service.GetDiffAsync(repo.Path, new("base.txt", null, ReviewGroup.Staged, ReviewStatus.Modified));
+        Assert.Equal(ReviewDiffState.Patch, staged.State);
+        Assert.Contains("+" + phrase, staged.Patch);
+        await repo.Commit("text containing binary marker");
+        var sha = await repo.Git("rev-parse", "HEAD");
+        var committed = await service.GetDiffAsync(repo.Path, new("base.txt", null, ReviewGroup.Commit, ReviewStatus.Modified, sha));
+        Assert.Equal(ReviewDiffState.Patch, committed.State);
+        Assert.Contains("+" + phrase, committed.Patch);
+        await File.WriteAllTextAsync(path, phrase + "\nextra\n");
+        var context = await service.GetDiffAsync(repo.Path, new("base.txt", null, ReviewGroup.Unstaged, ReviewStatus.Modified));
+        Assert.Equal(ReviewDiffState.Patch, context.State);
+        Assert.Contains(" " + phrase, context.Patch);
+        await File.WriteAllTextAsync(path, "replacement\n");
+        var removed = await service.GetDiffAsync(repo.Path, new("base.txt", null, ReviewGroup.Unstaged, ReviewStatus.Modified));
+        Assert.Equal(ReviewDiffState.Patch, removed.State);
+        Assert.Contains("-" + phrase, removed.Patch);
+        await File.WriteAllTextAsync(System.IO.Path.Combine(repo.Path, "untracked.txt"), phrase + "\n");
+        var untracked = await service.GetDiffAsync(repo.Path, new("untracked.txt", null, ReviewGroup.Unstaged, ReviewStatus.Untracked));
+        Assert.Equal(ReviewDiffState.Patch, untracked.State);
+        Assert.Contains("+" + phrase, untracked.Patch);
+    }
+
+    [Fact]
+    public async Task Genuine_binary_file_stays_binary_in_staged_and_unstaged_diffs()
+    {
+        using var repo = new Repo(); await repo.Initialize();
+        var path = System.IO.Path.Combine(repo.Path, "base.txt");
+        await File.WriteAllBytesAsync(path, [1, 0, 2]);
+        var service = new WorktreeChangeReviewService();
+        Assert.Equal(ReviewDiffState.Binary, (await service.GetDiffAsync(repo.Path, new("base.txt", null, ReviewGroup.Unstaged, ReviewStatus.Modified))).State);
+        await repo.Git("add", "base.txt");
+        Assert.Equal(ReviewDiffState.Binary, (await service.GetDiffAsync(repo.Path, new("base.txt", null, ReviewGroup.Staged, ReviewStatus.Modified))).State);
+    }
+
     [Fact]
     public async Task Root_rename_binary_untracked_and_conflict_diff_states_are_explicit()
     {

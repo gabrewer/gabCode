@@ -139,9 +139,15 @@ internal sealed class WorktreeChangeReviewService
                 args.AddRange(["--", file.OldPath ?? file.Path, file.Path]);
                 raw = await RunAsync(worktree, args, token);
             }
-            return raw.Contains("Binary files ", StringComparison.Ordinal) || raw.Contains("GIT binary patch", StringComparison.Ordinal)
-                ? new(ReviewDiffState.Binary, null)
-                : new(ReviewDiffState.Patch, raw);
+            // Git's binary markers are unprefixed diff metadata lines. Hunk lines
+            // begin with '+', '-' or ' ', and must never determine classification.
+            var isBinary = raw.Split('\n').Any(line =>
+            {
+                var metadata = line.TrimEnd('\r');
+                return metadata == "GIT binary patch" ||
+                    metadata.StartsWith("Binary files ", StringComparison.Ordinal) && metadata.EndsWith(" differ", StringComparison.Ordinal);
+            });
+            return isBinary ? new(ReviewDiffState.Binary, null) : new(ReviewDiffState.Patch, raw);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (TimeoutException exception) { return new(ReviewDiffState.Timeout, null, exception.Message); }
