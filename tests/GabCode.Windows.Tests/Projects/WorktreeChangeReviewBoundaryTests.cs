@@ -32,12 +32,14 @@ public sealed class WorktreeChangeReviewBoundaryTests
         var root = await repo.Git("rev-parse", "HEAD");
         var rootFile = Assert.Single(await service.GetCommitFilesAsync(repo.Path, root));
         Assert.Equal(ReviewStatus.Added, rootFile.Status);
+        Assert.Contains("empty tree", rootFile.Comparison);
         Assert.Contains("+base", (await service.GetDiffAsync(repo.Path, rootFile)).Patch);
         await repo.Git("mv", "base.txt", "renamed ü.txt");
         await repo.Commit("renamed");
         var renamed = Assert.Single(await service.GetCommitFilesAsync(repo.Path, await repo.Git("rev-parse", "HEAD")));
         Assert.Equal("base.txt", renamed.OldPath);
         Assert.Equal(ReviewStatus.Renamed, renamed.Status);
+        Assert.Contains("first parent", renamed.Comparison);
         await File.WriteAllBytesAsync(Path.Combine(repo.Path, "binary.bin"), [1, 0, 2]);
         Assert.Equal(ReviewDiffState.Binary, (await service.GetDiffAsync(repo.Path, new("binary.bin", null, ReviewGroup.Unstaged, ReviewStatus.Untracked))).State);
         await File.WriteAllTextAsync(Path.Combine(repo.Path, "new.txt"), "one\n");

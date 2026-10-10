@@ -8,7 +8,7 @@ internal enum ReviewGroup { Staged, Unstaged, Commit }
 internal enum ReviewStatus { Added, Modified, Deleted, Renamed, Untracked, Conflicted, Binary }
 internal enum ReviewDiffState { Patch, Binary, Oversized, Truncated, Conflict, Timeout, Unavailable }
 
-internal sealed record ReviewFile(string Path, string? OldPath, ReviewGroup Group, ReviewStatus Status, string? CommitSha = null)
+internal sealed record ReviewFile(string Path, string? OldPath, ReviewGroup Group, ReviewStatus Status, string? CommitSha = null, string? Comparison = null)
 {
     internal string Identity => $"{Group}:{CommitSha}:{OldPath}:{Path}";
 }
@@ -82,7 +82,8 @@ internal sealed class WorktreeChangeReviewService
             var code = tokens[i++];
             var old = code.StartsWith('R') || code.StartsWith('C') ? tokens[i++] : null;
             var path = tokens[i++];
-            entries.Add(new(path, old, ReviewGroup.Commit, ParseStatusCode(code[0]), sha));
+            entries.Add(new(path, old, ReviewGroup.Commit, ParseStatusCode(code[0]), sha,
+                parents.Length > 1 ? $"Compared with first parent ({before[..Math.Min(8, before.Length)]} → {sha[..Math.Min(8, sha.Length)]})" : "Compared with empty tree (root commit)"));
         }
         return entries.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
     }
