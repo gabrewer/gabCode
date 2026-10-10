@@ -8,6 +8,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
     @Published private(set) var selectedFile: ReviewFile?
     @Published private(set) var revision = 0
     @Published private(set) var content = ""
+    @Published private(set) var hasLoadedContent = false
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var wantsFocus = false
@@ -22,6 +23,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
         revision += 1
         errorMessage = nil
         content = ""
+        hasLoadedContent = false
         isLoading = true
         wantsFocus = true
         selectedBottomTerminal = restoreTerminal ?? mainTerminal
@@ -46,6 +48,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
         guard isOpen else { return }
         isLoading = false
         content = result.text
+        hasLoadedContent = result.state == .patch
         errorMessage = result.state == .patch ? nil : result.text
     }
 
@@ -53,6 +56,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
         guard isOpen else { return }
         isLoading = false
         content = ""
+        hasLoadedContent = false
         errorMessage = message
     }
 
@@ -60,6 +64,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
         selectedFile = nil
         revision += 1
         content = ""
+        hasLoadedContent = false
         errorMessage = nil
         isLoading = false
         wantsFocus = false
@@ -105,7 +110,18 @@ struct ReadOnlyUnifiedDiffView: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? NSTextView else { return }
-        if view.string != text { view.string = text }
+        if view.string != text {
+            let selection = view.selectedRange()
+            let visibleOrigin = scroll.contentView.bounds.origin
+            view.string = text
+            let length = (text as NSString).length
+            let start = min(selection.location, length)
+            view.setSelectedRange(NSRange(location: start, length: min(selection.length, length - start)))
+            if let container = view.textContainer { view.layoutManager?.ensureLayout(for: container) }
+            let maxY = max(0, (scroll.documentView?.frame.height ?? 0) - scroll.contentView.bounds.height)
+            scroll.contentView.scroll(to: NSPoint(x: visibleOrigin.x, y: min(visibleOrigin.y, maxY)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
         focusIfRequested(scroll)
     }
 

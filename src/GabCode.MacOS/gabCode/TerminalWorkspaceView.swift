@@ -138,7 +138,7 @@ struct TerminalWorkspaceView: View {
                         .accessibilityIdentifier("close-review-diff")
                 }.padding(8)
                 Divider()
-                if document.isLoading {
+                if document.isLoading && !document.hasLoadedContent {
                     ProgressView("Loading read-only diff")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let error = document.errorMessage {
@@ -149,6 +149,14 @@ struct TerminalWorkspaceView: View {
                         document.didFocus()
                     }
                     .accessibilityIdentifier("read-only-unified-diff")
+                    .overlay(alignment: .topTrailing) {
+                        if document.isLoading {
+                            ProgressView("Refreshing diff")
+                                .controlSize(.small)
+                                .padding(8)
+                                .allowsHitTesting(false)
+                        }
+                    }
                 }
             }
             .background(ReadOnlyDiffAnnouncement(message: document.isLoading
