@@ -5,11 +5,12 @@ import XCTest
 @MainActor
 final class WorkspaceWindowLayoutTests: XCTestCase {
     func testProjectWindowMinimumIsTheCompleteSidebarAndTerminalWidth() {
-        XCTAssertEqual(WorkspaceWindowLayout.minimumWidth, 760)
+        XCTAssertEqual(WorkspaceWindowLayout.minimumWidth, 1_001)
         XCTAssertGreaterThanOrEqual(WorkspaceWindowLayout.defaultWidth, WorkspaceWindowLayout.minimumWidth)
         XCTAssertEqual(
             WorkspaceWindowLayout.minimumWidth,
             WorkspaceWindowLayout.sidebarMinimumWidth + WorkspaceWindowLayout.dividerWidth + WorkspaceWindowLayout.terminalMinimumWidth
+                + WorkspaceWindowLayout.dividerWidth + WorkspaceWindowLayout.reviewMinimumWidth
         )
         XCTAssertGreaterThanOrEqual(WorkspaceWindowLayout.defaultHeight, WorkspaceWindowLayout.minimumHeight)
     }
@@ -34,6 +35,8 @@ final class WorkspaceWindowLayoutTests: XCTestCase {
                 for: WorkspaceWindowLayout.sidebarIdealWidth
                     + WorkspaceWindowLayout.dividerWidth
                     + WorkspaceWindowLayout.terminalMinimumWidth
+                    + WorkspaceWindowLayout.dividerWidth
+                    + WorkspaceWindowLayout.reviewMinimumWidth
             ),
             WorkspaceWindowLayout.sidebarIdealWidth
         )
@@ -46,14 +49,15 @@ final class WorkspaceWindowLayoutTests: XCTestCase {
     func testTerminalAreaKeepsItsMinimumAfterTheSidebarAtWindowMinimum() {
         let width = WorkspaceWindowLayout.minimumWidth
         let remaining = width - WorkspaceWindowLayout.sidebarWidth(for: width) - WorkspaceWindowLayout.dividerWidth
+            - WorkspaceWindowLayout.reviewMinimumWidth - WorkspaceWindowLayout.dividerWidth
 
         XCTAssertEqual(remaining, WorkspaceWindowLayout.terminalMinimumWidth)
     }
 
     func testFrameFittingMovesOnlyOverflowingRestoredWindowIntoVisibleFrame() {
         let visible = NSRect(x: 0, y: 0, width: 1_440, height: 900)
-        let alreadyVisible = NSRect(x: 100, y: 100, width: 760, height: 640)
-        let offscreenLeft = NSRect(x: -80, y: 100, width: 760, height: 640)
+        let alreadyVisible = NSRect(x: 100, y: 100, width: WorkspaceWindowLayout.minimumWidth, height: 640)
+        let offscreenLeft = NSRect(x: -80, y: 100, width: WorkspaceWindowLayout.minimumWidth, height: 640)
 
         XCTAssertEqual(WorkspaceWindowLayout.fittedFrame(alreadyVisible, in: visible), alreadyVisible)
         XCTAssertEqual(WorkspaceWindowLayout.fittedFrame(offscreenLeft, in: visible).minX, visible.minX)

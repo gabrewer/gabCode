@@ -95,14 +95,15 @@ struct TerminalWorkspaceView: View {
                 TerminalCommandRouter.shared.disconnect(presentation)
             }
         }
-        .task(id: document.selectedFile?.id) {
+        .task(id: document.revision) {
             guard let file = document.selectedFile, isActive else { return }
+            let revision = document.revision
             do {
                 let result = try await reviewService.diff(for: file, in: presentation.workingDirectory)
-                guard !Task.isCancelled, document.selectedFile?.id == file.id else { return }
+                guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
                 document.apply(result)
             } catch {
-                guard !Task.isCancelled, document.selectedFile?.id == file.id else { return }
+                guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
                 document.fail(error.localizedDescription)
             }
         }

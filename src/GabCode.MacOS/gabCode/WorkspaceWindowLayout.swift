@@ -2,20 +2,22 @@ import AppKit
 import SwiftUI
 
 enum WorkspaceWindowLayout {
-    static let minimumWidth: CGFloat = 760
+    static let minimumWidth: CGFloat = 1_001
     static let minimumHeight: CGFloat = 640
     static let sidebarMinimumWidth: CGFloat = 190
     static let sidebarIdealWidth: CGFloat = 240
     static let sidebarMaximumWidth: CGFloat = 300
     static let dividerWidth: CGFloat = 1
-    static let terminalMinimumWidth = minimumWidth - sidebarMinimumWidth - dividerWidth
-    static let defaultWidth = minimumWidth
+    static let reviewMinimumWidth: CGFloat = 240
+    static let reviewIdealWidth: CGFloat = 290
+    static let terminalMinimumWidth: CGFloat = 569
+    static let defaultWidth: CGFloat = 1_120
     static let defaultHeight: CGFloat = 720
 
     static func sidebarWidth(for windowWidth: CGFloat) -> CGFloat {
         min(
             sidebarMaximumWidth,
-            max(sidebarMinimumWidth, windowWidth - terminalMinimumWidth - dividerWidth)
+            max(sidebarMinimumWidth, windowWidth - terminalMinimumWidth - reviewMinimumWidth - 2 * dividerWidth)
         )
     }
 

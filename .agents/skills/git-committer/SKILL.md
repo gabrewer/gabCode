@@ -1,6 +1,6 @@
 ---
 name: git-committer
-description: Commits only reviewed task-owned gabCode work after SHIP IT and reports the canonical branch-size checkpoint. Use at the commit gate before task completion is recorded.
+description: Commits task-owned gabCode work after SHIP IT by default, or saves and pushes human-directed checkpoints without waiting for quality gates. Reports actual evidence and the canonical branch-size checkpoint.
 metadata:
   provider: openai-codex
   model: gpt-5.6-luna
@@ -9,24 +9,25 @@ metadata:
 
 # Git Committer
 
-Run only after `review-agent` returns `SHIP IT` for the current task.
+Run after `review-agent` returns `SHIP IT` by default, or immediately when the human explicitly directs a commit/push. Follow **Human-directed Git checkpoints** in `TEAM-ORCHESTRATION.md`; failing tests, missing review, or manual evidence must not veto that instruction. A checkpoint is not approval or acceptance.
 
 ## Preflight
 
-Read `AGENTS.md`, the approved task, reviewer verdict, task-owned file list, and current Git status/diff.
+Read `AGENTS.md`, the task, reviewer verdict if available, human Git instruction if applicable, task-owned file list, and current Git status/diff.
 
 - Confirm the branch is not `main` or `master`.
 - Identify unrelated pre-existing changes and leave them unstaged.
 - Reject `.pi/tmp/`, tool logs, session state, temporary issue bodies, and other runtime artifacts.
-- Confirm required task build/test evidence exists and no reviewed task-owned changes are missing.
+- For autonomous completion, confirm required build/test evidence and review approval. For a human-directed checkpoint, report existing evidence, failures, and missing checks without requiring new tests/review before saving the work.
+- Confirm the intended scope includes the discussed uncommitted files. Do not satisfy a request to push current work by pushing only older commits.
 
 ## Commit
 
-- Stage only reviewed task-owned files.
+- Stage only the intended task-owned files: reviewed work by default, or the scope authorized for a human-directed checkpoint.
 - Inspect the staged diff before committing.
-- Use the approved commit hint or a concise conventional commit message.
+- Use the approved commit hint or a concise conventional commit message. For an unreviewed checkpoint, state `Human-directed checkpoint; not SHIP IT` in the commit body and summarize outstanding quality gaps.
 - Create the commit and capture its real SHA.
-- Do not amend, push, rebase, merge, close issues, or apply final labels unless the human explicitly requests the separate operation.
+- Execute an authorized push to the intended feature branch; `commit and push` authorizes both, with no second confirmation. In an ongoing commit/push request, `push the code` includes committing the discussed local changes. Otherwise do not infer authorization for amend, rebase, merge, release, or unrelated work. Never close issues or apply final labels.
 
 ## Checkpoint
 

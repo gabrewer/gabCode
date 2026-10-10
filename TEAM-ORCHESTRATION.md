@@ -157,9 +157,9 @@ Triages destroyer findings and drives resolution.
 
 ### `git-committer`
 
-Commits all task work after the review agent approves.
+Commits task-owned work after review approval by default, or immediately on explicit human direction under **Human-directed Git checkpoints**.
 
-- Triggered by the Team Lead after `SHIP IT`
+- Triggered by the Team Lead after `SHIP IT` or an explicit human commit/push instruction
 - **Tools**: Read, Glob, Grep, Bash
 
 If the active AI tool produces local session or worker logs, treat them as untracked diagnostic traces. GitHub Issues remains the durable source of truth for sprint/task state.
@@ -325,13 +325,26 @@ Destroyer, review-agent, git-committer, and final tester/smoke phases are mandat
 
 ### Commit Gate
 
-The team-lead must run the `git-committer` phase after the review-agent returns `SHIP IT` and before posting `## 🧑‍⚖️ Ready for Acceptance Verification` or `## 🚀 Sprint Complete`.
+For autonomous task completion, the team-lead runs the `git-committer` phase after the review-agent returns `SHIP IT` and before posting `## 🧑‍⚖️ Ready for Acceptance Verification` or `## 🚀 Sprint Complete`. This default ordering must not block a human-directed Git checkpoint.
 
 - Completed implementation work must cite real commit SHA(s). Do not use `Commit(s): n/a` for completed code, tests, configuration, documentation deliverables, or build fixes unless the human explicitly approved a no-commit deviation.
 - If task-owned changes remain uncommitted, the sprint is not ready for acceptance verification.
 - The git-committer must separate unrelated pre-existing working-tree changes from task-owned changes and must not commit tool-specific temporary files, logs, session state, or other runtime artifacts.
 - If the repository is on `main` or `master`, create/use a feature branch before committing, following the project git-safety rules.
 - Final readiness must include commit SHA(s), verification evidence, and any explicit no-commit deviations.
+
+### Human-directed Git checkpoints
+
+Saving and sharing work is not a claim that it is ready to merge or accept. The workflow supports human control; agents must not use unfinished quality gates as a veto over an explicit Git instruction.
+
+- A direct `commit`, `push`, or `commit and push` instruction authorizes that operation for the discussed task-owned work, even with failing tests, incomplete adversarial/reviewer phases, unresolved findings, or unavailable manual/platform checks. No special override phrase, repeated confirmation, or `SHIP IT` verdict is required. Do not run the remaining sprint merely to permit the checkpoint.
+- Interpret scope from the conversation. When the user asks to push the current work after requesting commit/push, include the discussed uncommitted changes in a checkpoint commit. Do not substitute a push of older commits and leave the requested work behind. A push-only request for an already committed scope does not authorize unrelated working-tree changes; commit-only does not authorize a push.
+- Route through `team-lead` and `git-committer`, inspect the diff, stage only the intended files, and identify unreviewed commits as human-directed checkpoints in the commit body and issue evidence. Preserve known failures, missing reviews, and `NOT CHECKED` evidence without relabeling them as passes.
+- Keep concrete Git safety checks: no secrets or runtime artifacts; preserve unrelated work; never push directly to `main` or `master`; no destructive cleanup or blind force push. Stop only for an actual safety/permission problem or materially ambiguous scope/remote—not an unmet readiness gate.
+- Report the real SHA, destination branch, included scope, and remaining quality gaps. Record the instruction and outcome in the existing GitHub issue; an unavailable issue service must not prevent an otherwise safe authorized Git operation. Report that tracking gap for reconciliation.
+- A checkpoint does not complete the task, grant `SHIP IT`, authorize merge/release, close issues, or waive acceptance criteria. Reviews and required checks still govern readiness. A bounded Git request may end after the requested operation and honest status report; sprint-continuity rules do not force unrelated implementation before honoring it.
+
+This explicit-human exception applies wherever this document or generated worker/prompt instructions otherwise say commits occur only after review. Default autonomous execution retains its existing quality gates.
 
 ### Pull Request Size Checkpoint
 
@@ -441,7 +454,7 @@ Each step is either **agentic** (the Team Lead performs it under a worker role o
 
 ### What is deterministic
 
-- All **git commits** — handled under the `git-committer` role after review-agent approval
+- All **git commits** — handled under the `git-committer` role after review-agent approval by default, or under **Human-directed Git checkpoints** on explicit human instruction
 - All **verification scripts** — shell scripts defined during brainstorming, invoked after commit
 
 ### What is agentic
@@ -565,7 +578,7 @@ For each task in the Sprint:
 3. **Build gate** — the repository's documented build command must exit 0 before the destroyer runs. If it fails, the error is fed back to the builder. Code that does not compile never reaches the reviewer.
 4. **`destroyer`** — adversarial testing scoped to this task's code only. Only critical/high findings are actionable. Medium/low are noted but do not block.
 5. **`review-agent`** — triages destroyer findings, routes fixes to builders, escalates big issues
-6. **`git-committer`** — commits after `SHIP IT`, then measures and reports the Pull Request Size Checkpoint
+6. **`git-committer`** — commits after `SHIP IT` in the autonomous task loop; explicit human checkpoints follow **Human-directed Git checkpoints** instead. Measures and reports the Pull Request Size Checkpoint in either case.
 7. **Branch growth gate** — at the strong checkpoint, do not start another independent feature task without a human decision; finish only the smallest coherent stabilization required for a reviewable branch
 8. **Failed task cleanup** — if a task exceeds max review attempts, all uncommitted working tree changes are discarded (`git checkout -- . && git clean -fd`) so broken code does not leak into subsequent tasks.
 
