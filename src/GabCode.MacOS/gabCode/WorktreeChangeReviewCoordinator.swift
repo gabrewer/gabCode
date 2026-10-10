@@ -90,11 +90,19 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
             let keepPages = sameHistory && !next.commits.isEmpty &&
                 (previous?.commits.count ?? 0) > next.commits.count &&
                 Array(previous!.commits.prefix(next.commits.count)).map(\.sha) == next.commits.map(\.sha)
-            let reconciled = keepPages
-                ? ReviewSnapshot(worktree: next.worktree, head: next.head, main: next.main,
-                                 working: next.working, commits: previous!.commits,
-                                 hasMoreCommits: previous!.hasMoreCommits)
-                : next
+            let reconciled: ReviewSnapshot
+            if keepPages {
+                reconciled = ReviewSnapshot(worktree: next.worktree, head: next.head, main: next.main,
+                                            working: next.working, commits: previous!.commits,
+                                            hasMoreCommits: previous!.hasMoreCommits)
+            } else if let previous, previous.worktree == next.worktree,
+                      !previous.commits.isEmpty, next.hasMoreCommits,
+                      !sameHistory || previous.commits.count > next.commits.count {
+                reconciled = try await service.reconciledHistory(next, retaining: previous, mainBranch: branch)
+            } else {
+                reconciled = next
+            }
+            guard !Task.isCancelled, generation == requestedGeneration, selectedWorktree == path else { return }
             let nextSHAs = Set(reconciled.commits.map(\.sha))
             if !sameHistory || !keepPages && (previous?.commits.count ?? 0) > next.commits.count {
                 commitFiles = commitFiles.filter { nextSHAs.contains($0.key) }

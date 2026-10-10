@@ -40,6 +40,138 @@ final class WorktreeChangeReviewAdversarialTests: XCTestCase {
         XCTAssertTrue(presentation.reviewDocument.isOpen, "Periodic refresh must not close a valid diff")
     }
 
+    func testNewCommitRetainsStillUniqueOlderSelectedFileAndRebasesLoadedPage() async throws {
+        let root = try repository()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = WorktreeChangeReviewCoordinator(service: WorktreeChangeReviewService(pageSize: 1))
+        defer { coordinator.deactivate() }
+        coordinator.activate(worktree: root, mainBranch: "trunk")
+        await coordinator.refresh()
+        let page = expectation(description: "older commit loaded")
+        let pageToken = coordinator.$snapshot.sink { if $0?.commits.count == 2 { page.fulfill() } }
+        coordinator.loadMore()
+        await fulfillment(of: [page], timeout: 5)
+        pageToken.cancel()
+        let older = try XCTUnwrap(coordinator.snapshot?.commits.last)
+        let loaded = expectation(description: "older files loaded")
+        let fileToken = coordinator.$commitFiles.sink { if $0[older.sha] != nil { loaded.fulfill() } }
+        coordinator.toggleCommit(older.sha)
+        await fulfillment(of: [loaded], timeout: 5)
+        fileToken.cancel()
+        let file = try XCTUnwrap(coordinator.commitFiles[older.sha]?.first)
+        let presentation = TerminalWorkspacePresentation(workingDirectory: root)
+        coordinator.open(file: file, in: presentation)
+        presentation.reviewDocument.apply(ReviewDiff(state: .patch, text: "historical patch"))
+        let revision = presentation.reviewDocument.revision
+        try git(["-c", "user.name=Tests", "-c", "user.email=tests@example.invalid", "commit", "--allow-empty", "-m", "unrelated tip"], in: root)
+        try git(["merge-base", "--is-ancestor", older.sha, "HEAD"], in: root)
+        await coordinator.refresh()
+        let shas = try XCTUnwrap(coordinator.snapshot?.commits.map(\.sha))
+        XCTAssertEqual(shas.count, 3, "Include the new tip and previously loaded older commit")
+        XCTAssertEqual(shas.last, older.sha, "A new tip should shift, not discard, a still-unique older commit")
+        XCTAssertTrue(coordinator.expandedCommits.contains(older.sha))
+        XCTAssertEqual(coordinator.selectedFile?.id, file.id)
+        XCTAssertTrue(presentation.reviewDocument.isOpen)
+        XCTAssertEqual(presentation.reviewDocument.revision, revision, "An immutable selected patch must not restart")
+        XCTAssertTrue(coordinator.snapshot?.hasMoreCommits == true)
+        // The preserved page count is a new cursor: paging must continue without duplicates.
+        let nextPage = expectation(description: "load next older commit")
+        let nextToken = coordinator.$snapshot.sink { if $0?.commits.count == 4 { nextPage.fulfill() } }
+        coordinator.loadMore()
+        await fulfillment(of: [nextPage], timeout: 5)
+        nextToken.cancel()
+        XCTAssertEqual(Set(coordinator.snapshot?.commits.map(\.sha) ?? []).count, 4)
+        XCTAssertEqual(coordinator.selectedFile?.id, file.id)
+    }
+
+    func testMultipleNewTipsBeyondOriginalPageStillKeepOlderReview() async throws {
+        let root = try repository()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = WorktreeChangeReviewCoordinator(service: WorktreeChangeReviewService(pageSize: 1))
+        defer { coordinator.deactivate() }
+        coordinator.activate(worktree: root, mainBranch: "trunk")
+        await coordinator.refresh()
+        let older = try XCTUnwrap(coordinator.snapshot?.commits.first)
+        let loaded = expectation(description: "selected commit files")
+        let token = coordinator.$commitFiles.sink { if $0[older.sha] != nil { loaded.fulfill() } }
+        coordinator.toggleCommit(older.sha)
+        await fulfillment(of: [loaded], timeout: 5)
+        token.cancel()
+        let file = try XCTUnwrap(coordinator.commitFiles[older.sha]?.first)
+        let presentation = TerminalWorkspacePresentation(workingDirectory: root)
+        coordinator.open(file: file, in: presentation)
+        for index in 0..<4 {
+            try git(["-c", "user.name=Tests", "-c", "user.email=tests@example.invalid", "commit", "--allow-empty", "-m", "new tip \(index)"], in: root)
+        }
+        await coordinator.refresh()
+        XCTAssertEqual(coordinator.snapshot?.commits.count, 5)
+        XCTAssertEqual(coordinator.snapshot?.commits.last?.sha, older.sha)
+        XCTAssertEqual(coordinator.selectedFile?.id, file.id)
+        XCTAssertTrue(presentation.reviewDocument.isOpen)
+    }
+
+    func testRebasedAwaySelectionClosesEvenWhenNewRangeHasMorePages() async throws {
+        let root = try repository()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = WorktreeChangeReviewCoordinator(service: WorktreeChangeReviewService(pageSize: 1))
+        defer { coordinator.deactivate() }
+        coordinator.activate(worktree: root, mainBranch: "trunk")
+        await coordinator.refresh()
+        let page = expectation(description: "older page")
+        let pageToken = coordinator.$snapshot.sink { if $0?.commits.count == 2 { page.fulfill() } }
+        coordinator.loadMore()
+        await fulfillment(of: [page], timeout: 5)
+        pageToken.cancel()
+        let old = try XCTUnwrap(coordinator.snapshot?.commits.last)
+        let loaded = expectation(description: "old commit files")
+        let fileToken = coordinator.$commitFiles.sink { if $0[old.sha] != nil { loaded.fulfill() } }
+        coordinator.toggleCommit(old.sha)
+        await fulfillment(of: [loaded], timeout: 5)
+        fileToken.cancel()
+        let file = try XCTUnwrap(coordinator.commitFiles[old.sha]?.first)
+        let presentation = TerminalWorkspacePresentation(workingDirectory: root)
+        coordinator.open(file: file, in: presentation)
+        try git(["reset", "--hard", "trunk"], in: root) // isolated throwaway fixture only
+        for index in 0..<3 {
+            try git(["-c", "user.name=Tests", "-c", "user.email=tests@example.invalid", "commit", "--allow-empty", "-m", "replacement \(index)"], in: root)
+        }
+        await coordinator.refresh()
+        XCTAssertNil(coordinator.errorMessage)
+        XCTAssertFalse(coordinator.isStale)
+        XCTAssertFalse(coordinator.snapshot?.commits.contains(where: { $0.sha == old.sha }) ?? true)
+        XCTAssertNil(coordinator.selectedFile)
+        XCTAssertFalse(presentation.reviewDocument.isOpen)
+        XCTAssertNotNil(coordinator.notice)
+    }
+
+    func testMergeReorderingRetainsEveryPreviouslyLoadedCommitNotJustOldTail() async throws {
+        let root = try repository()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tree = try readGit(["rev-parse", "HEAD^{tree}"], in: root)
+        // Fixed-date DAG: the old prefix is [16,14,11]; merging 40 changes its
+        // order to [41,40,16,11,26,19,14,...]. Finding old tail 11 is not enough.
+        let graph: [(Int, [Int])] = [(0, []), (1, [0]), (2, [0, 1]), (7, [0]), (8, [2]),
+                                    (11, [7]), (14, [7]), (16, [11, 14]), (19, [8, 14]),
+                                    (26, [19]), (40, [26, 16]), (41, [16, 40])]
+        var shas: [Int: String] = [:]
+        for (node, parents) in graph {
+            let arguments = ["-c", "user.name=Tests", "-c", "user.email=tests@example.invalid", "commit-tree", tree, "-m", "\(node)"]
+                + parents.flatMap { ["-p", shas[$0]!] }
+            shas[node] = try readGit(arguments, in: root)
+        }
+        try git(["update-ref", "refs/heads/trunk", shas[0]!], in: root)
+        try git(["update-ref", "refs/heads/feature", shas[16]!], in: root)
+        let service = WorktreeChangeReviewService(pageSize: 3)
+        let previous = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        XCTAssertEqual(previous.commits.map(\.subject), ["16", "14", "11"])
+        try git(["update-ref", "refs/heads/feature", shas[41]!], in: root)
+        let next = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let reconciled = try await service.reconciledHistory(next, retaining: previous, mainBranch: "trunk")
+        for commit in previous.commits {
+            XCTAssertTrue(reconciled.commits.contains(where: { $0.sha == commit.sha }), "Still-reachable loaded commit \(commit.subject) must survive merge reordering")
+        }
+    }
+
     func testSwitchingWorktreesDuringPagingDoesNotPermanentlyDisableLoadMore() async throws {
         let root = try repository()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -225,6 +357,24 @@ final class WorktreeChangeReviewAdversarialTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
             throw error
         }
+    }
+
+    private func readGit(_ arguments: [String], in root: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = root
+        process.environment = ProcessInfo.processInfo.environment.merging([
+            "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z"
+        ]) { _, value in value }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw NSError(domain: "AdversarialDAG", code: Int(process.terminationStatus)) }
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func git(_ arguments: [String], in root: URL) throws {

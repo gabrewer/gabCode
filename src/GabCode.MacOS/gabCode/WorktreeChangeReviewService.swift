@@ -118,6 +118,41 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
         }
     }
 
+    /// Re-read the current unique range until every previously visible identity is
+    /// accounted for or the range ends. Merges can reorder the previous page's tail.
+    /// Never infer membership from an old SHA or splice stale pages:
+    /// main may have advanced, HEAD may have been rebased, and pagination uses an offset.
+    func reconciledHistory(_ next: ReviewSnapshot, retaining previous: ReviewSnapshot, mainBranch: String) async throws -> ReviewSnapshot {
+        var rows = next.commits
+        var hasMore = next.hasMoreCommits
+        var remaining = Set(previous.commits.map(\.sha))
+        remaining.subtract(rows.map(\.sha))
+        // A bounded query failure leaves the last good snapshot marked stale rather
+        // than incorrectly closing an open diff when history is unusually large.
+        let limit = max(2_500, previous.commits.count + pageSize)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while hasMore && (rows.count < previous.commits.count || !remaining.isEmpty) {
+            try Task.checkCancellation()
+            guard rows.count < limit, ContinuousClock.now < deadline else {
+                throw ReviewGitError.unavailable("History changed beyond the review reconciliation limit. Refresh later or reopen the review.")
+            }
+            let page = try await queryCommits(worktree: next.worktree, head: next.head, main: next.main,
+                                              skip: rows.count, count: min(pageSize, limit - rows.count) + 1)
+            let appended = Array(page.prefix(min(pageSize, limit - rows.count)))
+            guard !appended.isEmpty else { hasMore = false; break }
+            rows.append(contentsOf: appended)
+            remaining.subtract(appended.map(\.sha))
+            hasMore = page.count > appended.count
+        }
+        let mainRef = "refs/heads/\(mainBranch)"
+        guard (try await oid("HEAD", in: next.worktree)) == next.head,
+              (try await oid(mainRef, in: next.worktree)) == next.main else {
+            throw ReviewGitError.failed("Git history changed during review refresh. Refresh again.")
+        }
+        return ReviewSnapshot(worktree: next.worktree, head: next.head, main: next.main,
+                              working: next.working, commits: rows, hasMoreCommits: hasMore)
+    }
+
     func page(after snapshot: ReviewSnapshot, mainBranch: String, skip: Int) async throws -> ReviewHistoryPage {
         guard skip > 0, !mainBranch.isEmpty else { return .restart }
         let mainRef = "refs/heads/\(mainBranch)"
