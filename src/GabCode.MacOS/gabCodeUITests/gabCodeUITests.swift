@@ -155,8 +155,9 @@ final class gabCodeUITests: XCTestCase {
 
         let terminalPath = app.staticTexts["terminal-directory-path"]
         XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
-        let issueMenu = app.buttons["GitHub issue"]
+        let issueMenu = app.menuButtons["issue-reference"]
         XCTAssertTrue(issueMenu.waitForExistence(timeout: 5))
+        XCTAssertEqual(issueMenu.label, "GitHub issue reference")
         issueMenu.click()
         XCTAssertTrue(app.menuItems["Add issue…"].waitForExistence(timeout: 3))
         app.menuItems["Add issue…"].click()
@@ -165,7 +166,11 @@ final class gabCodeUITests: XCTestCase {
         issueURL.typeText("https://github.com/gabrewer/gabCode/issues/92?source=ui")
         app.buttons["Add"].click()
 
-        XCTAssertTrue(app.staticTexts["gabrewer/gabCode#92"].waitForExistence(timeout: 3))
+        let canonicalIssue = expectation(
+            for: NSPredicate(format: "value == %@", "gabrewer/gabCode#92"),
+            evaluatedWith: issueMenu
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [canonicalIssue], timeout: 5), .completed)
         XCTAssertEqual(terminalPath.value as? String, fixture.primary.path)
     }
 
