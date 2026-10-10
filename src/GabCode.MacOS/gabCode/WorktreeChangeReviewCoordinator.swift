@@ -75,21 +75,35 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
         guard let path = selectedWorktree, let branch = selectedMainBranch else { return }
         generation += 1
         let requestedGeneration = generation
+        pageTask?.cancel()
+        pageTask = nil
+        isLoadingMore = false
         isLoading = true
         defer { if generation == requestedGeneration { isLoading = false } }
         do {
             let next = try await snapshotLoader(path, branch)
             guard !Task.isCancelled, generation == requestedGeneration, selectedWorktree == path else { return }
-            let nextSHAs = Set(next.commits.map(\.sha))
-            let historyChanged = snapshot?.head != next.head || snapshot?.main != next.main
-            if historyChanged {
+            let previous = snapshot
+            let sameHistory = previous?.worktree == next.worktree && previous?.head == next.head && previous?.main == next.main
+            // A fresh snapshot reads only the first page. Preserve previously loaded pages
+            // while the Git refs and the first-page prefix still identify the same history.
+            let keepPages = sameHistory && !next.commits.isEmpty &&
+                (previous?.commits.count ?? 0) > next.commits.count &&
+                Array(previous!.commits.prefix(next.commits.count)).map(\.sha) == next.commits.map(\.sha)
+            let reconciled = keepPages
+                ? ReviewSnapshot(worktree: next.worktree, head: next.head, main: next.main,
+                                 working: next.working, commits: previous!.commits,
+                                 hasMoreCommits: previous!.hasMoreCommits)
+                : next
+            let nextSHAs = Set(reconciled.commits.map(\.sha))
+            if !sameHistory || !keepPages && (previous?.commits.count ?? 0) > next.commits.count {
                 commitFiles = commitFiles.filter { nextSHAs.contains($0.key) }
                 fileListTasks.values.forEach { $0.cancel() }
                 fileListTasks.removeAll()
             }
             expandedCommits.formIntersection(nextSHAs)
             if let selectedFile {
-                if !isValid(selectedFile, in: next) {
+                if !isValid(selectedFile, in: reconciled) {
                     selectedPresentation?.closeReviewDocument(restoreFocus: true)
                     self.selectedFile = nil
                     notice = "The selected diff is no longer available after Git changed."
@@ -97,8 +111,8 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
                     selectedPresentation?.reviewDocument.reload()
                 }
             }
-            snapshot = next
-            for commit in next.commits where expandedCommits.contains(commit.sha) && commitFiles[commit.sha] == nil {
+            snapshot = reconciled
+            for commit in reconciled.commits where expandedCommits.contains(commit.sha) && commitFiles[commit.sha] == nil {
                 loadFiles(for: commit)
             }
             isStale = false
@@ -191,7 +205,10 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
             }
             do {
                 switch try await service.page(after: snapshot, mainBranch: branch, skip: snapshot.commits.count) {
-                case .restart: self?.requestRefresh()
+                case .restart:
+                    guard let self, !Task.isCancelled, self.generation == expectedGeneration,
+                          self.selectedWorktree == snapshot.worktree else { return }
+                    self.requestRefresh()
                 case let .rows(rows):
                     guard let self, !Task.isCancelled, self.generation == expectedGeneration,
                           self.selectedWorktree == snapshot.worktree else { return }
@@ -245,6 +262,8 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
         debounceTask?.cancel(); debounceTask = nil
         periodicTask?.cancel(); periodicTask = nil
         pageTask?.cancel(); pageTask = nil
+        isLoadingMore = false
+        isLoading = false
         fileListTasks.values.forEach { $0.cancel() }
         fileListTasks.removeAll()
         observer?.stop(); observer = nil

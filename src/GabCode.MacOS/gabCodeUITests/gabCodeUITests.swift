@@ -231,6 +231,44 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["review-terminal-tabs"].exists)
         app.buttons["close-review-diff"].click()
         XCTAssertFalse(app.descendants(matching: .any)["review-diff-document"].exists)
+
+        let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
+        commit.click()
+        let history = app.buttons["review-file-commit-history.txt"]
+        XCTAssertTrue(history.waitForExistence(timeout: 8), "Expanding a commit must load its changed files")
+        history.click()
+        XCTAssertEqual(history.value as? String, "Selected diff", "Commit file selection must reach the review coordinator")
+        XCTAssertTrue(app.buttons["close-review-diff"].waitForExistence(timeout: 8),
+                      "A branch-history file must open its read-only diff")
+    }
+
+    @MainActor
+    func testCleanWorktreeStillOpensCommittedFileFromBranchHistory() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        try Data("committed content\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+        try run(git, ["-C", secondary.path, "add", "history.txt"])
+        try run(git, ["-C", secondary.path, "-c", "user.name=UI", "-c", "user.email=ui@example.invalid", "commit", "-m", "Ahead of main"])
+        XCTAssertTrue(try run(git, ["-C", secondary.path, "status", "--porcelain", "--untracked-files=all"]).isEmpty)
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+
+        XCTAssertTrue(app.buttons["refresh-change-review"].waitForExistence(timeout: 12))
+        let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+        XCTAssertTrue(secondaryRow.waitForExistence(timeout: 5))
+        secondaryRow.click()
+        XCTAssertTrue(app.staticTexts["Working tree clean"].waitForExistence(timeout: 12))
+        let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
+        XCTAssertTrue(commit.waitForExistence(timeout: 8))
+        commit.click()
+        let history = app.buttons["review-file-commit-history.txt"]
+        XCTAssertTrue(history.waitForExistence(timeout: 8))
+        history.click()
+        XCTAssertEqual(history.value as? String, "Selected diff")
+        XCTAssertTrue(app.buttons["close-review-diff"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["read-only-unified-diff"].waitForExistence(timeout: 8))
     }
 
     @MainActor
