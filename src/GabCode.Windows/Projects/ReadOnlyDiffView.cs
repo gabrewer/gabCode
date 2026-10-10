@@ -8,6 +8,7 @@ namespace GabCode.Windows.Projects;
 
 internal sealed class ReadOnlyDiffView : UserControl
 {
+    private readonly Grid root;
     private readonly TextBlock heading;
     private readonly TextBlock status;
     private readonly TextBox patch;
@@ -18,7 +19,7 @@ internal sealed class ReadOnlyDiffView : UserControl
 
     internal ReadOnlyDiffView(string label, string? currentFile)
     {
-        var root = new Grid { Background = new SolidColorBrush(Color.FromRgb(25, 26, 31)) };
+        root = new Grid { Background = new SolidColorBrush(Color.FromRgb(25, 26, 31)) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition());
@@ -43,6 +44,31 @@ internal sealed class ReadOnlyDiffView : UserControl
         AutomationProperties.SetName(patch, $"Read-only unified diff for {label}");
         Grid.SetRow(patch, 2); root.Children.Add(patch);
         Content = root;
+        ApplySystemColors();
+        Loaded += (_, _) => SystemParameters.StaticPropertyChanged += SystemParameters_Changed;
+        Unloaded += (_, _) => SystemParameters.StaticPropertyChanged -= SystemParameters_Changed;
+    }
+
+    private void SystemParameters_Changed(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SystemParameters.HighContrast)) ApplySystemColors();
+    }
+
+    private void ApplySystemColors()
+    {
+        var contrast = SystemParameters.HighContrast;
+        root.Background = contrast ? SystemColors.WindowBrush : new SolidColorBrush(Color.FromRgb(25, 26, 31));
+        heading.Foreground = status.Foreground = patch.Foreground = contrast ? SystemColors.WindowTextBrush : Brushes.White;
+        patch.Background = contrast ? SystemColors.WindowBrush : new SolidColorBrush(Color.FromRgb(20, 20, 22));
+        if (contrast)
+        {
+            var systemButton = new Style(typeof(Button));
+            systemButton.Setters.Add(new Setter(Control.ForegroundProperty, SystemColors.ControlTextBrush));
+            systemButton.Setters.Add(new Setter(Control.BackgroundProperty, SystemColors.ControlBrush));
+            systemButton.Setters.Add(new Setter(Control.BorderBrushProperty, SystemColors.ControlTextBrush));
+            closeButton.Style = openButton.Style = systemButton;
+        }
+        else closeButton.Style = openButton.Style = null;
     }
 
     internal void Show(ReviewDiff result)
@@ -58,12 +84,34 @@ internal sealed class ReadOnlyDiffView : UserControl
             _ => "Diff unavailable: " + (result.Error ?? "Git could not retrieve the diff")
         };
         AutomationProperties.SetName(status, status.Text);
-        patch.Text = result.State == ReviewDiffState.Patch ? result.Patch ?? string.Empty : string.Empty;
+        var nextPatch = result.State == ReviewDiffState.Patch ? result.Patch ?? string.Empty : string.Empty;
+        if (patch.Text != nextPatch)
+        {
+            var position = patch.VerticalOffset;
+            patch.Text = nextPatch;
+            patch.ScrollToVerticalOffset(position);
+        }
     }
 
-    internal void FocusDocument() => closeButton.Focus();
+    internal void FocusDocument()
+    {
+        if (IsLoaded) { closeButton.Focus(); return; }
+        RoutedEventHandler? onLoaded = null;
+        onLoaded = (_, _) =>
+        {
+            Loaded -= onLoaded;
+            Dispatcher.BeginInvoke(() => { if (IsVisible) closeButton.Focus(); }, System.Windows.Threading.DispatcherPriority.Input);
+        };
+        Loaded += onLoaded;
+    }
 
     internal static string? CurrentFile(string worktree, ReviewFile file)
+    {
+        try { return FindCurrentFile(worktree, file); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
+    }
+
+    private static string? FindCurrentFile(string worktree, ReviewFile file)
     {
         if (file.Status == ReviewStatus.Deleted || Path.IsPathFullyQualified(file.Path)) return null;
         var root = Path.GetFullPath(worktree).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;

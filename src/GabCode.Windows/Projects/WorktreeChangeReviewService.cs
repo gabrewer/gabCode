@@ -70,6 +70,18 @@ internal sealed class WorktreeChangeReviewService
         return commits;
     }
 
+    internal async Task<bool> IsCommitUniqueToHeadAsync(string worktree, string sha, string head, string mainHead, CancellationToken token = default)
+    {
+        try
+        {
+            var common = (await RunAsync(worktree, ["merge-base", sha, head], token)).Trim();
+            if (!string.Equals(common, sha, StringComparison.OrdinalIgnoreCase)) return false;
+            return string.Equals((await RunAsync(worktree, ["rev-list", "--max-count=1", sha, $"^{mainHead}"], token)).Trim(), sha, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception) { return false; }
+    }
+
     internal async Task<IReadOnlyList<ReviewFile>> GetCommitFilesAsync(string worktree, string sha, CancellationToken token = default)
     {
         var parents = (await RunAsync(worktree, ["rev-list", "--parents", "-n", "1", sha], token)).Split(' ', StringSplitOptions.RemoveEmptyEntries);

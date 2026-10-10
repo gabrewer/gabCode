@@ -29,8 +29,10 @@ public sealed class WorkspaceMenuTests
         Assert.Contains("new TabControl", settings);
         Assert.Contains("Header = \"Terminal\"", settings);
         Assert.Contains("Header = \"VS Code\"", settings);
-        Assert.Contains("Move Sidebar _Right", xaml);
-        Assert.Contains("Move Sidebar _Left", xaml);
+        Assert.DoesNotContain("Move Sidebar _Right", xaml);
+        Assert.DoesNotContain("Move Sidebar _Left", xaml);
+        Assert.Contains("Grid.Column=\"4\"", xaml);
+        Assert.Contains("ReviewSidebarRegion", xaml);
         Assert.Contains("Refresh Worktrees", xaml);
         Assert.Contains("InputGestureText=\"F5\"", xaml);
         Assert.Contains("WorktreeSidebar", xaml);
@@ -42,7 +44,7 @@ public sealed class WorkspaceMenuTests
         Assert.DoesNotContain("PART_Popup", code);
         Assert.DoesNotContain("CustomPopupPlacement", code);
         Assert.DoesNotContain("popup.Child", code);
-        Assert.Contains("CreateTerminalWorkspace();\n        UpdateSidebarIndicators();", code.Replace("\r\n", "\n"));
+        Assert.Contains("CreateTerminalWorkspace();\n        SyncReviewSidebar();\n        UpdateSidebarIndicators();", code.Replace("\r\n", "\n"));
     }
 
     [Fact]
