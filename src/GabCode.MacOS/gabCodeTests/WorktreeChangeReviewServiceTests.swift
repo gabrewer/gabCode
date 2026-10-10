@@ -269,6 +269,91 @@ final class WorktreeChangeReviewServiceTests: XCTestCase {
         XCTAssertEqual(missingResult.state, .unavailable)
     }
 
+    func testBinaryMarkersInsidePlainTextNeverHideReadOnlyPatch() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review markers ünicode \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try commit("base", in: root, allowEmpty: true)
+        try git(["switch", "-c", "feature"], in: root)
+        let name = "notes GIT binary patch Binary files ü.txt"
+        let text = "GIT binary patch\nBinary files a/file and b/file differ\ndocumentation explains GIT binary patch output\n"
+        try Data(text.utf8).write(to: root.appendingPathComponent(name))
+        let service = WorktreeChangeReviewService()
+        let untracked = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let untrackedFile = try XCTUnwrap(untracked.working.first { $0.path == name })
+        let untrackedPatch = try await service.diff(for: untrackedFile, in: root)
+        XCTAssertEqual(untrackedPatch.state, .patch, "Untracked no-index diff lines beginning with + are content, not Git metadata")
+        XCTAssertTrue(untrackedPatch.text.contains("+GIT binary patch"))
+        try git(["add", "--", name], in: root)
+        let staged = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let stagedFile = try XCTUnwrap(staged.working.first { $0.group == .staged && $0.path == name })
+        let stagedPatch = try await service.diff(for: stagedFile, in: root)
+        XCTAssertEqual(stagedPatch.state, .patch)
+        XCTAssertTrue(stagedPatch.text.contains("+Binary files a/file and b/file differ"))
+        try commit("add text", in: root)
+        let history = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let files = try await service.files(in: XCTUnwrap(history.commits.first), worktree: root)
+        let commitFile = try XCTUnwrap(files.first)
+        let commitPatch = try await service.diff(for: commitFile, in: root)
+        XCTAssertEqual(commitPatch.state, .patch)
+        XCTAssertTrue(commitPatch.text.contains("+GIT binary patch"))
+        try Data((text + "Binary files a/one and b/two differ\n").utf8).write(to: root.appendingPathComponent(name))
+        let unstaged = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let unstagedFile = try XCTUnwrap(unstaged.working.first { $0.group == .unstaged && $0.path == name })
+        let unstagedPatch = try await service.diff(for: unstagedFile, in: root)
+        XCTAssertEqual(unstagedPatch.state, .patch)
+        XCTAssertTrue(unstagedPatch.text.contains("+Binary files a/one and b/two differ"))
+    }
+
+    func testGenuineBinaryContentRemainsExplicitAcrossEveryReviewGroup() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review true binary ünicode \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try commit("base", in: root, allowEmpty: true)
+        try git(["switch", "-c", "feature"], in: root)
+        let path = root.appendingPathComponent("picture.bin")
+        try Data([0, 1, 2]).write(to: path)
+        let service = WorktreeChangeReviewService()
+        let untracked = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let untrackedDiff = try await service.diff(for: XCTUnwrap(untracked.working.first), in: root)
+        XCTAssertEqual(untrackedDiff.state, .binary)
+        try git(["add", "picture.bin"], in: root)
+        let staged = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let stagedDiff = try await service.diff(for: XCTUnwrap(staged.working.first), in: root)
+        XCTAssertEqual(stagedDiff.state, .binary)
+        try commit("add binary", in: root)
+        let history = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let files = try await service.files(in: XCTUnwrap(history.commits.first), worktree: root)
+        let commitDiff = try await service.diff(for: XCTUnwrap(files.first), in: root)
+        XCTAssertEqual(commitDiff.state, .binary)
+        try Data([0, 1, 2, 3]).write(to: path)
+        let unstaged = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let unstagedDiff = try await service.diff(for: XCTUnwrap(unstaged.working.first), in: root)
+        XCTAssertEqual(unstagedDiff.state, .binary)
+    }
+
+    func testRemovedMarkersAndUnicodeLineBreaksRemainPatchContent() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review removed markers \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        let path = root.appendingPathComponent("notes.txt")
+        try Data("GIT binary patch\r\nBinary files a/x and b/x differ\r\n".utf8).write(to: path)
+        try git(["add", "notes.txt"], in: root)
+        try commit("marker text", in: root)
+        let content = "ordinary\u{2028}GIT binary patch\u{2029}Binary files a/x and b/x differ\n"
+        try Data(content.utf8).write(to: path)
+        let service = WorktreeChangeReviewService()
+        let snapshot = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let result = try await service.diff(for: XCTUnwrap(snapshot.working.first), in: root)
+        XCTAssertEqual(result.state, .patch)
+        XCTAssertTrue(result.text.contains("-GIT binary patch"))
+        XCTAssertTrue(result.text.contains("-Binary files a/x and b/x differ"))
+        XCTAssertTrue(result.text.contains("+" + content))
+    }
+
     func testEverySharedDiffCaseAgainstNativeReadOnlyGit() async throws {
         let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/worktree-change-review/cases.json")
