@@ -9,7 +9,7 @@
         Height="820"
         Width="1220"
         MinHeight="640"
-        MinWidth="900"
+        MinWidth="1050"
         Background="#151515">
     <Window.Resources>
         <ControlTemplate x:Key="DarkButtonTemplate" TargetType="Button">
@@ -51,8 +51,6 @@
                         <MenuItem Header="_Settings…" Click="OpenTerminalFontSettings_Click" AutomationProperties.Name="Open terminal font settings" />
                     </MenuItem>
                     <MenuItem Header="_View" AutomationProperties.Name="View">
-                        <MenuItem Header="Move Sidebar _Right" Click="MoveSidebarRight_Click" AutomationProperties.Name="Move sidebar right" />
-                        <MenuItem Header="Move Sidebar _Left" Click="MoveSidebarLeft_Click" AutomationProperties.Name="Move sidebar left" />
                         <MenuItem Header="_Refresh Worktrees" InputGestureText="F5" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" />
                     </MenuItem>
                 </Menu>
@@ -70,7 +68,7 @@
         </Border>
 
         <Grid x:Name="TerminalWorkspace" Grid.Row="1" Visibility="Collapsed">
-            <Grid.ColumnDefinitions><ColumnDefinition x:Name="SidebarColumn" Width="270" MinWidth="190" MaxWidth="420" /><ColumnDefinition Width="5" /><ColumnDefinition x:Name="TerminalColumn" Width="*" MinWidth="520" /></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="230" MinWidth="190" MaxWidth="350" /><ColumnDefinition Width="5" /><ColumnDefinition Width="*" MinWidth="500" /><ColumnDefinition Width="5" /><ColumnDefinition Width="290" MinWidth="230" MaxWidth="430" /></Grid.ColumnDefinitions>
             <Border x:Name="WorktreeSidebar" Background="#1D1E24" BorderBrush="#383A42" BorderThickness="0,0,1,0" Padding="12" AutomationProperties.Name="Worktrees sidebar">
                 <DockPanel><StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12"><TextBlock Text="Worktrees" FontSize="16" FontWeight="SemiBold" Foreground="#F4F4F5" VerticalAlignment="Center" /><Button x:Name="RefreshWorktreesButton" Margin="12,0,0,0" Padding="8,4" Background="#30323B" Foreground="#E5E7EB" BorderBrush="#454854" Content="↻" ToolTip="Refresh worktrees" Click="RefreshWorktrees_Click" AutomationProperties.Name="Refresh worktrees" /><Button x:Name="CancelRefreshButton" Background="#30323B" Foreground="White" Margin="8,0,0,0" Content="Cancel" Click="CancelRefresh_Click" Visibility="Collapsed" AutomationProperties.Name="Cancel worktree refresh" /></StackPanel><StackPanel DockPanel.Dock="Top"><TextBlock x:Name="RefreshStatusText" Margin="0,0,0,4" Foreground="White" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /><WrapPanel><Button x:Name="RetryCleanupButton" Content="Retry cleanup" Margin="0,0,8,4" Visibility="Collapsed" Click="RetryRetainedWorktreeCleanup_Click" AutomationProperties.Name="Retry cleanup" /><Button x:Name="OpenRetainedFolderButton" Content="Open folder" Margin="0,0,0,4" Visibility="Collapsed" Click="OpenRetainedFolder_Click" AutomationProperties.Name="Open retained worktree folder" /></WrapPanel></StackPanel><ListBox x:Name="WorktreeList" Background="#1D1E24" Foreground="#E5E7EB" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" SelectionChanged="WorktreeList_SelectionChanged" PreviewMouseRightButtonDown="WorktreeList_PreviewMouseRightButtonDown" ContextMenuOpening="WorktreeList_ContextMenuOpening" AutomationProperties.Name="Worktrees and orphaned terminals">
                     <ListBox.Resources>
@@ -100,7 +98,9 @@
                     </ListBox.Resources>
                 </ListBox></DockPanel>
             </Border>
-            <GridSplitter x:Name="SidebarSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#383A42" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="Resize worktree sidebar and terminal area" />
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#383A42" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="Resize worktree navigation and terminal area" />
+            <GridSplitter Grid.Column="3" Width="5" HorizontalAlignment="Stretch" Background="#383A42" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="Resize terminal area and review sidebar" />
+            <Border Grid.Column="4" Background="#1D1E24" BorderBrush="#383A42" BorderThickness="1,0,0,0" Padding="10"><ContentControl x:Name="ReviewSidebarRegion" Visibility="Collapsed" AutomationProperties.Name="Selected worktree review" /></Border>
             <Grid x:Name="TerminalGrid" Grid.Column="2">
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="2*" MinHeight="250" /><RowDefinition Height="5" /><RowDefinition Height="*" MinHeight="190" /></Grid.RowDefinitions>
                 <Grid x:Name="WorktreeReferencesBar" Margin="12,8,12,4" AutomationProperties.Name="Worktree references">

@@ -30,9 +30,11 @@ public partial class MainWindow : Window
     private readonly ITerminalExitConfirmationService exitConfirmation;
     private RetainedTerminalLayout? terminalLayout;
     private readonly WorktreeChangeReviewService reviewService = new();
+    private WorktreeReviewSidebar? reviewSidebar;
     private CancellationTokenSource? diffCancellation;
     private ReadOnlyDiffView? diffView;
     private UIElement? diffReturnFocus;
+    private ReviewFile? activeDiffFile;
     private long diffGeneration;
     private WorktreeTerminalRegistry? terminalRegistry;
     private TerminalSessionView? piTerminal;
@@ -44,7 +46,6 @@ public partial class MainWindow : Window
     private CancellationTokenSource? workspaceOpenCancellation;
     private CancellationTokenSource? worktreeActionCancellation;
     private string? worktreeActionRepositoryPath;
-    private readonly SidebarSidePreference sidebarPreference = new();
     private readonly VisualStudioCodePreference visualStudioCodePreference = new();
     private readonly TerminalFontPreferenceStore terminalFontPreference = new();
     private TerminalFontSettingsDialog? terminalFontSettingsDialog;
@@ -90,6 +91,7 @@ public partial class MainWindow : Window
         InputBindings.Add(new KeyBinding(RefreshWorktreesCommand, Key.F5, ModifierKeys.None) { CommandTarget = this });
         CommandBindings.Add(new CommandBinding(RefreshWorktreesCommand, RefreshWorktreesCommand_Executed, RefreshWorktreesCommand_CanExecute));
         Closing += MainWindow_Closing;
+        Activated += (_, _) => reviewSidebar?.RequestRefresh();
 
         if (project is null)
         {
@@ -141,8 +143,28 @@ public partial class MainWindow : Window
         TerminalWorkspace.Visibility = Visibility.Visible;
         SwapTerminalsButton.IsEnabled = true;
         CreateTerminalWorkspace();
-        ApplySidebarSide(sidebarPreference.Read());
+        SyncReviewSidebar();
         _ = RefreshWorktreesAsync();
+    }
+
+    private void SyncReviewSidebar()
+    {
+        if (project is null) return;
+        if (reviewSidebar is null)
+        {
+            reviewSidebar = new WorktreeReviewSidebar(reviewService);
+            reviewSidebar.DiffRequested += (file, focus) => _ = OpenReviewDiffAsync(file, focus);
+            reviewSidebar.SelectionRetained += file => _ = RefreshReviewDiffAsync(file);
+            reviewSidebar.SelectionInvalidated += () =>
+            {
+                CloseReviewDiff(restoreFocus: false);
+                RefreshStatusText.Text = "Selected review file is no longer available; the read-only diff was closed.";
+            };
+            ReviewSidebarRegion.Content = reviewSidebar;
+            ReviewSidebarRegion.Visibility = Visibility.Visible;
+        }
+        ReviewSidebarRegion.IsEnabled = true;
+        reviewSidebar.Select(project.ProjectFolder, project.MainBranch);
     }
 
     private void CreateTerminalWorkspace()
@@ -366,6 +388,7 @@ public partial class MainWindow : Window
         var token = diffCancellation.Token;
         var generation = ++diffGeneration;
         diffReturnFocus = returnFocus ?? diffReturnFocus;
+        activeDiffFile = file;
         var comparison = file.Group switch
         {
             ReviewGroup.Staged => "HEAD → index",
@@ -386,7 +409,7 @@ public partial class MainWindow : Window
             try { OpenInVsCode(currentFile); }
             catch (Exception exception) { RefreshStatusText.Text = $"Could not open current file in VS Code: {exception.Message}"; }
         };
-        var tabs = new TabControl { Background = System.Windows.Media.Brushes.Black };
+        var tabs = new TabControl { Background = SystemParameters.HighContrast ? SystemColors.WindowBrush : System.Windows.Media.Brushes.Black };
         var firstTab = new TabItem { Header = "Terminal 1" };
         var secondTab = new TabItem { Header = "Terminal 2" };
         AutomationProperties.SetName(firstTab, "First terminal");
@@ -405,6 +428,23 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
 
+    private async Task RefreshReviewDiffAsync(ReviewFile file)
+    {
+        if (project is null || diffView is null || activeDiffFile?.Identity != file.Identity) return;
+        var path = project.ProjectFolder;
+        diffCancellation?.Cancel(); diffCancellation?.Dispose();
+        diffCancellation = new CancellationTokenSource();
+        var token = diffCancellation.Token;
+        var current = ++diffGeneration;
+        var view = diffView;
+        try
+        {
+            var result = await reviewService.GetDiffAsync(path, file, token);
+            if (current == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, path)) view.Show(result);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+    }
+
     private void CloseReviewDiff(bool restoreFocus = true)
     {
         ++diffGeneration;
@@ -416,9 +456,12 @@ public partial class MainWindow : Window
         terminalLayout?.CloseDocument();
         SwapTerminalsButton.IsEnabled = terminalLayout is not null;
         var target = diffReturnFocus;
+        var file = activeDiffFile;
         diffReturnFocus = null;
-        if (restoreFocus && target is { IsVisible: true }) target.Focus();
-        else if (restoreFocus) (IsPiInMain ? piTerminal : commandsTerminal)?.FocusTerminal();
+        activeDiffFile = null;
+        if (restoreFocus && target is { IsVisible: true } && target.Focus()) return;
+        if (restoreFocus && file is not null && reviewSidebar?.FocusFile(file) is true) return;
+        if (restoreFocus) (IsPiInMain ? piTerminal : commandsTerminal)?.FocusTerminal();
     }
 
     private async void RefreshWorktrees_Click(object sender, RoutedEventArgs e) => await RefreshWorktreesAsync();
@@ -741,6 +784,7 @@ public partial class MainWindow : Window
         WorktreePathText.Text = path;
         WorktreePathText.ToolTip = path;
         CreateTerminalWorkspace();
+        SyncReviewSidebar();
         PopulateWorktrees();
         FocusWorktreeListItem(path);
         _ = UpdateWorktreeReferencesAsync();
@@ -1041,6 +1085,7 @@ public partial class MainWindow : Window
             await terminalRegistry.CloseAndRemoveAsync(entry.Path);
             worktreeState?.RemoveOrphan(entry.Path);
             CreateTerminalWorkspace();
+            SyncReviewSidebar();
             PopulateWorktrees();
             FocusWorktreeListItem(project?.ProjectFolder ?? string.Empty);
         }
@@ -1056,6 +1101,8 @@ public partial class MainWindow : Window
             if (entry.MissingRefreshes >= 2 && terminalRegistry?.Pairs.FirstOrDefault(pair => WorktreePath.Comparer.Equals(pair.Path, entry.Path)) is { } orphan)
             {
                 CloseReviewDiff(restoreFocus: false);
+                reviewSidebar?.Suspend();
+                ReviewSidebarRegion.IsEnabled = false;
                 orphan.Attach(MainTerminalRegion, BottomTerminalRegion);
                 piTerminal = orphan.First;
                 commandsTerminal = orphan.Second;
@@ -1081,6 +1128,7 @@ public partial class MainWindow : Window
         PersistSelectedWorktree(entry.Path);
         Title = project.WindowTitle; WorktreePathText.Text = entry.Path; WorktreePathText.ToolTip = entry.Path;
         CreateTerminalWorkspace();
+        SyncReviewSidebar();
         UpdateSidebarIndicators();
         _ = UpdateWorktreeReferencesAsync();
     }
@@ -1201,14 +1249,11 @@ public partial class MainWindow : Window
         catch (Exception exception) { RefreshStatusText.Text = $"Could not remember the selected worktree: {exception.Message}"; }
     }
 
-    private void MoveSidebarRight_Click(object sender, RoutedEventArgs e) => ApplySidebarSide(SidebarSide.Right);
-    private void MoveSidebarLeft_Click(object sender, RoutedEventArgs e) => ApplySidebarSide(SidebarSide.Left);
-    private void ApplySidebarSide(SidebarSide side)
+    protected override void OnClosed(EventArgs e)
     {
-        if (side == SidebarSide.Right) { Grid.SetColumn(WorktreeSidebar, 2); Grid.SetColumn(TerminalGrid, 0); SidebarColumn.Width = new GridLength(1, GridUnitType.Star); TerminalColumn.Width = new GridLength(270); }
-        else { Grid.SetColumn(WorktreeSidebar, 0); Grid.SetColumn(TerminalGrid, 2); SidebarColumn.Width = new GridLength(270); TerminalColumn.Width = new GridLength(1, GridUnitType.Star); }
-        Grid.SetColumn(SidebarSplitter, 1);
-        sidebarPreference.Write(side);
+        reviewSidebar?.Dispose();
+        CloseReviewDiff(restoreFocus: false);
+        base.OnClosed(e);
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)

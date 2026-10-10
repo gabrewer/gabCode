@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.ExceptionServices;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -20,6 +21,7 @@ public sealed class ReadOnlyDiffWindowTests
     {
         var root = Path.Combine(Path.GetTempPath(), "gabcode diff window Ω " + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
+        int? ownedPi = null, ownedCommands = null;
         try
         {
             await RunGit(root, "init", "-b", "trunk");
@@ -36,6 +38,7 @@ public sealed class ReadOnlyDiffWindowTests
                     await WaitUntil(() => first.ProcessId is not null && second.ProcessId is not null);
                     var firstPid = first.ProcessId;
                     var secondPid = second.ProcessId;
+                    ownedPi = firstPid; ownedCommands = secondPid;
                     window.ShowCommandsInMain();
                     await window.OpenReviewDiffAsync(new ReviewFile("notes.txt", null, ReviewGroup.Unstaged, ReviewStatus.Untracked));
                     var main = Assert.IsType<ContentControl>(window.FindName("MainTerminalRegion"));
@@ -53,6 +56,7 @@ public sealed class ReadOnlyDiffWindowTests
                     view.ApplyTemplate();
                     view.UpdateLayout();
                     var close = Assert.Single(Descendants<Button>(view), b => Equals(b.Content, "Close Diff"));
+                    await WaitUntil(() => close.IsKeyboardFocused);
                     close.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                     Assert.Same(second, main.Content);
                     Assert.Same(first, bottom.Content);
@@ -61,8 +65,253 @@ public sealed class ReadOnlyDiffWindowTests
                 }
                 finally { window.Close(); await WaitUntil(() => !window.IsVisible); }
             });
+            Assert.NotNull(ownedPi); Assert.NotNull(ownedCommands);
+            await WaitUntil(() => HasExited(ownedPi.Value) && HasExited(ownedCommands.Value));
         }
         finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    private static bool HasExited(int pid)
+    {
+        try { using var process = Process.GetProcessById(pid); return process.HasExited; }
+        catch (ArgumentException) { return true; }
+    }
+
+    [Fact]
+    public async Task Sidebar_shows_selected_worktree_groups_and_opens_a_file_diff()
+    {
+        using var cases = JsonDocument.Parse(File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../tests/fixtures/worktree-change-review/cases.json"))));
+        var missing = Assert.Single(cases.RootElement.GetProperty("cases").EnumerateArray(), row => row.GetProperty("id").GetString() == "selected-file-disappears-on-refresh");
+        Assert.False(missing.GetProperty("expected").GetProperty("documentOpen").GetBoolean());
+        var root = Path.Combine(Path.GetTempPath(), "gabcode sidebar " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await File.WriteAllTextAsync(Path.Combine(root, "base.txt"), "base\n");
+            await RunGit(root, "add", "base.txt");
+            await RunGit(root, "commit", "-m", "base");
+            await File.WriteAllTextAsync(Path.Combine(root, "added.txt"), "new\n");
+            await OnSta(async () =>
+            {
+                var resolver = new TerminalProfileResolver([], [new TerminalShellCandidate(Environment.GetEnvironmentVariable("ComSpec")!, "cmd", "/d /q")]);
+                var window = new MainWindow(new ProjectContext("Review", root, "trunk"), resolver, new AcceptClose());
+                window.Show();
+                try
+                {
+                    var region = Assert.IsType<ContentControl>(window.FindName("ReviewSidebarRegion"));
+                    var sidebar = Assert.IsType<WorktreeReviewSidebar>(region.Content);
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Unstaged (1)")));
+                    var group = Assert.Single(Descendants<Expander>(sidebar), b => Equals(b.Header, "Unstaged (1)"));
+                    var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(group);
+                    Assert.NotNull(peer?.GetPattern(System.Windows.Automation.Peers.PatternInterface.ExpandCollapse));
+                    Assert.Equal("Unstaged (1)", peer.GetName());
+                    group.IsExpanded = true;
+                    await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Untracked: added.txt")));
+                    var file = Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Untracked: added.txt"));
+                    file.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    await WaitUntil(() => window.FindName("MainTerminalRegion") is ContentControl { Content: ReadOnlyDiffView });
+                    var diff = (ReadOnlyDiffView)((ContentControl)window.FindName("MainTerminalRegion")).Content;
+                    diff.ApplyTemplate(); diff.UpdateLayout();
+                    Assert.Contains(Descendants<TextBlock>(diff), text => text.Text.Contains("added.txt", StringComparison.Ordinal));
+                    sidebar.RequestRefresh();
+                    await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Untracked: added.txt") && !ReferenceEquals(b, file)));
+                    diff.ApplyTemplate(); diff.UpdateLayout();
+                    Assert.Single(Descendants<Button>(diff), b => Equals(b.Content, "Close Diff"))
+                        .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    var restored = Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Untracked: added.txt"));
+                    Assert.True(restored.IsKeyboardFocused);
+                    restored.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    await WaitUntil(() => ((ContentControl)window.FindName("MainTerminalRegion")).Content is ReadOnlyDiffView);
+                    var reopened = (ReadOnlyDiffView)((ContentControl)window.FindName("MainTerminalRegion")).Content;
+                    reopened.ApplyTemplate(); reopened.UpdateLayout();
+                    await File.WriteAllTextAsync(Path.Combine(root, "added.txt"), "second\n");
+                    await WaitUntil(() => Descendants<TextBox>(reopened).Any(box => box.Text.Contains("+second", StringComparison.Ordinal)));
+                    Assert.Same(reopened, ((ContentControl)window.FindName("MainTerminalRegion")).Content);
+                    File.Delete(Path.Combine(root, "added.txt"));
+                    await WaitUntil(() => ((ContentControl)window.FindName("MainTerminalRegion")).Content is TerminalSessionView);
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Unstaged (0)") && b.IsExpanded));
+                }
+                finally { window.Close(); await WaitUntil(() => !window.IsVisible); }
+            });
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
+    public async Task Sidebar_expands_commit_files_on_demand_and_opens_the_first_parent_diff()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode commit sidebar " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await File.WriteAllTextAsync(Path.Combine(root, "committed.txt"), "base\n");
+            await RunGit(root, "add", "committed.txt");
+            await RunGit(root, "commit", "-m", "base");
+            await RunGit(root, "checkout", "-b", "feature/review");
+            await File.WriteAllTextAsync(Path.Combine(root, "committed.txt"), "updated\n");
+            await RunGit(root, "commit", "-am", "change subject");
+            await OnSta(async () =>
+            {
+                var resolver = new TerminalProfileResolver([], [new TerminalShellCandidate(Environment.GetEnvironmentVariable("ComSpec")!, "cmd", "/d /q")]);
+                var window = new MainWindow(new ProjectContext("Review", root, "trunk"), resolver, new AcceptClose());
+                window.Show();
+                try
+                {
+                    var sidebar = Assert.IsType<WorktreeReviewSidebar>(((ContentControl)window.FindName("ReviewSidebarRegion")).Content);
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Commits ahead of main (1)")));
+                    Assert.Single(Descendants<Expander>(sidebar), b => Equals(b.Header, "Commits ahead of main (1)")).IsExpanded = true;
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => System.Windows.Automation.AutomationProperties.GetName(b).Contains("change subject", StringComparison.Ordinal)));
+                    var commit = Assert.Single(Descendants<Expander>(sidebar), b => System.Windows.Automation.AutomationProperties.GetName(b).Contains("change subject", StringComparison.Ordinal));
+                    commit.IsExpanded = true;
+                    await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Modified: committed.txt")));
+                    Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Modified: committed.txt"))
+                        .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    await WaitUntil(() => ((ContentControl)window.FindName("MainTerminalRegion")).Content is ReadOnlyDiffView);
+                    var diff = (ReadOnlyDiffView)((ContentControl)window.FindName("MainTerminalRegion")).Content;
+                    diff.ApplyTemplate(); diff.UpdateLayout();
+                    Assert.Contains(Descendants<TextBlock>(diff), block => block.Text.Contains("first parent", StringComparison.Ordinal));
+                    await WaitUntil(() => Descendants<TextBox>(diff).Any(box => box.Text.Contains("+updated", StringComparison.Ordinal)));
+                }
+                finally { window.Close(); await WaitUntil(() => !window.IsVisible); }
+            });
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
+    public async Task Selected_worktree_watchers_do_not_accumulate_across_switches_and_dispose()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode watcher handles " + Guid.NewGuid().ToString("N"));
+        var linked = root + " linked";
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await File.WriteAllTextAsync(Path.Combine(root, "base.txt"), "base\n");
+            await RunGit(root, "add", "."); await RunGit(root, "commit", "-m", "base");
+            await RunGit(root, "worktree", "add", "-b", "feature/watch", linked);
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                for (var i = 0; i < 6; i++)
+                {
+                    sidebar.Select(i % 2 == 0 ? root : linked, "trunk");
+                    Assert.InRange(sidebar.WatcherCount, 1, 3);
+                    await Task.Delay(20);
+                }
+                sidebar.Suspend();
+                Assert.Equal(0, sidebar.WatcherCount);
+                sidebar.Select(root, "trunk");
+                Assert.InRange(sidebar.WatcherCount, 1, 3);
+                sidebar.Dispose();
+                Assert.Equal(0, sidebar.WatcherCount);
+                Assert.True(sidebar.IsDisposed);
+                sidebar.RequestRefresh();
+                Assert.Equal(0, sidebar.WatcherCount);
+            });
+        }
+        finally
+        {
+            try { if (Directory.Exists(linked)) Directory.Delete(linked, true); Directory.Delete(root, true); }
+            catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [Fact]
+    public async Task Shared_reconciliation_cases_keep_valid_commit_context_and_drop_rewritten_history()
+    {
+        using var cases = JsonDocument.Parse(File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../tests/fixtures/worktree-change-review/cases.json"))));
+        var fixtureRows = cases.RootElement.GetProperty("cases").EnumerateArray().ToDictionary(row => row.GetProperty("id").GetString()!);
+        Assert.True(fixtureRows["unrelated-refresh-preserves-review-context"].GetProperty("expected").GetProperty("documentOpen").GetBoolean());
+        Assert.False(fixtureRows["rewritten-history-drops-old-selection"].GetProperty("expected").GetProperty("documentOpen").GetBoolean());
+        var root = Path.Combine(Path.GetTempPath(), "gabcode rewritten review " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await File.WriteAllTextAsync(Path.Combine(root, "base.txt"), "base\n");
+            await RunGit(root, "add", "."); await RunGit(root, "commit", "-m", "base");
+            await RunGit(root, "switch", "-c", "feature/rewrite");
+            await File.WriteAllTextAsync(Path.Combine(root, "selected.txt"), "committed\n");
+            await RunGit(root, "add", "."); await RunGit(root, "commit", "-m", "old commit");
+            await OnSta(async () =>
+            {
+                var resolver = new TerminalProfileResolver([], [new TerminalShellCandidate(Environment.GetEnvironmentVariable("ComSpec")!, "cmd", "/d /q")]);
+                var window = new MainWindow(new ProjectContext("Review", root, "trunk"), resolver, new AcceptClose());
+                window.Show();
+                try
+                {
+                    var sidebar = Assert.IsType<WorktreeReviewSidebar>(((ContentControl)window.FindName("ReviewSidebarRegion")).Content);
+                    var main = Assert.IsType<ContentControl>(window.FindName("MainTerminalRegion"));
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Commits ahead of main (1)")));
+                    Assert.Single(Descendants<Expander>(sidebar), b => Equals(b.Header, "Commits ahead of main (1)")).IsExpanded = true;
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => System.Windows.Automation.AutomationProperties.GetName(b).Contains("old commit")));
+                    Assert.Single(Descendants<Expander>(sidebar), b => System.Windows.Automation.AutomationProperties.GetName(b).Contains("old commit")).IsExpanded = true;
+                    await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Added: selected.txt")));
+                    Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Added: selected.txt")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    await WaitUntil(() => main.Content is ReadOnlyDiffView);
+                    var selectedDiff = main.Content;
+                    await File.WriteAllTextAsync(Path.Combine(root, "unrelated.txt"), "unrelated\n");
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Unstaged (1)")));
+                    Assert.Same(selectedDiff, main.Content);
+                    Assert.Contains(Descendants<Expander>(sidebar), b => System.Windows.Automation.AutomationProperties.GetName(b).Contains("old commit") && b.IsExpanded);
+                    await RunGit(root, "reset", "--hard", "trunk");
+                    await WaitUntil(() => main.Content is TerminalSessionView && Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Commits ahead of main (0)")));
+                    Assert.DoesNotContain(Descendants<Expander>(sidebar), b => System.Windows.Automation.AutomationProperties.GetName(b).Contains("old commit"));
+                }
+                finally { window.Close(); await WaitUntil(() => !window.IsVisible); }
+            });
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
+    public async Task Linked_worktree_review_reconciles_when_shared_local_main_ref_moves_externally()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode common refs " + Guid.NewGuid().ToString("N"));
+        var linked = root + " linked";
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await File.WriteAllTextAsync(Path.Combine(root, "base.txt"), "base\n");
+            await RunGit(root, "add", "."); await RunGit(root, "commit", "-m", "base");
+            await RunGit(root, "worktree", "add", "-b", "feature/review", linked);
+            await File.WriteAllTextAsync(Path.Combine(linked, "change.txt"), "branch\n");
+            await RunGit(linked, "add", "."); await RunGit(linked, "commit", "-m", "feature");
+            await OnSta(async () =>
+            {
+                var resolver = new TerminalProfileResolver([], [new TerminalShellCandidate(Environment.GetEnvironmentVariable("ComSpec")!, "cmd", "/d /q")]);
+                var window = new MainWindow(new ProjectContext("Review", linked, "trunk"), resolver, new AcceptClose());
+                window.Show();
+                try
+                {
+                    var sidebar = Assert.IsType<WorktreeReviewSidebar>(((ContentControl)window.FindName("ReviewSidebarRegion")).Content);
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Commits ahead of main (1)")));
+                    await RunGit(root, "update-ref", "refs/heads/trunk", "feature/review");
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Commits ahead of main (0)")));
+                }
+                finally { window.Close(); await WaitUntil(() => !window.IsVisible); }
+            });
+        }
+        finally
+        {
+            try { if (Directory.Exists(linked)) Directory.Delete(linked, true); Directory.Delete(root, true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     [Fact]

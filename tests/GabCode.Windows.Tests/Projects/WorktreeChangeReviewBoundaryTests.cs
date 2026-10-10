@@ -87,6 +87,39 @@ public sealed class WorktreeChangeReviewBoundaryTests
     }
 
     [Fact]
+    public async Task Large_history_pages_are_bounded_and_recomputed_when_main_moves()
+    {
+        using var repo = new Repo(); await repo.Initialize();
+        var main = await repo.Git("rev-parse", "HEAD");
+        var tree = await repo.Git("rev-parse", "HEAD^{tree}");
+        var shas = new List<string>();
+        var parent = main;
+        for (var i = 0; i < 250; i++)
+        {
+            parent = await repo.Git("commit-tree", tree, "-p", parent, "-m", $"review-{i:D3}");
+            shas.Add(parent);
+        }
+        await repo.Git("update-ref", "refs/heads/review", parent);
+        await repo.Git("checkout", "review");
+        var service = new WorktreeChangeReviewService();
+        var first = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(first.IsStale, first.Error);
+        Assert.Equal(100, first.Commits.Count);
+        Assert.Equal(shas[^1], first.Commits[0].Sha);
+        var second = await service.GetCommitsAsync(repo.Path, first.Head!, first.MainHead!, 100);
+        Assert.Equal(100, second.Count);
+        var third = await service.GetCommitsAsync(repo.Path, first.Head!, first.MainHead!, 200);
+        Assert.Equal(50, third.Count);
+        Assert.Equal(shas.AsEnumerable().Reverse(), first.Commits.Concat(second).Concat(third).Select(commit => commit.Sha));
+        await repo.Git("update-ref", "refs/heads/trunk", shas[200]);
+        var updated = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.NotEqual(first.MainHead, updated.MainHead);
+        Assert.Equal(shas.AsEnumerable().Skip(201).Reverse(), updated.Commits.Select(commit => commit.Sha));
+        Assert.True(await service.IsCommitUniqueToHeadAsync(repo.Path, shas[201], updated.Head!, updated.MainHead!));
+        Assert.False(await service.IsCommitUniqueToHeadAsync(repo.Path, shas[200], updated.Head!, updated.MainHead!));
+    }
+
+    [Fact]
     public async Task Review_diff_classifies_shared_states_against_real_files_and_controlled_failures()
     {
         using var repo = new Repo(); await repo.Initialize();
