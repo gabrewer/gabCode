@@ -200,6 +200,40 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testNativeChangeReviewLoadsSelectedWorktreeAndOpensReadOnlyDiff() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        try Data("history change\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+        try run(git, ["-C", secondary.path, "add", "history.txt"])
+        try run(git, ["-C", secondary.path, "-c", "user.name=UI", "-c", "user.email=ui@example.invalid", "commit", "-m", "Ahead of main"])
+        try Data("staged content\n".utf8).write(to: secondary.appendingPathComponent("staged.txt"))
+        try run(git, ["-C", secondary.path, "add", "staged.txt"])
+        try Data("unstaged content\n".utf8).write(to: secondary.appendingPathComponent("README.md"))
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+
+        XCTAssertTrue(app.buttons["refresh-change-review"].waitForExistence(timeout: 12))
+        let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+        XCTAssertTrue(secondaryRow.waitForExistence(timeout: 5))
+        secondaryRow.click()
+        let staged = app.buttons["review-file-staged-staged.txt"]
+        XCTAssertTrue(staged.waitForExistence(timeout: 12), "Selected worktree's staged files must load")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "review-file-unstaged-README.md").firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch.exists)
+        staged.click()
+        XCTAssertEqual(staged.value as? String, "Selected diff", "Selecting a row must update coordinator state")
+        XCTAssertTrue(app.buttons["close-review-diff"].waitForExistence(timeout: 8),
+                      "A staged row click must open the diff document")
+        XCTAssertTrue(app.descendants(matching: .any)["review-diff-document"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["read-only-unified-diff"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["review-terminal-tabs"].exists)
+        app.buttons["close-review-diff"].click()
+        XCTAssertFalse(app.descendants(matching: .any)["review-diff-document"].exists)
+    }
+
+    @MainActor
     func testCloseWithoutWorkspaceDoesNotOfferTerminalCleanup() throws {
         app.launch()
         XCTAssertTrue(app.buttons["open-workspace"].waitForExistence(timeout: 5))

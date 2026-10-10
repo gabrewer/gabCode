@@ -86,7 +86,7 @@ Use the canonical worker names from `TEAM-ORCHESTRATION.md` unless a later resou
 | `frontend-builder` | Complete native-client work for the task's declared Windows or macOS platform; not a web frontend |
 | `destroyer` | Adversarial checks focused on task-owned native lifecycle, Git safety, parity drift, and product-boundary risks |
 | `review-agent` | Triage against the PRD, approved plan, platform evidence, and canonical review rules |
-| `git-committer` | Canonical reviewed-commit and branch-size checkpoint behavior without project-specific expansion |
+| `git-committer` | Reviewed commits by default; explicit human-directed commit/push checkpoints without readiness-gate vetoes, following `TEAM-ORCHESTRATION.md`; honest evidence and branch-size reporting |
 
 Preserve the canonical `frontend-builder` identity for both native platforms rather than creating `windows-builder` or `macos-builder` automatically. Do not create a `shared-core-builder`; shared specifications and fixtures are artifacts, not another production workstream.
 
@@ -135,7 +135,9 @@ supporting capabilities loaded by those workers as needed
   -> gabcode-protocol-contracts only as a guard when reviewing a proposed internal protocol
 ```
 
-The generated prompts should coordinate this flow. The worker skills should remain narrow and point to the PRD, approved sprint record, and canonical orchestration rules instead of duplicating them.
+The generated prompts should coordinate this flow. Preserve **Human-directed Git checkpoints** from `TEAM-ORCHESTRATION.md`: explicit commit/push instructions save and share the discussed work without requiring review/test completion or another approval. They do not imply SHIP IT, readiness, or acceptance. A bounded Git operation is not an instruction to complete the sprint first.
+
+The worker skills should remain narrow and point to the PRD, approved sprint record, and canonical orchestration rules instead of duplicating them.
 
 ## Proposed model assignments
 

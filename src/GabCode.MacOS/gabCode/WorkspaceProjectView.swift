@@ -5,7 +5,6 @@ extension Notification.Name {
     static let gabCodeOpenWorkspace = Notification.Name("gabCode.openWorkspace")
     static let gabCodeCreateWorkspace = Notification.Name("gabCode.createWorkspace")
     static let gabCodeRefreshWorktrees = Notification.Name("gabCode.refreshWorktrees")
-    static let gabCodeMoveSidebar = Notification.Name("gabCode.moveSidebar")
 }
 
 @MainActor
@@ -59,12 +58,14 @@ struct WorkspaceProjectView: View {
 
     @State private var creationPresentation: WorktreeCreationPresentation?
     @StateObject private var terminalRegistry = WorkspaceTerminalRegistry()
+    @StateObject private var review = WorktreeChangeReviewCoordinator()
 
     var body: some View {
         Group {
             if controller.state == .ready, let descriptor = controller.activeDescriptor {
                 HStack(spacing: 0) {
-                    if !controller.preference.sidebarOnRight { worktreeSidebar }
+                    worktreeSidebar
+                        .accessibilityIdentifier("worktree-sidebar")
                     VStack(spacing: 0) {
                         if let fallbackNotice = controller.fallbackNotice {
                             Text(fallbackNotice)
@@ -111,9 +112,14 @@ struct WorkspaceProjectView: View {
                             )
                         }
                     }
-                    if controller.preference.sidebarOnRight { worktreeSidebar }
+                    Divider()
+                    reviewSidebar
+                        .accessibilityIdentifier("change-review-sidebar")
                 }
-                .onAppear { selectedWorktreePath = descriptor.resolvedFolder }
+                .onAppear {
+                    selectedWorktreePath = descriptor.resolvedFolder
+                    configureReview(for: descriptor.resolvedFolder)
+                }
                 .onChange(of: selectedWorktreePath) { previousPath, path in
                     if let previousPath,
                        previousPath.standardizedFileURL != path?.standardizedFileURL {
@@ -121,6 +127,7 @@ struct WorkspaceProjectView: View {
                         terminalRegistry.existingPresentation(for: previousPath)?.closeReviewDocument(restoreFocus: false)
                     }
                     if let path {
+                        configureReview(for: path)
                         controller.persistSelectedWorktree(path: path)
                         if !closedWorktreePaths.contains(path.standardizedFileURL) {
                             presentation(for: path).focusMainTerminal()
@@ -130,6 +137,14 @@ struct WorkspaceProjectView: View {
                 .onChange(of: controller.requestedSelectionPath) { _, path in
                     if let path { selectedWorktreePath = path }
                 }
+                .onChange(of: controller.activeDescriptor) { _, next in
+                    review.deactivate()
+                    if let next {
+                        selectedWorktreePath = next.resolvedFolder
+                        configureReview(for: next.resolvedFolder)
+                    }
+                }
+                .onDisappear { review.deactivate() }
                 .background(WindowTitleBridge(title: selectedWorktreePath.map { "\(controller.activeDescriptor?.name ?? "gabCode") — \($0.lastPathComponent) — gabCode" } ?? controller.windowTitle))
                 .background(WindowCloseInterceptor(
                     registry: terminalRegistry,
@@ -181,17 +196,13 @@ struct WorkspaceProjectView: View {
             guard handles(notification) else { return }
             chooseProjectFolderAndCreateWorkspace()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
+            guard let window = notification.object as? NSWindow, window.windowNumber == windowNumber else { return }
+            review.requestRefresh()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeRefreshWorktrees)) { notification in
             guard handles(notification), !hasConflictingWorkspaceOperation else { return }
             Task { await refreshWorktreesAndCleanupReferences() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .gabCodeMoveSidebar)) { notification in
-            guard handles(notification) else { return }
-            if let right = notification.userInfo?["right"] as? Bool {
-                controller.preference.sidebarOnRight = right
-            } else {
-                controller.preference.sidebarOnRight.toggle()
-            }
         }
         .onAppear {
             let isFirstWindow = ProcessWindowStartupClaims.shared.claimFirstWindow()
@@ -538,6 +549,7 @@ struct WorkspaceProjectView: View {
             }
             Button("Open Workspace") {
                 closedWorktreePaths.remove(path.standardizedFileURL)
+                configureReview(for: path)
             }
             .accessibilityLabel("Open Workspace")
             .accessibilityIdentifier("open-closed-workspace")
@@ -574,6 +586,7 @@ struct WorkspaceProjectView: View {
                 }
                 if selectedWorktreePath?.standardizedFileURL == worktree.path.standardizedFileURL {
                     closedWorktreePaths.insert(worktree.path.standardizedFileURL)
+                    review.deactivate()
                 }
             }
         }
@@ -705,12 +718,33 @@ struct WorkspaceProjectView: View {
         }
     }
 
+    private func configureReview(for path: URL) {
+        guard let descriptor = controller.activeDescriptor, isRecognizedWorktree(path),
+              !controller.orphanedWorktreePaths.contains(path.standardizedFileURL),
+              !closedWorktreePaths.contains(path.standardizedFileURL) else {
+            review.deactivate()
+            return
+        }
+        review.activate(worktree: path, mainBranch: descriptor.mainBranch)
+        review.observeSelectedWorktree()
+        review.requestRefresh()
+    }
+
+    private var reviewSidebar: some View {
+        WorktreeChangeReviewSidebar(coordinator: review) {
+            guard let path = selectedWorktreePath, review.selectedWorktree == path.standardizedFileURL,
+                  isRecognizedWorktree(path), !closedWorktreePaths.contains(path.standardizedFileURL) else { return nil }
+            return presentation(for: path)
+        }
+    }
+
     private func refreshWorktreesAndCleanupReferences() async {
         let before = Set(controller.worktrees.map { $0.path.standardizedFileURL })
         await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths)
         let after = Set(controller.worktrees.map { $0.path.standardizedFileURL })
         let confirmedRemoved = before.subtracting(after)
         for path in confirmedRemoved { removeReferences(for: path) }
+        if let selectedWorktreePath { configureReview(for: selectedWorktreePath) }
     }
 
     private func removeReferences(for path: URL) {

@@ -29,6 +29,10 @@ Do not redesign or silently expand the approved scope.
 - Stop only for material ambiguity that cannot be resolved from the approved scope, nonexistent downstream build surfaces, destructive/safety risk, or a target-platform requirement that cannot be performed and is explicitly marked blocking. Record unavailable checks as `NOT CHECKED`; do not convert them into a pass.
 - A shared prerequisite that is merged and present on the rebased branch is satisfied. Do not require a second approval conversation for a child platform sprint after the user directs execution.
 
+## Human-directed Git requests
+
+An explicit instruction to commit or push is an authorized, bounded operation, not a request to finish the sprint first. Apply **Human-directed Git checkpoints** in `TEAM-ORCHESTRATION.md`: use `git-committer` to save/push the discussed task-owned changes without requiring `SHIP IT`, green tests, manual checks, or repeated approval. Preserve actual failures and missing evidence; do not claim completion or acceptance. In the ongoing commit/push context, include the discussed local changes rather than pushing only older commits. Keep feature-branch, scope, secret-exclusion, and non-destructive Git safeguards. This exception takes precedence over the autonomous-loop and completion-boundary rules below; report the Git outcome and remaining gaps when the bounded request is done.
+
 ## Worker routing
 
 Before adopting a worker role, activate its resource route when the `activate_orchestration_resource` tool is available, then read its `SKILL.md`. After the phase, reactivate `team-lead` before coordinating the next transition.
@@ -65,7 +69,7 @@ For each task:
 4. Run the documented build/test gate on the correct platform.
 5. Run task-scoped adversarial testing and review.
 6. Remediate only task-owned findings and repeat the gate as required.
-7. Commit reviewed task-owned work only after `SHIP IT`.
+7. Commit reviewed task-owned work after `SHIP IT` in autonomous execution; honor explicit human-directed checkpoints under the exception above.
 8. Record durable evidence in the configured GitHub Issues backend before moving on.
 
 ### Enforced sprint continuity guard

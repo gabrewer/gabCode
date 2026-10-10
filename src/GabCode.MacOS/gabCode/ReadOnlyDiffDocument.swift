@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 final class ReadOnlyDiffDocumentState: ObservableObject {
     @Published private(set) var selectedFile: ReviewFile?
+    @Published private(set) var revision = 0
     @Published private(set) var content = ""
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
@@ -18,11 +19,20 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
     func open(_ file: ReviewFile, mainTerminal: TerminalWorkspaceTerminal) {
         if !isOpen { restoreTerminal = mainTerminal }
         selectedFile = file
+        revision += 1
         errorMessage = nil
         content = ""
         isLoading = true
         wantsFocus = true
         selectedBottomTerminal = restoreTerminal ?? mainTerminal
+    }
+
+    func reload() {
+        guard selectedFile != nil else { return }
+        revision += 1
+        isLoading = true
+        errorMessage = nil
+        wantsFocus = false
     }
 
     func selectBottom(_ terminal: TerminalWorkspaceTerminal) {
@@ -48,6 +58,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
 
     func close() {
         selectedFile = nil
+        revision += 1
         content = ""
         errorMessage = nil
         isLoading = false
