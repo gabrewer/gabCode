@@ -312,6 +312,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             header = graph;
         }
         var section = new Expander { Header = header, Foreground = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.White, Tag = key, IsExpanded = expanded.Contains(key), Content = content, Margin = new Thickness(key.StartsWith("commit:") ? 10 : 0, 3, 0, 2), ToolTip = title };
+        if (TryFindResource("CompactReviewExpanderStyle") is Style compactStyle) section.Style = compactStyle;
         AutomationProperties.SetName(section, title);
         section.Expanded += (_, e) =>
         {

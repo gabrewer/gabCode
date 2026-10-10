@@ -105,10 +105,19 @@ public sealed class ReadOnlyDiffWindowTests
                     var sidebar = Assert.IsType<WorktreeReviewSidebar>(region.Content);
                     await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Unstaged (1)")));
                     var group = Assert.Single(Descendants<Expander>(sidebar), b => Equals(b.Header, "Unstaged (1)"));
+                    Assert.Same(window.FindResource("CompactReviewExpanderStyle"), group.Style);
                     var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(group);
                     Assert.NotNull(peer?.GetPattern(System.Windows.Automation.Peers.PatternInterface.ExpandCollapse));
                     Assert.Equal("Unstaged (1)", peer.GetName());
-                    group.IsExpanded = true;
+                    group.ApplyTemplate(); group.UpdateLayout();
+                    var disclosure = Assert.Single(Descendants<System.Windows.Controls.Primitives.ToggleButton>(group));
+                    Assert.True(disclosure.Focus());
+                    Assert.True(disclosure.IsKeyboardFocused);
+                    disclosure.IsChecked = false;
+                    Assert.False(group.IsExpanded);
+                    disclosure.IsChecked = true;
+                    Assert.True(group.IsExpanded);
+                    Assert.True(disclosure.IsKeyboardFocused);
                     await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Untracked: added.txt")));
                     var file = Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Untracked: added.txt"));
                     file.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
@@ -168,7 +177,11 @@ public sealed class ReadOnlyDiffWindowTests
                     Assert.Single(Descendants<Expander>(sidebar), b => Equals(b.Header, "Commits ahead of main (1)")).IsExpanded = true;
                     await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => System.Windows.Automation.AutomationProperties.GetName(b).Contains("change subject", StringComparison.Ordinal)));
                     var commit = Assert.Single(Descendants<Expander>(sidebar), b => System.Windows.Automation.AutomationProperties.GetName(b).Contains("change subject", StringComparison.Ordinal));
-                    commit.IsExpanded = true;
+                    Assert.Same(window.FindResource("CompactReviewExpanderStyle"), commit.Style);
+                    commit.ApplyTemplate(); commit.UpdateLayout();
+                    var commitToggle = Assert.Single(Descendants<System.Windows.Controls.Primitives.ToggleButton>(commit));
+                    commitToggle.IsChecked = true;
+                    Assert.True(commit.IsExpanded);
                     await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Modified: committed.txt")));
                     Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Modified: committed.txt"))
                         .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
