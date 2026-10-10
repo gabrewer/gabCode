@@ -229,7 +229,12 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
         do {
             let output = try await run(args, in: root, accepted: allowDifference ? [0, 1] : [0])
             if allowDifference && !output.text.hasPrefix("diff --git ") { return ReviewDiff(state: .unavailable, text: "Git could not read the current file.") }
-            if output.text.contains("Binary files ") || output.text.contains("GIT binary patch") { return ReviewDiff(state: .binary, text: "Binary file — no text diff available.") }
+            // Git's binary markers are whole metadata lines. Hunk text is prefixed
+            // with +, -, or space, so marker-like file content stays readable.
+            let binary = output.text.split(separator: "\n", omittingEmptySubsequences: false).contains { line in
+                line == "GIT binary patch" || line.hasPrefix("Binary files ") && line.hasSuffix(" differ")
+            }
+            if binary { return ReviewDiff(state: .binary, text: "Binary file — no text diff available.") }
             if output.data.count > min(outputLimit, 1024 * 1024) { return ReviewDiff(state: .oversized, text: "Diff exceeds the document size limit.") }
             return ReviewDiff(state: .patch, text: output.text)
         } catch ReviewGitError.truncated { return ReviewDiff(state: .truncated, text: "Diff exceeds the output limit.") }
