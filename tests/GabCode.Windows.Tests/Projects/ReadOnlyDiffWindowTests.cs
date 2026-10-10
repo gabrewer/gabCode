@@ -4,6 +4,7 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using GabCode.Windows;
 using GabCode.Windows.Projects;
@@ -118,6 +119,18 @@ public sealed class ReadOnlyDiffWindowTests
                     disclosure.IsChecked = true;
                     Assert.True(group.IsExpanded);
                     Assert.True(disclosure.IsKeyboardFocused);
+                    sidebar.RequestRefresh();
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => Equals(b.Header, "Unstaged (1)") && !ReferenceEquals(b, group)));
+                    await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                    var refreshedGroup = Assert.Single(Descendants<Expander>(sidebar), b => Equals(b.Header, "Unstaged (1)"));
+                    refreshedGroup.ApplyTemplate(); refreshedGroup.UpdateLayout();
+                    var refreshedDisclosure = Assert.Single(Descendants<System.Windows.Controls.Primitives.ToggleButton>(refreshedGroup));
+                    Assert.Same(refreshedDisclosure, Keyboard.FocusedElement);
+                    Assert.True(refreshedGroup.IsExpanded);
+                    PressSpace(refreshedDisclosure, window);
+                    Assert.False(refreshedGroup.IsExpanded);
+                    PressSpace(refreshedDisclosure, window);
+                    Assert.True(refreshedGroup.IsExpanded);
                     await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Untracked: added.txt")));
                     var file = Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Untracked: added.txt"));
                     file.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
@@ -182,6 +195,19 @@ public sealed class ReadOnlyDiffWindowTests
                     var commitToggle = Assert.Single(Descendants<System.Windows.Controls.Primitives.ToggleButton>(commit));
                     commitToggle.IsChecked = true;
                     Assert.True(commit.IsExpanded);
+                    Assert.True(commitToggle.Focus());
+                    sidebar.RequestRefresh();
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => b.Tag is string key && key.StartsWith("commit:", StringComparison.Ordinal) && !ReferenceEquals(b, commit)));
+                    await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                    var refreshedCommit = Assert.Single(Descendants<Expander>(sidebar), b => b.Tag is string key && key.StartsWith("commit:", StringComparison.Ordinal));
+                    refreshedCommit.ApplyTemplate(); refreshedCommit.UpdateLayout();
+                    var refreshedToggle = Assert.Single(Descendants<System.Windows.Controls.Primitives.ToggleButton>(refreshedCommit));
+                    Assert.Same(refreshedToggle, Keyboard.FocusedElement);
+                    Assert.True(refreshedCommit.IsExpanded);
+                    PressSpace(refreshedToggle, window);
+                    Assert.False(refreshedCommit.IsExpanded);
+                    PressSpace(refreshedToggle, window);
+                    Assert.True(refreshedCommit.IsExpanded);
                     await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Modified: committed.txt")));
                     Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Modified: committed.txt"))
                         .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
@@ -353,6 +379,12 @@ public sealed class ReadOnlyDiffWindowTests
             foreach (var inner in Descendants<T>(child)) yield return inner;
         }
     }
+    private static void PressSpace(UIElement target, Window window)
+    {
+        foreach (var routed in new[] { Keyboard.KeyDownEvent, Keyboard.KeyUpEvent })
+            target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window), Environment.TickCount, Key.Space) { RoutedEvent = routed });
+    }
+
     private static async Task WaitUntil(Func<bool> condition)
     {
         var end = DateTime.UtcNow + TimeSpan.FromSeconds(15);

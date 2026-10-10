@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -280,7 +281,12 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             if (disposed || epoch != renderEpoch || !string.Equals(worktree, renderedWorktree, StringComparison.OrdinalIgnoreCase) || !ReferenceEquals(coordinator.Snapshot, renderedSnapshot)) return;
             scroller.ScrollToVerticalOffset(offset);
             if (focusedKey is not null && fileButtons.TryGetValue(focusedKey, out var button)) button.Focus();
-            else if (focusedSection is not null && sections.TryGetValue(focusedSection, out var section)) section.Focus();
+            else if (focusedSection is not null && sections.TryGetValue(focusedSection, out var section))
+            {
+                section.ApplyTemplate();
+                if (section.Template.FindName("Disclosure", section) is ToggleButton disclosure) disclosure.Focus();
+                else section.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+            }
         }, DispatcherPriority.Loaded);
     }
 
