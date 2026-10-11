@@ -84,7 +84,10 @@ struct WorktreeChangeReviewSidebar: View {
     }
 
     private func fileButton(_ file: ReviewFile) -> some View {
-        Button {
+        let comparison = file.group == .commit
+            ? (file.comparison.hasPrefix("empty tree →") ? "Root commit · empty tree → commit" : "First parent → commit")
+            : file.comparison
+        return Button {
             guard let presentation = presentation() else {
                 coordinator.reportUnavailableSelection()
                 return
@@ -98,7 +101,7 @@ struct WorktreeChangeReviewSidebar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
                         .lineLimit(2).truncationMode(.middle)
-                    Text("\(file.status.rawValue.capitalized) · \(file.comparison)")
+                    Text("\(file.status.rawValue.capitalized) · \(comparison)")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -108,7 +111,7 @@ struct WorktreeChangeReviewSidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(file.status.rawValue.capitalized), \(file.path), \(file.comparison)\(file.oldPath.map { ", renamed from \($0)" } ?? "")")
+        .accessibilityLabel("\(file.status.rawValue.capitalized), \(file.path), \(comparison)\(file.oldPath.map { ", renamed from \($0)" } ?? "")")
         .accessibilityAddTraits(coordinator.selectedFile?.id == file.id ? [.isSelected] : [])
         .accessibilityValue(coordinator.selectedFile?.id == file.id ? "Selected diff" : "Not selected")
         .accessibilityIdentifier("review-file-\(file.group.rawValue)-\(file.path)")
@@ -164,7 +167,7 @@ struct WorktreeChangeReviewSidebar: View {
                             .background(selected ? Color.accentColor.opacity(0.14) : Color.clear)
                         }
                         .buttonStyle(.plain)
-                        .help("\(commit.subject) · \(commit.author) · \(commit.sha.prefix(8))")
+                        .help("\(commit.subject) · \(commit.author)")
                         .accessibilityLabel("\(commit.parents.count > 1 ? "Merge commit" : "Commit"), \(isHead ? "HEAD, " : "")\(commit.sha), \(commit.subject), \(commit.author), \(commit.timestamp.formatted()), \(commit.summary)")
                         .accessibilityValue("\(expanded ? "Expanded" : "Collapsed")\(selected ? ", selected diff" : "")")
                         .accessibilityIdentifier("review-commit-\(commit.sha)")
@@ -178,7 +181,7 @@ struct WorktreeChangeReviewSidebar: View {
                     }
                     if expanded {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(commit.subject)\n\(commit.sha.prefix(8)) · \(commit.author) · \(commit.timestamp.formatted(date: .abbreviated, time: .shortened))\n\(commit.summary)")
+                            Text("\(commit.subject)\n\(commit.author) · \(commit.timestamp.formatted(date: .abbreviated, time: .shortened))\n\(commit.summary)")
                                 .font(.caption2).foregroundStyle(.secondary)
                                 .accessibilityIdentifier("review-commit-details-\(commit.sha)")
                             if let files = coordinator.commitFiles[commit.sha] {
