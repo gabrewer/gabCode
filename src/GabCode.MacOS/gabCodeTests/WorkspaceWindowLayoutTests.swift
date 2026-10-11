@@ -5,12 +5,16 @@ import XCTest
 @MainActor
 final class WorkspaceWindowLayoutTests: XCTestCase {
     func testProjectWindowMinimumIsTheCompleteSidebarAndTerminalWidth() {
-        XCTAssertEqual(WorkspaceWindowLayout.minimumWidth, 1_001)
+        XCTAssertGreaterThanOrEqual(WorkspaceWindowLayout.minimumWidth,
+            WorkspaceWindowLayout.sidebarMaximumWidth + WorkspaceWindowLayout.dividerWidth
+                + WorkspaceWindowLayout.terminalMinimumWidth + WorkspaceWindowLayout.dividerWidth
+                + WorkspaceWindowLayout.reviewIdealWidth,
+            "The native minimum must cover both sidebar layout proposals and the retained terminal minimum")
         XCTAssertGreaterThanOrEqual(WorkspaceWindowLayout.defaultWidth, WorkspaceWindowLayout.minimumWidth)
         XCTAssertEqual(
             WorkspaceWindowLayout.minimumWidth,
-            WorkspaceWindowLayout.sidebarMinimumWidth + WorkspaceWindowLayout.dividerWidth + WorkspaceWindowLayout.terminalMinimumWidth
-                + WorkspaceWindowLayout.dividerWidth + WorkspaceWindowLayout.reviewMinimumWidth
+            WorkspaceWindowLayout.sidebarMaximumWidth + WorkspaceWindowLayout.dividerWidth + WorkspaceWindowLayout.terminalMinimumWidth
+                + WorkspaceWindowLayout.dividerWidth + WorkspaceWindowLayout.reviewIdealWidth
         )
         XCTAssertGreaterThanOrEqual(WorkspaceWindowLayout.defaultHeight, WorkspaceWindowLayout.minimumHeight)
     }
@@ -28,7 +32,7 @@ final class WorkspaceWindowLayoutTests: XCTestCase {
     func testSidebarWidthClampsToTheAvailableProjectWindowWidth() {
         XCTAssertEqual(
             WorkspaceWindowLayout.sidebarWidth(for: WorkspaceWindowLayout.minimumWidth),
-            WorkspaceWindowLayout.sidebarMinimumWidth
+            WorkspaceWindowLayout.sidebarMaximumWidth
         )
         XCTAssertEqual(
             WorkspaceWindowLayout.sidebarWidth(
@@ -51,7 +55,10 @@ final class WorkspaceWindowLayoutTests: XCTestCase {
         let remaining = width - WorkspaceWindowLayout.sidebarWidth(for: width) - WorkspaceWindowLayout.dividerWidth
             - WorkspaceWindowLayout.reviewMinimumWidth - WorkspaceWindowLayout.dividerWidth
 
-        XCTAssertEqual(remaining, WorkspaceWindowLayout.terminalMinimumWidth)
+        XCTAssertGreaterThanOrEqual(remaining, WorkspaceWindowLayout.terminalMinimumWidth)
+        XCTAssertGreaterThanOrEqual(width - WorkspaceWindowLayout.sidebarMaximumWidth - WorkspaceWindowLayout.dividerWidth
+            - WorkspaceWindowLayout.reviewIdealWidth - WorkspaceWindowLayout.dividerWidth,
+            WorkspaceWindowLayout.terminalMinimumWidth)
     }
 
     func testFrameFittingMovesOnlyOverflowingRestoredWindowIntoVisibleFrame() {

@@ -248,6 +248,56 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testReviewAndWorktreeControlsStayInsideWindowAtMinimumAfterReopen() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        try Data("history\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+        try run(git, ["-C", secondary.path, "add", "history.txt"])
+        try run(git, ["-C", secondary.path, "-c", "user.name=UI", "-c", "user.email=ui@example.invalid", "commit", "-m", "Review at minimum width"])
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 12))
+        if window.frame.width <= 1_161 {
+            let growCorner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
+            growCorner.press(forDuration: 0.2, thenDragTo: growCorner.withOffset(CGVector(dx: 160, dy: 0)))
+        }
+        let initialWidth = window.frame.width
+        XCTAssertGreaterThan(initialWidth, 1_161, "Resize fixture must start wider than the native minimum")
+        checkControls()
+        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
+        corner.press(forDuration: 0.2, thenDragTo: corner.withOffset(CGVector(dx: -350, dy: 0)))
+        XCTAssertLessThan(window.frame.width, initialWidth, "Resize fixture must exercise native minimum sizing")
+        XCTAssertEqual(window.frame.width, 1_161, accuracy: 1, "Exercise the actual native minimum, not merely a wider passing size")
+        func checkControls() {
+            let bounds = app.windows.firstMatch.frame
+            let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+            XCTAssertTrue(secondaryRow.waitForExistence(timeout: 12))
+            XCTAssertGreaterThanOrEqual(secondaryRow.frame.minX, bounds.minX)
+            XCTAssertLessThanOrEqual(secondaryRow.frame.maxX, bounds.maxX)
+            XCTAssertTrue(secondaryRow.isHittable, "Worktree selection must remain reachable")
+            secondaryRow.click()
+            let refresh = app.buttons["refresh-change-review"]
+            XCTAssertTrue(refresh.waitForExistence(timeout: 12))
+            XCTAssertLessThanOrEqual(refresh.frame.maxX, bounds.maxX, "Refresh must not clip past the window")
+            XCTAssertTrue(refresh.isHittable, "Refresh must remain clickable")
+            refresh.click()
+            let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
+            XCTAssertTrue(commit.waitForExistence(timeout: 12))
+            XCTAssertLessThanOrEqual(commit.frame.maxX, bounds.maxX)
+            XCTAssertTrue(commit.isHittable)
+        }
+        checkControls()
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 12))
+        XCTAssertEqual(app.windows.firstMatch.frame.width, 1_161, accuracy: 1, "Reopen must exercise the persisted minimum-width window")
+        checkControls()
+    }
+
+    @MainActor
     func testBranchHistoryUsesCompactSingleLineRowsWithAccessibleExpandedDetails() throws {
         let fixture = try makeWorkspaceFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
