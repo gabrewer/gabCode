@@ -339,9 +339,16 @@ final class gabCodeUITests: XCTestCase {
         first.click()
         XCTAssertTrue(details.waitForExistence(timeout: 8))
         let detailText = "\(details.label) \(details.value as? String ?? "")"
-        XCTAssertTrue(detailText.contains(String(head.prefix(8))), "Expanded details were: \(details.debugDescription)")
+        XCTAssertFalse(detailText.contains(String(head.prefix(8))), "Expanded details should not repeat the commit hash")
         XCTAssertTrue(detailText.contains("Reviewer"))
-        XCTAssertTrue(app.buttons["review-file-commit-history.txt"].waitForExistence(timeout: 8))
+        let historyFile = app.buttons["review-file-commit-history.txt"]
+        XCTAssertTrue(historyFile.waitForExistence(timeout: 8))
+        XCTAssertFalse(historyFile.label.contains(head), "Historical file rows should not render raw commit IDs")
+        XCTAssertTrue(historyFile.label.contains("First parent"), "The comparison basis must remain understandable")
+        let expandedScreenshot = XCTAttachment(screenshot: app.screenshot())
+        expandedScreenshot.name = "Expanded history without commit hashes"
+        expandedScreenshot.lifetime = .keepAlways
+        add(expandedScreenshot)
         first.click()
         XCTAssertFalse(details.exists)
     }
