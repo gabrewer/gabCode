@@ -38,11 +38,17 @@ Renamed files show their old and new paths. Selecting a staged file opens its in
 
 ### 3. Branch-unique commit review — Must-have
 
-Each branch-unique commit row shows its abbreviated SHA, subject, author, timestamp, and file-change summary. Commits are collapsed initially. Activating a commit expands its flat list of changed files, with added, modified, deleted, and renamed badges; activating it again collapses the list.
+Commit history uses the same compact tree hierarchy and information density on Windows and macOS, based on the Windows review sidebar presentation. Native controls and platform styling remain native; the shared contract is the information hierarchy and behavior, not pixel-identical rendering. At a comparable sidebar width and text scale, both platforms show the same sections, commit-row hierarchy, file-row hierarchy, expansion defaults, and semantic labels without one platform repeating details that the other keeps compact.
+
+Each collapsed commit row shows a graph node/merge indicator, an expansion disclosure, the `HEAD` marker when applicable, the full commit subject truncated to the available row width, and the author. Commit hashes are not displayed in the row. Long subject and author text truncate rather than forcing excessive row height or displacing the disclosure/HEAD indicator. Commit rows are collapsed initially.
+
+Hovering or otherwise requesting the native help tooltip for a commit exposes its full SHA plus subject, author, timestamp, and file-change summary. Hash availability must not depend on pointer hover: the commit's accessible name/value includes its full identity, and **Copy Commit Hash** is available from a native commit context menu reachable by pointer and keyboard. Invoking it copies exactly the full SHA (no label or surrounding text) to the system clipboard, reports accessible confirmation, and does not change Git or the selected diff. If the platform provides an equivalent discoverable native alternate action, it must preserve the same label, keyboard reachability, and behavior.
+
+Expanding a commit shows concise metadata (subject, author/timestamp, and file-change summary) once, followed immediately by a compact flat list of changed files with added, modified, deleted, and renamed status. Do not repeat full commit metadata in the expanded header when it is already available in the collapsed row/tooltip. File rows remain compact, consistent with ordinary working-change rows, and show a readable status plus semantic comparison basis; do not expose raw Git object IDs as comparison labels. The commit SHA remains internal stable identity for querying, selection, refresh preservation, and diff routing.
 
 Selecting a changed file opens the diff for that file at that exact commit in gabCode's existing main content area. The displayed historical content remains read-only. A deleted historical file does not offer an action that would open a non-existent current file in an external editor.
 
-Merge commits remain visible and are clearly identified. Their changed-file lists and file diffs compare the merge commit with its first parent, and the UI labels that comparison basis. The branch range is recomputed from Git whenever branch tips or the selected worktree change; it is not captured as local history metadata.
+Merge commits remain visible and are clearly identified. Their changed-file lists and file diffs compare the merge commit with its first parent, and the UI labels that comparison basis. Root commits label the empty-tree-to-commit basis. The branch range is recomputed from Git whenever branch tips or the selected worktree change; it is not captured as local history metadata.
 
 ### 4. Graph-inspired history affordance — Should-have
 
@@ -62,7 +68,9 @@ A refresh preserves an expanded commit row and selected file when its commit SHA
 
 ### 6. Native-platform parity — Must-have
 
-Windows and macOS independently implement the same Git semantics, review ordering, staged/unstaged distinction, diff selection behavior, refresh behavior, keyboard behavior, and accessible state. Their native controls may differ in presentation. Evidence from one platform does not establish the other's behavior.
+Windows and macOS independently implement the same Git semantics, review ordering, staged/unstaged distinction, diff selection behavior, refresh behavior, keyboard behavior, accessible state, and commit-tree information hierarchy. Their native controls and visual styling may differ while preserving comparable compactness and identical information/interaction outcomes. Evidence from one platform does not establish the other's behavior.
+
+For read-only parity comparisons, create the same disposable Git repository state on both target platforms with distinct commit subjects, author, timestamps, one merge/root example, and identifiable full SHAs. Compare the same selected worktree and expanded/collapsed commit selection at comparable sidebar widths and text scales. Record a parity matrix covering working-change sections; commit count/order and row hierarchy; expanded metadata and compact file rows; merge/root labels; tooltip contents; keyboard/pointer discovery of **Copy Commit Hash**; exact full-SHA clipboard value; and focus retention. Capture target-native screenshots and interaction evidence separately; do not require pixel-identical rendering.
 
 ## Non-Goals
 
@@ -70,6 +78,7 @@ This increment will not:
 
 - Create dockable, movable, floating, or independently managed windows; dockable-window design is a future issue.
 - Render a complete GitKraken-style multi-lane DAG, add graph filters, or provide list/tree display preferences.
+- Display commit hashes persistently in commit rows or copy anything other than the selected commit's full hash through **Copy Commit Hash**.
 - Show commits inherited from the configured main branch as branch work.
 - Infer whether a particular change was made by an LLM, Pi, a terminal command, an IDE, or a person.
 - Inspect, manage, start, resume, or interpret CLI coding-tool sessions or terminal content.
@@ -87,13 +96,14 @@ This increment will not:
 - **Windows:** C#/WPF owns Git process execution, watcher/reconciliation, cancellation, UI-thread application, sidebar controls, native keyboard behavior, and UI Automation accessibility.
 - **macOS:** Swift/SwiftUI/AppKit owns the equivalent process execution, filesystem observation, async coordination, UI update, native controls, keyboard behavior, and accessibility.
 - Cross-platform artifacts may describe fixtures and expected outcomes, but production implementation remains independent native code.
+- The Windows presentation is the reference for compact commit-tree information hierarchy, not a mandate to replace native macOS controls with WPF-like controls. Retain each platform's existing reviewed visual refinements unless they conflict with this shared hierarchy. Keep the clipboard action explicit and scoped to copying the selected commit SHA; do not add Git or terminal mutations.
 
 ## Milestones
 
 1. **Behavior and fixture definition** — Define language-neutral Git fixtures and expected outcomes for clean, staged, unstaged, untracked, conflicted, mixed staged/unstaged, rename, deletion, binary/oversized content, linear unique history, merge commits with first-parent comparison, rewritten history, large commit ranges, and unavailable Git/reference states.
 2. **Windows review sidebar** — Implement the Windows right-sidebar review surface, Git normalization, staged/unstaged and commit-file diff routing, debounced reconciliation, explicit refresh, automated coverage, and Windows target-machine accessibility evidence.
 3. **macOS review sidebar** — Implement the equivalent macOS behavior, native refresh/cancellation lifecycle, diff routing, automated coverage, and macOS target-machine accessibility evidence.
-4. **Parity and resilience review** — Verify both clients against the shared fixtures; exercise external Git changes, rapid commit/rewrite bursts, branch/worktree switching during refresh, large branch behavior, missed-event focus reconciliation, and keyboard/screen-reader operation.
+4. **Parity and resilience review** — Verify both clients against the shared fixtures; exercise external Git changes, rapid commit/rewrite bursts, branch/worktree switching during refresh, large branch behavior, missed-event focus reconciliation, and keyboard/screen-reader operation. Using equivalent repositories and sidebar widths, compare the shared compact commit-tree hierarchy, full-SHA tooltip and accessible identity, keyboard-reachable Copy Commit Hash action, and exact clipboard contents on each target OS.
 
 ## Open Questions
 
