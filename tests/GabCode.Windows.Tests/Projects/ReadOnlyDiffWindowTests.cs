@@ -313,7 +313,7 @@ public sealed class ReadOnlyDiffWindowTests
                 Assert.Equal(0, sidebar.WatcherCount);
             });
         }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        finally { try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 
     [Fact]
@@ -344,7 +344,151 @@ public sealed class ReadOnlyDiffWindowTests
                 Assert.Equal(0, sidebar.WatcherCount);
             });
         }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
+    public async Task Real_file_bursts_reconcile_and_later_edits_are_still_observed()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode real burst Ω " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await RunGit(root, "commit", "--allow-empty", "-m", "base");
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                var coordinator = (WorktreeChangeReviewCoordinator)typeof(WorktreeReviewSidebar)
+                    .GetField("coordinator", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar)!;
+                sidebar.Select(root, "trunk");
+                await WaitUntil(() => coordinator.Snapshot?.IsStale is false);
+                await Task.Run(() => Parallel.For(0, 500, i => File.WriteAllText(Path.Combine(root, $"file-{i}.txt"), "first\n")));
+                await WaitUntil(() => coordinator.Snapshot is { IsStale: false, Working.Count: 500 });
+                await Task.Run(() => Parallel.For(0, 500, i => File.Delete(Path.Combine(root, $"file-{i}.txt"))));
+                await WaitUntil(() => coordinator.Snapshot is { IsStale: false, Working.Count: 0 });
+                await File.WriteAllTextAsync(Path.Combine(root, "later.txt"), "still watching\n");
+                await WaitUntil(() => coordinator.Snapshot?.Working.Any(f => f.Path == "later.txt") is true);
+                Assert.Equal(1, sidebar.WatcherCount);
+            });
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
+    public async Task Overflow_burst_does_not_cancel_an_inflight_read_or_queue_one_ui_callback_per_event()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode busy watcher " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var coordinator = (WorktreeChangeReviewCoordinator)typeof(WorktreeReviewSidebar).GetField("coordinator", flags)!.GetValue(sidebar)!;
+                var blocked = new TaskCompletionSource<ReviewSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var calls = 0;
+                CancellationToken busyToken = default;
+                Func<string, string?, CancellationToken, Task<ReviewSnapshot>> read = (path, _, token) =>
+                {
+                    ++calls;
+                    if (calls == 2) { busyToken = token; return blocked.Task; }
+                    return Task.FromResult(new ReviewSnapshot(path, "read-" + calls, "main", [], [], false, null));
+                };
+                typeof(WorktreeChangeReviewCoordinator).GetField("read", flags)!.SetValue(coordinator, read);
+                sidebar.Select(root, "trunk");
+                await WaitUntil(() => coordinator.Snapshot?.Head == "read-1");
+                sidebar.RequestRefresh();
+                Assert.Equal(2, calls);
+                var watcher = Assert.Single((List<FileSystemWatcher>)typeof(WorktreeReviewSidebar).GetField("watchers", flags)!.GetValue(sidebar)!);
+                var onError = typeof(FileSystemWatcher).GetMethod("OnError", flags)!;
+                var onChanged = typeof(FileSystemWatcher).GetMethod("OnChanged", flags)!;
+                var posted = 0;
+                System.Windows.Threading.DispatcherHookEventHandler hook = (_, _) => Interlocked.Increment(ref posted);
+                Dispatcher.CurrentDispatcher.Hooks.OperationPosted += hook;
+                try
+                {
+                    for (var i = 0; i < 10_000; ++i)
+                        onChanged.Invoke(watcher, [new FileSystemEventArgs(WatcherChangeTypes.Changed, root, "file.txt")]);
+                    for (var i = 0; i < 100; ++i)
+                        onError.Invoke(watcher, [new ErrorEventArgs(new InternalBufferOverflowException("burst"))]);
+                }
+                finally { Dispatcher.CurrentDispatcher.Hooks.OperationPosted -= hook; }
+                Assert.InRange(posted, 0, 1);
+                await WaitUntil(() => sidebar.CurrentWatcherWarning is not null);
+                Assert.False(busyToken.IsCancellationRequested);
+                Assert.Equal(2, calls);
+                blocked.SetResult(new ReviewSnapshot(root, "busy-result", "main", [], [], false, null));
+                await WaitUntil(() => calls >= 3 && sidebar.CurrentWatcherWarning is null);
+                Assert.Equal("read-" + calls, coordinator.Snapshot?.Head);
+                Assert.Same(watcher, Assert.Single((List<FileSystemWatcher>)typeof(WorktreeReviewSidebar).GetField("watchers", flags)!.GetValue(sidebar)!));
+            });
+        }
         finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task Fatal_watcher_error_disables_watcher_until_periodic_retry()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode fatal watcher " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                var field = typeof(WorktreeReviewSidebar).GetField("watchers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                var onError = typeof(FileSystemWatcher).GetMethod("OnError", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                var poll = (DispatcherTimer)typeof(WorktreeReviewSidebar)
+                    .GetField("poll", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar)!;
+                sidebar.Select(root, "trunk");
+                var watcher = Assert.Single((List<FileSystemWatcher>)field.GetValue(sidebar)!);
+                for (var i = 0; i < 100; ++i)
+                    onError.Invoke(watcher, [new ErrorEventArgs(new InternalBufferOverflowException("before fatal"))]);
+                onError.Invoke(watcher, [new ErrorEventArgs(new IOException("injected fatal"))]);
+                onError.Invoke(watcher, [new ErrorEventArgs(new InternalBufferOverflowException("after fatal"))]);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                Assert.Equal(0, sidebar.WatcherCount);
+                Assert.Contains("injected fatal", sidebar.CurrentWatcherWarning);
+                poll.Interval = TimeSpan.FromMilliseconds(50);
+                await WaitUntil(() => sidebar.CurrentWatcherWarning is null && sidebar.WatcherCount == 1);
+                Assert.NotSame(watcher, Assert.Single((List<FileSystemWatcher>)field.GetValue(sidebar)!));
+            });
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
+    public async Task Overflow_reconciles_from_git_without_restarting_a_live_watcher()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode overflow burst " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await File.WriteAllTextAsync(Path.Combine(root, "base.txt"), "base\n");
+            await RunGit(root, "add", "."); await RunGit(root, "commit", "-m", "base");
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                var field = typeof(WorktreeReviewSidebar).GetField("watchers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                var onError = typeof(FileSystemWatcher).GetMethod("OnError", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                sidebar.Select(root, "trunk");
+                await WaitUntil(() => sidebar.CurrentWatcherWarning is null && sidebar.WatcherCount == 1);
+                var watcher = Assert.Single((List<FileSystemWatcher>)field.GetValue(sidebar)!);
+                onError.Invoke(watcher, [new ErrorEventArgs(new InternalBufferOverflowException("injected"))]);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                Assert.Same(watcher, Assert.Single((List<FileSystemWatcher>)field.GetValue(sidebar)!));
+                await WaitUntil(() => sidebar.CurrentWatcherWarning is null);
+                Assert.Same(watcher, Assert.Single((List<FileSystemWatcher>)field.GetValue(sidebar)!));
+            });
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 
     [Fact]

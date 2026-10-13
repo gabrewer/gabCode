@@ -16,6 +16,12 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private readonly WorktreeChangeReviewCoordinator coordinator;
     private readonly DispatcherTimer debounce;
     private readonly DispatcherTimer poll;
+    private readonly WatcherInvalidation invalidation = new();
+    private readonly object errorGate = new();
+    private (FileSystemWatcher Watcher, Exception Error, string Directory, long Generation)? pendingWatcherError;
+    private bool errorPosted;
+    private bool overflowPending;
+    private long overflowVersion;
     private readonly DockPanel root;
     private readonly TextBlock titleText;
     private readonly StackPanel rows = new();
@@ -36,6 +42,9 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private string? mainHead;
     private string? activeFileIdentity;
     private bool moreAvailable = true;
+    private bool refreshRunning;
+    private bool refreshPending;
+    private long refreshEpoch;
     private long generation;
     private long renderEpoch;
     private bool disposed;
@@ -55,14 +64,18 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             if (ReferenceEquals(coordinator.Snapshot, snapshot)) Render(snapshot);
         });
         debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
-        debounce.Tick += (_, _) => { debounce.Stop(); _ = coordinator.RefreshAsync(); };
+        debounce.Tick += (_, _) =>
+        {
+            // Fixed-window batching: continued file writes cannot postpone reconciliation forever.
+            if (invalidation.Consume()) _ = RefreshReviewAsync();
+        };
         poll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(12) };
-        poll.Tick += (_, _) => { if (worktree is null) return; if (watcherWarning is not null) StartWatchers(worktree); status.Text = "Refreshing changes…"; _ = coordinator.RefreshAsync(); };
+        poll.Tick += (_, _) => { if (worktree is null) return; if (watchers.Count == 0) StartWatchers(worktree); _ = RefreshReviewAsync(); };
         root = new DockPanel { Background = new SolidColorBrush(Color.FromRgb(29, 30, 36)) };
         var title = new DockPanel { Margin = new Thickness(0, 8, 0, 4) };
         var button = new Button { Content = "Refresh changes", Padding = new Thickness(5, 2, 5, 2) };
         AutomationProperties.SetName(button, "Refresh selected worktree changes and commits");
-        button.Click += (_, _) => { if (worktree is not null) { if (watcherWarning is not null) StartWatchers(worktree); status.Text = "Refreshing changes…"; } _ = coordinator.RefreshAsync(); };
+        button.Click += (_, _) => { if (worktree is not null && watchers.Count == 0) StartWatchers(worktree); _ = RefreshReviewAsync(); };
         DockPanel.SetDock(button, Dock.Right); title.Children.Add(button);
         titleText = new TextBlock { Text = "Changes and commits", FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center };
         title.Children.Add(titleText);
@@ -107,6 +120,9 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (disposed) return;
         if (string.Equals(path, worktree, StringComparison.OrdinalIgnoreCase) && branch == mainBranch) { RequestRefresh(); return; }
         ++generation;
+        ++refreshEpoch; refreshRunning = refreshPending = false;
+        overflowPending = false;
+        debounce.Stop(); invalidation.Reset();
         lazyCancellation?.Cancel(); lazyCancellation?.Dispose(); lazyCancellation = null;
         foreach (var watcher in watchers) watcher.Dispose();
         watchers.Clear(); watcherWarning = null;
@@ -121,13 +137,16 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         rows.Children.Clear();
         StartWatchers(path);
         poll.Start();
-        _ = coordinator.RefreshAsync();
+        _ = RefreshReviewAsync();
     }
 
     internal void Suspend()
     {
         if (disposed) return;
         ++generation;
+        ++refreshEpoch; refreshRunning = refreshPending = false;
+        overflowPending = false;
+        invalidation.Reset();
         debounce.Stop(); poll.Stop();
         lazyCancellation?.Cancel(); lazyCancellation?.Dispose(); lazyCancellation = null;
         foreach (var watcher in watchers) watcher.Dispose();
@@ -143,9 +162,13 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
 
     private void StartWatchers(string path)
     {
+        invalidation.Reset();
+        lock (errorGate) { pendingWatcherError = null; errorPosted = false; }
         foreach (var watcher in watchers) watcher.Dispose();
         watchers.Clear();
+        overflowPending = false;
         watcherWarning = "File watcher unavailable; periodic and manual refresh remain active.";
+        var watcherGeneration = invalidation.Generation;
         try
         {
             var gitEntry = Path.Combine(path, ".git");
@@ -172,16 +195,15 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                     IncludeSubdirectories = true,
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size
                 };
-                watcher.Changed += OnFileChanged; watcher.Created += OnFileChanged; watcher.Deleted += OnFileChanged; watcher.Renamed += OnFileRenamed;
-                watcher.Error += (sender, _) => Dispatcher.BeginInvoke(() =>
-                {
-                    if (watchers.Contains(sender) && string.Equals(worktree, path, StringComparison.OrdinalIgnoreCase))
-                        RecoverWatcherFailure();
-                });
+                watcher.Changed += (_, _) => invalidation.Signal(watcherGeneration);
+                watcher.Created += (_, _) => invalidation.Signal(watcherGeneration);
+                watcher.Deleted += (_, _) => invalidation.Signal(watcherGeneration);
+                watcher.Renamed += (_, _) => invalidation.Signal(watcherGeneration);
+                watcher.Error += (sender, args) => QueueWatcherError((FileSystemWatcher)sender, args.GetException(), directory, watcherGeneration);
                 watchers.Add(watcher);
                 watcher.EnableRaisingEvents = true;
             }
-            if (watchers.Count > 0) watcherWarning = null;
+            if (watchers.Count > 0) { watcherWarning = null; debounce.Start(); }
         }
         catch (Exception error)
         {
@@ -199,26 +221,92 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             && !Path.IsPathRooted(relative);
     }
 
-    internal void RecoverWatcherFailure()
+    private void QueueWatcherError(FileSystemWatcher watcher, Exception error, string directory, long watcherGeneration)
     {
-        if (disposed || worktree is null) return;
-        watcherWarning = "File watcher overflow or failure; recovering with polling and retry.";
-        coordinator.MarkStale(watcherWarning);
-        StartWatchers(worktree);
-        _ = coordinator.RefreshAsync();
+        lock (errorGate)
+        {
+            if (watcherGeneration != invalidation.Generation) return;
+            // Preserve a fatal failure over a recoverable overflow within this batch.
+            if (pendingWatcherError is null ||
+                pendingWatcherError.Value.Error is InternalBufferOverflowException && error is not InternalBufferOverflowException)
+                pendingWatcherError = (watcher, error, directory, watcherGeneration);
+            if (errorPosted) return;
+            errorPosted = true;
+        }
+        Dispatcher.BeginInvoke(ProcessWatcherError);
     }
 
-    private void OnFileChanged(object sender, FileSystemEventArgs e) => Dispatcher.BeginInvoke(() =>
+    private void ProcessWatcherError()
     {
-        if (watchers.Contains(sender)) RequestRefresh();
-    });
-    private void OnFileRenamed(object sender, RenamedEventArgs e) => OnFileChanged(sender, e);
+        (FileSystemWatcher Watcher, Exception Error, string Directory, long Generation)? next;
+        lock (errorGate) { next = pendingWatcherError; pendingWatcherError = null; errorPosted = false; }
+        if (next is not { } fault || disposed || fault.Generation != invalidation.Generation ||
+            !watchers.Contains(fault.Watcher)) return;
+        if (fault.Error is InternalBufferOverflowException)
+        {
+            // Leave the watcher live. Git is the source of truth after dropped notifications.
+            watcherWarning = $"File watcher overflow ({fault.Directory}, InternalBufferOverflowException); reconciling from Git.";
+            overflowPending = true;
+            ++overflowVersion;
+            if (!refreshRunning) coordinator.MarkStale(watcherWarning);
+            else Render(coordinator.Snapshot);
+            _ = RefreshReviewAsync();
+        }
+        else
+        {
+            var error = $"File watcher failed ({fault.Directory}, {fault.Error.GetType().Name}): {fault.Error.Message}";
+            foreach (var active in watchers) active.Dispose();
+            watchers.Clear();
+            invalidation.Reset();
+            debounce.Stop();
+            watcherWarning = error;
+            coordinator.MarkStale(error);
+            _ = RefreshReviewAsync(); // Git stays authoritative even without a live watcher.
+        }
+    }
+
+    internal void RecoverWatcherFailure(string? error = null)
+    {
+        if (disposed || worktree is null) return;
+        watcherWarning = error ?? "File watcher failed; retrying with polling.";
+        coordinator.MarkStale(watcherWarning);
+        StartWatchers(worktree);
+        _ = RefreshReviewAsync();
+    }
+
+    private async Task RefreshReviewAsync()
+    {
+        if (disposed || worktree is null) return;
+        if (refreshRunning) { refreshPending = true; return; }
+        refreshRunning = true;
+        var epoch = refreshEpoch;
+        try
+        {
+            do
+            {
+                refreshPending = false;
+                var readVersion = overflowVersion;
+                status.Text = "Refreshing changes…";
+                await coordinator.RefreshAsync();
+                if (disposed || epoch != refreshEpoch) return;
+                // A read that began before an overflow cannot repair the lost notifications.
+                if (overflowPending && coordinator.Snapshot?.IsStale is false && watchers.Count > 0 &&
+                    readVersion == overflowVersion)
+                {
+                    overflowPending = false;
+                    watcherWarning = null;
+                    Render(coordinator.Snapshot);
+                }
+            } while (refreshPending);
+        }
+        finally { if (epoch == refreshEpoch) refreshRunning = false; }
+    }
 
     internal void RequestRefresh()
     {
         if (disposed || worktree is null) return;
         status.Text = "Refreshing changes…";
-        debounce.Stop(); debounce.Start();
+        _ = RefreshReviewAsync();
     }
 
     internal bool FocusFile(ReviewFile file)
@@ -442,6 +530,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (disposed) return;
         disposed = true;
         ++generation;
+        ++refreshEpoch; invalidation.Reset();
         SystemParameters.StaticPropertyChanged -= SystemParameters_Changed;
         debounce.Stop(); poll.Stop(); foreach (var watcher in watchers) watcher.Dispose(); watchers.Clear(); coordinator.Dispose();
         lazyCancellation?.Cancel(); lazyCancellation?.Dispose();
