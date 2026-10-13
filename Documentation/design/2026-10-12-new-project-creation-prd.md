@@ -40,13 +40,13 @@ Offer two named, understandable choices:
 1. **Worktree-ready (suggested)** creates:
    ```text
    <chosen parent>/<project name>/
-   ├── main/     # primary Git worktree, initial branch `main`
+   ├── main/     # primary Git worktree; folder is a layout label, not branch authority
    └── wt/       # initially empty; default destination for later linked worktrees
    ```
    Git metadata remains owned by Git in `main/.git`. `wt/` is an ordinary empty destination directory, not a worktree and not authority about which branch is primary.
 2. **Simple repository** creates:
    ```text
-   <chosen parent>/<project name>/  # primary Git worktree, initial branch `main`
+   <chosen parent>/<project name>/  # primary Git worktree
    ```
 
 The project-name field supplies a suggested new folder name and workspace display name; both remain editable before creation. The chosen parent folder must already exist and be writable. Do not silently merge with or overwrite an existing target directory. Validate the final target against path traversal, invalid names, symlink/reparse redirection and placement inside another Git worktree; reject ambiguous or unsafe targets rather than initializing a nested repository.
@@ -63,7 +63,7 @@ The layout is only a creation-time convention. Discovery, primary-worktree ident
 
 ### 4. Initialize a usable repository — Must-have
 
-- Initialize the primary worktree as a non-bare Git repository with local branch `main`, independent of Git's machine-wide `init.defaultBranch` setting.
+- Initialize the primary worktree as a non-bare Git repository using Git's configured initial-branch behavior (including `init.defaultBranch` and Git-version defaults). Do not force or rename the branch to `main`. Resolve the actual unborn initial branch from the newly initialized repository's symbolic `HEAD` and validate it before writing the workspace descriptor.
 - Create exactly one initial **empty commit** with a clear message such as `Initial commit`. It contains no generated/source files and is the only commit New Project creates.
 - Configure no remote, GitHub repository, identity, starter files, `.gitignore`, license, template, package, editor, or terminal command.
 - Before mutation, validate required Git availability and the selected destination, and present the exact project folder/layout and empty-commit behavior for confirmation.
@@ -74,9 +74,9 @@ The empty commit is an explicit creation-time initialization exception. Opening 
 
 ### 5. Create and open the workspace — Must-have
 
-- After repository initialization and the empty commit succeed, create the existing workspace-v1 descriptor using the resulting primary worktree/project root and `mainBranch: "main"`.
-- In Worktree-ready layout, the workspace project root is the container directory so discovery finds the repository under `main/`; in Simple layout, it is the repository directory.
-- Follow existing descriptor placement and workspace-name conventions; use a visible, editable `.gabcode-workspace` destination and do not create it inside `.git`. Publish it after the initial commit, never stage it automatically, and never modify `.gitignore`. With the proposed default location, the Simple layout will therefore show the descriptor as an untracked file; Worktree-ready keeps it outside the repository.
+- After repository initialization and the empty commit succeed, create the existing workspace-v1 descriptor using the resulting primary worktree/project root and the actual configured initial branch as `mainBranch`. The descriptor's `mainBranch` means the configured conventional/mainline branch; it does not require the literal name `main`.
+- In Worktree-ready layout, the workspace project root is the container directory so discovery finds the repository under the `main/` layout folder; in Simple layout, it is the repository directory.
+- The `.gabcode-workspace` descriptor is gabCode's small settings file containing workspace name, project path, and configured main branch. Follow existing descriptor naming conventions; show its destination and allow choosing/editing its name/location before creation. Proposed default: `<project folder>/<project name>.gabcode-workspace`, outside the repository root in Worktree-ready layout and inside the repository in Simple layout. Publish it after the initial commit, never stage it automatically, and never modify `.gitignore`. In Simple layout it will appear as an untracked file.
 - On successful descriptor creation, activate the project using the existing invoking-window routing contract: reuse an empty window or open a separate native window/instance when the current window is occupied. Never replace or stop another window's terminals.
 - The project opens at Git's primary worktree and starts no extra linked worktrees. The `wt/` folder is simply ready for subsequent explicit worktree creation.
 
@@ -113,7 +113,7 @@ Creation spans filesystem, Git initialization, commit, and descriptor publicatio
 ## Technical Considerations
 
 - Git remains authoritative. Each native client independently invokes installed Git with structured arguments and bounded output/time/cancellation, without shell interpolation.
-- Initialize the exact requested branch explicitly rather than inheriting an unrelated global default; validate actual resulting `HEAD`, `refs/heads/main`, and primary worktree using read-only queries before publishing the descriptor.
+- Let installed Git resolve its configured default initial branch; do not impose a gabCode branch-name default. Before the first commit, the branch may exist only as an unborn symbolic `HEAD`, not as a `refs/heads/...` ref. After creating the empty initial commit, validate the resulting branch name, `HEAD`, local branch ref, empty root commit tree, and primary worktree using read-only queries before publishing the descriptor.
 - A new directory and a Git repository are separate mutation stages. Failure recovery must account for partially created directories, `.git`, commits, and descriptors without unsafe broad rollback.
 - A retry must distinguish: absent destination; empty directory created by this operation; initialized repository with unborn HEAD; initialized repository with the expected empty initial commit; and descriptor already published. Never infer ownership of an existing folder merely from its name.
 - The initial empty commit requires the user's configured Git identity. It does not authorize gabCode to set local/global identity or to create any further commit. Respect effective signing and hook policy rather than bypassing it to force success; report failures and preserve resulting files. Bound Git children and their cleanup. Verify the initialization commit is a root commit with an empty tree, not a commit of template-generated or concurrently staged files.
@@ -126,8 +126,8 @@ Creation spans filesystem, Git initialization, commit, and descriptor publicatio
 - [ ] A new project can be created in either layout without pre-running Git commands, assuming Git and usable identity/signing prerequisites are available.
 - [ ] Worktree-ready produces a primary repository in `main/` and an empty `wt/`; Simple produces a repository directly at the project root. Neither preset creates a linked worktree.
 - [ ] No saved preference selects Worktree-ready; a successful choice survives app restart. Cancellation, failure before creation completes, and opening an existing project do not overwrite the choice.
-- [ ] Git reports exactly one empty root commit on local `main`; no source, workspace descriptor, or generated file has been staged or committed by gabCode.
-- [ ] The existing workspace schema opens the resulting primary worktree. The descriptor and layout preview agree; the remembered layout is absent from descriptor/repository metadata.
+- [ ] Git reports exactly one empty root commit on the initial branch selected by the user's Git configuration; the workspace descriptor records that same branch. No source, workspace descriptor, or generated file has been staged or committed by gabCode.
+- [ ] The existing workspace schema opens the resulting primary worktree. The descriptor records the actual Git-configured initial branch and resolves the chosen layout correctly; the remembered layout is absent from descriptor/repository metadata.
 - [ ] Missing Git/identity, unsafe paths, destination and descriptor collisions fail visibly without modifying pre-existing data or global Git configuration.
 - [ ] Injected initialization/commit/publication/activation failures report completed steps and leave recoverable data. Same-operation retry never creates a second initialization commit or overwrites externally changed state.
 - [ ] Cancelling before mutation creates nothing. Cancellation or exit after mutation never claims rollback or deletes the project recursively; owned Git processes have bounded cleanup.
@@ -141,9 +141,9 @@ This is genuinely cross-platform: the user-visible capability, Git mutation, rec
 
 ## Open Questions
 
-1. The PRD currently proposes a fixed initial branch name `main`, independent of global Git defaults. Confirm this default is acceptable for New Project, or choose a configurable branch name.
+1. **Resolved:** initial branch follows Git's configured default behavior; gabCode must not force `main`.
 2. The parent directory must exist; New Project creates the project-name child. Should picking a nonexistent parent be supported by creating parent paths recursively? Default proposal: no, keep scope/collision behavior simple.
-3. Descriptor location is selectable and visible. Default proposal: save `<project folder>/<project name>.gabcode-workspace`, with an editable location/name before creation.
+3. A workspace descriptor is gabCode's `.gabcode-workspace` settings file: it stores the workspace name, project path, and configured main branch so the project can be reopened. Proposed default: save `<project folder>/<project name>.gabcode-workspace`, with an editable location/name before creation. In the Simple layout this descriptor is consequently an untracked file inside the Git repository; in Worktree-ready layout it is outside the repository, in the containing project folder. The descriptor is never staged or committed automatically. Confirm this default or choose a different location.
 4. Existing unborn-repository completion is explicitly excluded. Revisit only in a separate decision if a guided recovery action is still desired after New Project ships.
 
 ## Approval Boundary
