@@ -265,6 +265,89 @@ public sealed class ReadOnlyDiffWindowTests
     }
 
     [Fact]
+    public async Task Watcher_failure_recovery_clears_warning_after_success_and_does_not_overlap_git_root()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode watcher recovery " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                sidebar.Select(root, "trunk");
+                Assert.Equal(1, sidebar.WatcherCount); // .git is already inside the recursive worktree watcher.
+                await WaitUntil(() => sidebar.CurrentWatcherWarning is null);
+                sidebar.RecoverWatcherFailure();
+                Assert.Null(sidebar.CurrentWatcherWarning);
+                Assert.Equal(1, sidebar.WatcherCount);
+            });
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
+    public async Task Missing_watcher_root_stays_degraded_until_periodic_retry_can_watch_it()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode watcher retry Ω " + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                sidebar.Select(root, "trunk");
+                Assert.NotNull(sidebar.CurrentWatcherWarning);
+                Assert.Equal(0, sidebar.WatcherCount);
+                sidebar.RecoverWatcherFailure();
+                Assert.NotNull(sidebar.CurrentWatcherWarning);
+                Assert.Equal(0, sidebar.WatcherCount);
+                // Exercise the real periodic retry, accelerated without replacing its handler.
+                var poll = (DispatcherTimer)typeof(WorktreeReviewSidebar)
+                    .GetField("poll", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar)!;
+                Directory.CreateDirectory(root);
+                poll.Interval = TimeSpan.FromMilliseconds(50);
+                await WaitUntil(() => sidebar.CurrentWatcherWarning is null && sidebar.WatcherCount == 1);
+                sidebar.Suspend();
+                Assert.Equal(0, sidebar.WatcherCount);
+                sidebar.RecoverWatcherFailure();
+                Assert.Equal(0, sidebar.WatcherCount);
+            });
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task Queued_errors_from_retired_watchers_do_not_restart_current_watchers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode stale watcher " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                var field = typeof(WorktreeReviewSidebar).GetField("watchers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                var onError = typeof(FileSystemWatcher).GetMethod("OnError", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                sidebar.Select(root, "trunk");
+                var old = Assert.Single((List<FileSystemWatcher>)field.GetValue(sidebar)!);
+                onError.Invoke(old, [new ErrorEventArgs(new InternalBufferOverflowException("injected"))]);
+                // Restart before the old error reaches the UI dispatcher.
+                sidebar.RecoverWatcherFailure();
+                var current = Assert.Single((List<FileSystemWatcher>)field.GetValue(sidebar)!);
+                Assert.NotSame(old, current);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                Assert.Same(current, Assert.Single((List<FileSystemWatcher>)field.GetValue(sidebar)!));
+                Assert.Null(sidebar.CurrentWatcherWarning);
+                onError.Invoke(current, [new ErrorEventArgs(new InternalBufferOverflowException("injected"))]);
+                sidebar.Dispose();
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                Assert.Equal(0, sidebar.WatcherCount);
+            });
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task Shared_reconciliation_cases_keep_valid_commit_context_and_drop_rewritten_history()
     {
         using var cases = JsonDocument.Parse(File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../tests/fixtures/worktree-change-review/cases.json"))));

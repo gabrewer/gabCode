@@ -40,6 +40,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private long renderEpoch;
     private bool disposed;
     internal int WatcherCount => watchers.Count;
+    internal string? CurrentWatcherWarning => watcherWarning;
     internal bool IsDisposed => disposed;
     internal event Action<ReviewFile, UIElement>? DiffRequested;
     internal event Action<ReviewFile>? SelectionRetained;
@@ -56,12 +57,12 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         debounce.Tick += (_, _) => { debounce.Stop(); _ = coordinator.RefreshAsync(); };
         poll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(12) };
-        poll.Tick += (_, _) => { status.Text = "Refreshing changes…"; _ = coordinator.RefreshAsync(); };
+        poll.Tick += (_, _) => { if (worktree is null) return; if (watcherWarning is not null) StartWatchers(worktree); status.Text = "Refreshing changes…"; _ = coordinator.RefreshAsync(); };
         root = new DockPanel { Background = new SolidColorBrush(Color.FromRgb(29, 30, 36)) };
         var title = new DockPanel { Margin = new Thickness(0, 8, 0, 4) };
         var button = new Button { Content = "Refresh changes", Padding = new Thickness(5, 2, 5, 2) };
         AutomationProperties.SetName(button, "Refresh selected worktree changes and commits");
-        button.Click += (_, _) => { if (worktree is not null) status.Text = "Refreshing changes…"; _ = coordinator.RefreshAsync(); };
+        button.Click += (_, _) => { if (worktree is not null) { if (watcherWarning is not null) StartWatchers(worktree); status.Text = "Refreshing changes…"; } _ = coordinator.RefreshAsync(); };
         DockPanel.SetDock(button, Dock.Right); title.Children.Add(button);
         titleText = new TextBlock { Text = "Changes and commits", FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center };
         title.Children.Add(titleText);
@@ -144,6 +145,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     {
         foreach (var watcher in watchers) watcher.Dispose();
         watchers.Clear();
+        watcherWarning = "File watcher unavailable; periodic and manual refresh remain active.";
         try
         {
             var gitEntry = Path.Combine(path, ".git");
@@ -158,7 +160,11 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             string? commonDir = null;
             if (gitDir is not null && File.Exists(Path.Combine(gitDir, "commondir")))
                 commonDir = Path.GetFullPath(Path.Combine(gitDir, File.ReadAllText(Path.Combine(gitDir, "commondir")).Trim()));
-            foreach (var directory in new[] { path, gitDir, commonDir }.OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+            var roots = new[] { path, gitDir, commonDir }.OfType<string>()
+                .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            foreach (var directory in roots.Where(candidate => !roots.Any(parent =>
+                         !string.Equals(parent, candidate, StringComparison.OrdinalIgnoreCase) &&
+                         IsInside(candidate, parent))))
             {
                 if (!Directory.Exists(directory)) continue;
                 var watcher = new FileSystemWatcher(directory)
@@ -167,15 +173,30 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size
                 };
                 watcher.Changed += OnFileChanged; watcher.Created += OnFileChanged; watcher.Deleted += OnFileChanged; watcher.Renamed += OnFileRenamed;
-                watcher.Error += (_, _) => Dispatcher.BeginInvoke(() =>
+                watcher.Error += (sender, _) => Dispatcher.BeginInvoke(() =>
                 {
-                    if (string.Equals(worktree, path, StringComparison.OrdinalIgnoreCase)) RecoverWatcherFailure();
+                    if (watchers.Contains(sender) && string.Equals(worktree, path, StringComparison.OrdinalIgnoreCase))
+                        RecoverWatcherFailure();
                 });
-                watcher.EnableRaisingEvents = true;
                 watchers.Add(watcher);
+                watcher.EnableRaisingEvents = true;
             }
+            if (watchers.Count > 0) watcherWarning = null;
         }
-        catch (Exception error) { watcherWarning = "File watcher unavailable; periodic and manual refresh remain active: " + error.Message; }
+        catch (Exception error)
+        {
+            foreach (var watcher in watchers) watcher.Dispose();
+            watchers.Clear();
+            watcherWarning = "File watcher unavailable; periodic and manual refresh remain active: " + error.Message;
+        }
+        if (coordinator.Snapshot is not null) Render(coordinator.Snapshot);
+    }
+
+    private static bool IsInside(string candidate, string parent)
+    {
+        var relative = Path.GetRelativePath(parent, candidate);
+        return relative != "." && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            && !Path.IsPathRooted(relative);
     }
 
     internal void RecoverWatcherFailure()
@@ -187,8 +208,11 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         _ = coordinator.RefreshAsync();
     }
 
-    private void OnFileChanged(object sender, FileSystemEventArgs e) => Dispatcher.BeginInvoke(RequestRefresh);
-    private void OnFileRenamed(object sender, RenamedEventArgs e) => Dispatcher.BeginInvoke(RequestRefresh);
+    private void OnFileChanged(object sender, FileSystemEventArgs e) => Dispatcher.BeginInvoke(() =>
+    {
+        if (watchers.Contains(sender)) RequestRefresh();
+    });
+    private void OnFileRenamed(object sender, RenamedEventArgs e) => OnFileChanged(sender, e);
 
     internal void RequestRefresh()
     {
