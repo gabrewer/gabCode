@@ -3,7 +3,6 @@ import Foundation
 @MainActor
 final class WorkspacePreference {
     static let lastWorkspaceKey = "lastWorkspaceDescriptorPath"
-    static let sidebarOnRightKey = "worktreeSidebarOnRight"
     static let selectedWorktreeKeyPrefix = "workspaceSelectedWorktree."
 
     let defaults: UserDefaults
@@ -42,11 +41,6 @@ final class WorkspacePreference {
         let normalized = worktreeURL.standardizedFileURL
         guard availableWorktrees.map(\.standardizedFileURL).contains(normalized) else { return }
         defaults.set(normalized.path, forKey: key)
-    }
-
-    var sidebarOnRight: Bool {
-        get { defaults.bool(forKey: Self.sidebarOnRightKey) }
-        set { defaults.set(newValue, forKey: Self.sidebarOnRightKey) }
     }
 
     private static func selectedWorktreeKey(for workspaceURL: URL) -> String {

@@ -32,16 +32,16 @@ final class WorkspacePreferenceTests: XCTestCase {
         XCTAssertEqual(preference.selectedWorktreeURL(for: workspace)?.path, available.standardizedFileURL.path)
     }
 
-    func testSidebarSideRoundTripsThroughInjectedDefaultsOnly() throws {
+    func testObsoleteSidebarSidePreferenceCannotAffectFixedNavigation() throws {
         let suite = "gabCode.workspace.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "worktreeSidebarOnRight")
         let preference = WorkspacePreference(defaults: defaults)
 
-        XCTAssertFalse(preference.sidebarOnRight)
-        preference.sidebarOnRight = true
-        XCTAssertTrue(preference.sidebarOnRight)
-        XCTAssertNil(UserDefaults.standard.object(forKey: WorkspacePreference.sidebarOnRightKey))
+        XCTAssertNil(preference.lastWorkspaceURL)
+        XCTAssertEqual(WorkspaceWindowLayout.reviewMinimumWidth, 240)
+        XCTAssertTrue(defaults.bool(forKey: "worktreeSidebarOnRight"), "Legacy state may remain on disk but cannot drive layout")
     }
 
     func testInvalidRememberedWorkspaceIsClearedWhenRevalidated() throws {

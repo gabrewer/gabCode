@@ -155,8 +155,9 @@ final class gabCodeUITests: XCTestCase {
 
         let terminalPath = app.staticTexts["terminal-directory-path"]
         XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
-        let issueMenu = app.buttons["GitHub issue"]
+        let issueMenu = app.menuButtons["issue-reference"]
         XCTAssertTrue(issueMenu.waitForExistence(timeout: 5))
+        XCTAssertEqual(issueMenu.label, "GitHub issue reference")
         issueMenu.click()
         XCTAssertTrue(app.menuItems["Add issue…"].waitForExistence(timeout: 3))
         app.menuItems["Add issue…"].click()
@@ -165,7 +166,11 @@ final class gabCodeUITests: XCTestCase {
         issueURL.typeText("https://github.com/gabrewer/gabCode/issues/92?source=ui")
         app.buttons["Add"].click()
 
-        XCTAssertTrue(app.staticTexts["gabrewer/gabCode#92"].waitForExistence(timeout: 3))
+        let canonicalIssue = expectation(
+            for: NSPredicate(format: "value == %@", "gabrewer/gabCode#92"),
+            evaluatedWith: issueMenu
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [canonicalIssue], timeout: 5), .completed)
         XCTAssertEqual(terminalPath.value as? String, fixture.primary.path)
     }
 
@@ -197,6 +202,184 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
         XCTAssertFalse(app.staticTexts["Workspace closed"].exists)
         XCTAssertEqual(terminalPath.value as? String, fixture.primary.path)
+    }
+
+    @MainActor
+    func testNativeChangeReviewLoadsSelectedWorktreeAndOpensReadOnlyDiff() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        try Data("history change\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+        try run(git, ["-C", secondary.path, "add", "history.txt"])
+        try run(git, ["-C", secondary.path, "-c", "user.name=UI", "-c", "user.email=ui@example.invalid", "commit", "-m", "Ahead of main"])
+        try Data("staged content\n".utf8).write(to: secondary.appendingPathComponent("staged.txt"))
+        try run(git, ["-C", secondary.path, "add", "staged.txt"])
+        try Data("unstaged content\n".utf8).write(to: secondary.appendingPathComponent("README.md"))
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+
+        XCTAssertTrue(app.buttons["refresh-change-review"].waitForExistence(timeout: 12))
+        let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+        XCTAssertTrue(secondaryRow.waitForExistence(timeout: 5))
+        secondaryRow.click()
+        let staged = app.buttons["review-file-staged-staged.txt"]
+        XCTAssertTrue(staged.waitForExistence(timeout: 12), "Selected worktree's staged files must load")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "review-file-unstaged-README.md").firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch.exists)
+        staged.click()
+        XCTAssertEqual(staged.value as? String, "Selected diff", "Selecting a row must update coordinator state")
+        XCTAssertTrue(app.buttons["close-review-diff"].waitForExistence(timeout: 8),
+                      "A staged row click must open the diff document")
+        XCTAssertTrue(app.descendants(matching: .any)["review-diff-document"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["read-only-unified-diff"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["review-terminal-tabs"].exists)
+        app.buttons["close-review-diff"].click()
+        XCTAssertFalse(app.descendants(matching: .any)["review-diff-document"].exists)
+
+        let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
+        commit.click()
+        let history = app.buttons["review-file-commit-history.txt"]
+        XCTAssertTrue(history.waitForExistence(timeout: 8), "Expanding a commit must load its changed files")
+        history.click()
+        XCTAssertEqual(history.value as? String, "Selected diff", "Commit file selection must reach the review coordinator")
+        XCTAssertTrue(app.buttons["close-review-diff"].waitForExistence(timeout: 8),
+                      "A branch-history file must open its read-only diff")
+    }
+
+    @MainActor
+    func testReviewAndWorktreeControlsStayInsideWindowAtMinimumAfterReopen() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        try Data("history\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+        try run(git, ["-C", secondary.path, "add", "history.txt"])
+        try run(git, ["-C", secondary.path, "-c", "user.name=UI", "-c", "user.email=ui@example.invalid", "commit", "-m", "Review at minimum width"])
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 12))
+        if window.frame.width <= 1_161 {
+            let growCorner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
+            growCorner.press(forDuration: 0.2, thenDragTo: growCorner.withOffset(CGVector(dx: 160, dy: 0)))
+        }
+        let initialWidth = window.frame.width
+        XCTAssertGreaterThan(initialWidth, 1_161, "Resize fixture must start wider than the native minimum")
+        checkControls()
+        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
+        corner.press(forDuration: 0.2, thenDragTo: corner.withOffset(CGVector(dx: -350, dy: 0)))
+        XCTAssertLessThan(window.frame.width, initialWidth, "Resize fixture must exercise native minimum sizing")
+        XCTAssertEqual(window.frame.width, 1_161, accuracy: 1, "Exercise the actual native minimum, not merely a wider passing size")
+        func checkControls() {
+            let bounds = app.windows.firstMatch.frame
+            let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+            XCTAssertTrue(secondaryRow.waitForExistence(timeout: 12))
+            XCTAssertGreaterThanOrEqual(secondaryRow.frame.minX, bounds.minX)
+            XCTAssertLessThanOrEqual(secondaryRow.frame.maxX, bounds.maxX)
+            XCTAssertTrue(secondaryRow.isHittable, "Worktree selection must remain reachable")
+            secondaryRow.click()
+            let refresh = app.buttons["refresh-change-review"]
+            XCTAssertTrue(refresh.waitForExistence(timeout: 12))
+            XCTAssertLessThanOrEqual(refresh.frame.maxX, bounds.maxX, "Refresh must not clip past the window")
+            XCTAssertTrue(refresh.isHittable, "Refresh must remain clickable")
+            refresh.click()
+            let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
+            XCTAssertTrue(commit.waitForExistence(timeout: 12))
+            XCTAssertLessThanOrEqual(commit.frame.maxX, bounds.maxX)
+            XCTAssertTrue(commit.isHittable)
+        }
+        checkControls()
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 12))
+        XCTAssertEqual(app.windows.firstMatch.frame.width, 1_161, accuracy: 1, "Reopen must exercise the persisted minimum-width window")
+        checkControls()
+    }
+
+    @MainActor
+    func testBranchHistoryUsesCompactSingleLineRowsWithAccessibleExpandedDetails() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        let subjects = (1...4).map { "Compact history \($0): a deliberately long subject that must not wrap onto multiple lines" }
+        for (index, subject) in subjects.enumerated() {
+            try Data("version \(index)\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+            try run(git, ["-C", secondary.path, "add", "history.txt"])
+            try run(git, ["-C", secondary.path, "-c", "user.name=Reviewer", "-c", "user.email=reviewer@example.invalid", "commit", "-m", subject])
+        }
+        let head = try run(git, ["-C", secondary.path, "rev-parse", "HEAD"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+        let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+        XCTAssertTrue(secondaryRow.waitForExistence(timeout: 12))
+        secondaryRow.click()
+        let first = app.buttons["review-commit-\(head)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 12))
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-"))
+        XCTAssertEqual(rows.count, 4)
+        let second = rows.element(boundBy: 1)
+        let refresh = app.buttons["refresh-change-review"]
+        XCTAssertLessThanOrEqual(first.frame.maxX, refresh.frame.maxX + 10, "The row must fit the actual sidebar width")
+        XCTAssertLessThanOrEqual(first.frame.height, 42, "Collapsed history row should be a compact single line")
+        XCTAssertLessThanOrEqual(second.frame.minY - first.frame.minY, 43, "No per-row metadata block or large divider gap")
+        XCTAssertTrue(first.label.contains(subjects[3]), "Full subject remains available to accessibility when visually truncated")
+        XCTAssertTrue(first.label.contains("Reviewer"))
+        XCTAssertTrue(first.label.contains("HEAD"), "Identify only the actual current tip with a ref badge")
+        XCTAssertTrue(first.label.contains(String(head.prefix(8))), "Collapsed accessibility retains the abbreviated SHA")
+        XCTAssertFalse(second.label.contains("HEAD"))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Compact branch history, four collapsed commits"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let details = app.staticTexts["review-commit-details-\(head)"]
+        XCTAssertFalse(details.exists, "Metadata belongs in expanded details, not each collapsed row")
+        first.click()
+        XCTAssertTrue(details.waitForExistence(timeout: 8))
+        let detailText = "\(details.label) \(details.value as? String ?? "")"
+        XCTAssertFalse(detailText.contains(String(head.prefix(8))), "Expanded details should not repeat the commit hash")
+        XCTAssertTrue(detailText.contains("Reviewer"))
+        let historyFile = app.buttons["review-file-commit-history.txt"]
+        XCTAssertTrue(historyFile.waitForExistence(timeout: 8))
+        XCTAssertFalse(historyFile.label.contains(head), "Historical file rows should not render raw commit IDs")
+        XCTAssertTrue(historyFile.label.contains("First parent"), "The comparison basis must remain understandable")
+        let expandedScreenshot = XCTAttachment(screenshot: app.screenshot())
+        expandedScreenshot.name = "Expanded history without commit hashes"
+        expandedScreenshot.lifetime = .keepAlways
+        add(expandedScreenshot)
+        first.click()
+        XCTAssertFalse(details.exists)
+    }
+
+    @MainActor
+    func testCleanWorktreeStillOpensCommittedFileFromBranchHistory() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        try Data("committed content\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+        try run(git, ["-C", secondary.path, "add", "history.txt"])
+        try run(git, ["-C", secondary.path, "-c", "user.name=UI", "-c", "user.email=ui@example.invalid", "commit", "-m", "Ahead of main"])
+        XCTAssertTrue(try run(git, ["-C", secondary.path, "status", "--porcelain", "--untracked-files=all"]).isEmpty)
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+
+        XCTAssertTrue(app.buttons["refresh-change-review"].waitForExistence(timeout: 12))
+        let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+        XCTAssertTrue(secondaryRow.waitForExistence(timeout: 5))
+        secondaryRow.click()
+        XCTAssertTrue(app.staticTexts["Working tree clean"].waitForExistence(timeout: 12))
+        let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
+        XCTAssertTrue(commit.waitForExistence(timeout: 8))
+        commit.click()
+        let history = app.buttons["review-file-commit-history.txt"]
+        XCTAssertTrue(history.waitForExistence(timeout: 8))
+        history.click()
+        XCTAssertEqual(history.value as? String, "Selected diff")
+        XCTAssertTrue(app.buttons["close-review-diff"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["read-only-unified-diff"].waitForExistence(timeout: 8))
     }
 
     @MainActor

@@ -21,6 +21,7 @@ final class TerminalWorkspacePresentation: ObservableObject {
 
     @Published private(set) var mainTerminal: TerminalWorkspaceTerminal = .terminal1
     @Published private(set) var isMutationLocked = false
+    let reviewDocument = ReadOnlyDiffDocumentState()
     private var cancellables: Set<AnyCancellable> = []
     private var didStart = false
 
@@ -69,7 +70,7 @@ final class TerminalWorkspacePresentation: ObservableObject {
     }
 
     func swapTerminals() {
-        guard !isMutationLocked else {
+        guard !isMutationLocked, !reviewDocument.isOpen else {
             return
         }
         mainTerminal = bottomTerminal
@@ -79,14 +80,37 @@ final class TerminalWorkspacePresentation: ObservableObject {
     }
 
     func focus(_ terminal: TerminalWorkspaceTerminal) {
-        guard !isMutationLocked else {
-            return
+        guard !isMutationLocked else { return }
+        if reviewDocument.isOpen {
+            reviewDocument.selectBottom(terminal)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.reviewDocument.isOpen,
+                      self.reviewDocument.selectedBottomTerminal == terminal else { return }
+                _ = self.session(for: terminal).focusTerminalView()
+            }
+        } else {
+            _ = session(for: terminal).focusTerminalView()
         }
-        _ = session(for: terminal).focusTerminalView()
     }
 
     func focusMainTerminal() {
         focus(mainTerminal)
+    }
+
+    func openReviewDocument(_ file: ReviewFile) {
+        reviewDocument.open(file, mainTerminal: mainTerminal)
+    }
+
+    func closeReviewDocument(restoreFocus: Bool = true) {
+        guard reviewDocument.isOpen else { return }
+        reviewDocument.close()
+        if let restore = reviewDocument.restoreTerminal { mainTerminal = restore }
+        if restoreFocus {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.reviewDocument.isOpen else { return }
+                self.focusMainTerminal()
+            }
+        }
     }
 
     func retry(_ terminal: TerminalWorkspaceTerminal) async {
