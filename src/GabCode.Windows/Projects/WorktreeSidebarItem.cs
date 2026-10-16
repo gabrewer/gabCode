@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Media.Animation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
@@ -9,6 +10,8 @@ namespace GabCode.Windows.Projects;
 internal sealed class WorktreeSidebarItem : Border
 {
     private readonly WorktreeNavigationEntry entry;
+    private bool refreshAnimationActive;
+    private bool showRefresh;
     private static readonly Geometry BoltCircleGeometry = Geometry.Parse(
         "M9,0.75 A8.25,8.25 0 1 1 9,17.25 A8.25,8.25 0 1 1 9,0.75 M10.5,3.75 L6.75,9.25 L9.5,9.25 L7.75,14.25 L12.25,8.25 L9.5,8.25 Z");
 
@@ -16,9 +19,25 @@ internal sealed class WorktreeSidebarItem : Border
     {
         this.entry = entry;
         RunningIcon = CreateIcon(BoltCircleGeometry, hasRunningTerminals);
-
-        var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        labels.Children.Add(new TextBlock
+        RefreshIcon = new Path
+        {
+            Data = Geometry.Parse("M9,2 A7,7 0 1 1 2,9"),
+            Width = 18,
+            Height = 18,
+            StrokeThickness = 2,
+            Stroke = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.White,
+            Fill = Brushes.Transparent,
+            Stretch = Stretch.Uniform,
+            RenderTransform = new RotateTransform(),
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            Visibility = Visibility.Collapsed,
+            Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var folder = new Grid();
+        folder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        folder.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        folder.Children.Add(new TextBlock
         {
             Text = entry.FolderName,
             FontWeight = FontWeights.SemiBold,
@@ -26,6 +45,12 @@ internal sealed class WorktreeSidebarItem : Border
             TextTrimming = TextTrimming.CharacterEllipsis,
             ToolTip = entry.FolderName,
         });
+        Grid.SetColumn(RefreshIcon, 1);
+        folder.Children.Add(RefreshIcon);
+        RefreshIcon.Loaded += (_, _) => UpdateRefreshAnimation();
+        RefreshIcon.Unloaded += (_, _) => StopRefreshAnimation();
+        var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        labels.Children.Add(folder);
         labels.Children.Add(new TextBlock
         {
             Text = entry.Branch + (entry.Availability == WorktreeAvailability.Unavailable ? " — unavailable" : string.Empty),
@@ -50,17 +75,39 @@ internal sealed class WorktreeSidebarItem : Border
     }
 
     internal Path RunningIcon { get; }
+    internal Path RefreshIcon { get; }
 
     internal static WorktreeSidebarItem Create(WorktreeNavigationEntry entry, bool selected, bool hasRunningTerminals) =>
         new(entry, selected, hasRunningTerminals);
 
-    internal void UpdateState(bool selected, bool hasRunningTerminals)
+    internal void UpdateState(bool selected, bool hasRunningTerminals, bool isRefreshingChanges = false)
     {
         RunningIcon.Visibility = hasRunningTerminals ? Visibility.Visible : Visibility.Collapsed;
+        showRefresh = selected && isRefreshingChanges;
+        RefreshIcon.Visibility = showRefresh ? Visibility.Visible : Visibility.Collapsed;
+        RefreshIcon.Stroke = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.White;
+        UpdateRefreshAnimation();
+        AutomationProperties.SetName(RefreshIcon, string.Empty);
         BorderBrush = selected ? new SolidColorBrush(Color.FromRgb(0, 120, 212)) : Brushes.Transparent;
         BorderThickness = selected ? new Thickness(1) : new Thickness(0);
         Background = selected ? new SolidColorBrush(Color.FromArgb(24, 0, 120, 212)) : Brushes.Transparent;
-        AutomationProperties.SetName(this, BuildAccessibleName(entry, selected, hasRunningTerminals));
+        AutomationProperties.SetName(this, BuildAccessibleName(entry, selected, hasRunningTerminals) + (showRefresh ? ", refreshing changes" : string.Empty));
+    }
+
+    private void UpdateRefreshAnimation()
+    {
+        var animate = showRefresh && RefreshIcon.IsLoaded && SystemParameters.ClientAreaAnimation && !SystemParameters.HighContrast;
+        if (refreshAnimationActive == animate) return;
+        ((RotateTransform)RefreshIcon.RenderTransform).BeginAnimation(RotateTransform.AngleProperty,
+            animate ? new DoubleAnimation(0, 360, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever } : null);
+        refreshAnimationActive = animate;
+    }
+
+    private void StopRefreshAnimation()
+    {
+        if (!refreshAnimationActive) return;
+        ((RotateTransform)RefreshIcon.RenderTransform).BeginAnimation(RotateTransform.AngleProperty, null);
+        refreshAnimationActive = false;
     }
 
     private static Path CreateIcon(Geometry geometry, bool visible) => new()

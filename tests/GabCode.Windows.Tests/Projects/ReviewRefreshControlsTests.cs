@@ -88,6 +88,68 @@ public sealed class ReviewRefreshControlsTests
     }
 
     [Fact]
+    public async Task Routine_review_state_uses_worktree_activity_instead_of_a_button_or_status_label()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode quiet review Ω " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                var activity = new List<bool>();
+                sidebar.RefreshActivityChanged += () => activity.Add(sidebar.IsRefreshing);
+                sidebar.Select(root, "main");
+                Assert.True(sidebar.IsRefreshing);
+                Assert.Contains(true, activity);
+                Assert.DoesNotContain(FindButtons((DependencyObject)sidebar.Content), button =>
+                    AutomationProperties.GetName(button) == "Refresh selected worktree changes and commits");
+                typeof(WorktreeReviewSidebar).GetMethod("Render", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                    null, [typeof(ReviewSnapshot)], null)!.Invoke(sidebar,
+                    [new ReviewSnapshot(root, "head", "main", [], [], false, null)]);
+                var status = Assert.Single(LogicalTreeHelper.GetChildren((DependencyObject)sidebar.Content).OfType<TextBlock>(),
+                    text => AutomationProperties.GetLiveSetting(text) == AutomationLiveSetting.Polite);
+                Assert.True(string.IsNullOrEmpty(status.Text));
+                Assert.Equal(Visibility.Collapsed, status.Visibility);
+                var cancel = Assert.Single(FindButtons((DependencyObject)sidebar.Content), button =>
+                    AutomationProperties.GetName(button) == "Cancel review refresh");
+                cancel.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(4);
+                while (sidebar.IsRefreshing && DateTime.UtcNow < deadline) await Task.Delay(25);
+                Assert.False(sidebar.IsRefreshing);
+                Assert.Contains(false, activity);
+                Assert.Equal(Visibility.Visible, Assert.Single(FindButtons((DependencyObject)sidebar.Content), button =>
+                    AutomationProperties.GetName(button) == "Retry review refresh").Visibility);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            });
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch (IOException) { } }
+    }
+
+    [Fact]
+    public async Task Suspending_review_clears_busy_state_without_starting_another_refresh()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode suspend review Ω " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                var activity = new List<bool>();
+                sidebar.RefreshActivityChanged += () => activity.Add(sidebar.IsRefreshing);
+                sidebar.Select(root, "main");
+                Assert.True(sidebar.IsRefreshing);
+                sidebar.Suspend();
+                Assert.False(sidebar.IsRefreshing);
+                Assert.False(activity[^1]);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            });
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch (IOException) { } }
+    }
+
+    [Fact]
     public async Task First_partial_result_never_claims_previous_success()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabcode first partial Ω " + Guid.NewGuid().ToString("N"));

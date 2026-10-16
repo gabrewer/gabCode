@@ -30,7 +30,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private readonly ScrollViewer scroller;
     private readonly Dictionary<string, Button> fileButtons = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Expander> sections = new(StringComparer.Ordinal);
-    private readonly TextBlock status = new() { Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock status = new() { Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
     private readonly Dictionary<string, IReadOnlyList<ReviewFile>> commitFiles = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> commitFileOffsets = new(StringComparer.Ordinal);
     private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
@@ -57,6 +57,9 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     internal int WatcherCount => watchers.Count;
     internal string? CurrentWatcherWarning => watcherWarning;
     internal bool IsDisposed => disposed;
+    internal bool IsRefreshing => refreshRunning && !disposed;
+    internal bool HasFreshSnapshot => coordinator.Snapshot is { IsStale: false };
+    internal event Action? RefreshActivityChanged;
     internal event Action<ReviewFile, UIElement>? DiffRequested;
     internal event Action<ReviewFile>? SelectionRetained;
     internal event Action? SelectionInvalidated;
@@ -79,9 +82,6 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         poll.Tick += (_, _) => { if (worktree is null) return; if (watchers.Count == 0) StartWatchers(worktree); _ = RefreshReviewAsync(); };
         root = new DockPanel { Background = new SolidColorBrush(Color.FromRgb(29, 30, 36)) };
         var title = new DockPanel { Margin = new Thickness(0, 8, 0, 4) };
-        var button = new Button { Content = "Refresh changes", Padding = new Thickness(5, 2, 5, 2) };
-        AutomationProperties.SetName(button, "Refresh selected worktree changes and commits");
-        button.Click += (_, _) => { if (worktree is not null && watchers.Count == 0) StartWatchers(worktree); _ = RefreshReviewAsync(); };
         cancelReviewRefresh = new Button { Content = "Cancel", Padding = new Thickness(5, 2, 5, 2), Visibility = Visibility.Collapsed };
         retryReviewRefresh = new Button { Content = "Retry", Padding = new Thickness(5, 2, 5, 2), Visibility = Visibility.Collapsed };
         AutomationProperties.SetName(cancelReviewRefresh, "Cancel review refresh");
@@ -96,11 +96,16 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         AutomationProperties.SetName(retryReviewRefresh, "Retry review refresh");
         retryReviewRefresh.Click += (_, _) =>
         {
-            if (!coordinator.Retry()) { status.Text = coordinator.StopMessage ?? "Waiting for the previous Git refresh to stop. Retry again shortly."; return; }
+            if (!coordinator.Retry()) { SetStatus(coordinator.StopMessage ?? "Waiting for the previous Git refresh to stop. Retry again shortly."); return; }
+            var returnFocus = retryReviewRefresh.IsKeyboardFocused;
             retryReviewRefresh.Visibility = Visibility.Collapsed;
             _ = RefreshReviewAsync();
+            if (returnFocus)
+            {
+                if (cancelReviewRefresh.Visibility == Visibility.Visible) cancelReviewRefresh.Focus();
+                else scroller?.Focus();
+            }
         };
-        DockPanel.SetDock(button, Dock.Right); title.Children.Add(button);
         DockPanel.SetDock(cancelReviewRefresh, Dock.Right); title.Children.Add(cancelReviewRefresh);
         DockPanel.SetDock(retryReviewRefresh, Dock.Right); title.Children.Add(retryReviewRefresh);
         titleText = new TextBlock { Text = "Changes and commits", FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center };
@@ -122,7 +127,10 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         {
             ApplySystemColors();
             Render(coordinator.Snapshot);
+            RefreshActivityChanged?.Invoke();
         }
+        else if (e.PropertyName is nameof(SystemParameters.ClientAreaAnimation))
+            RefreshActivityChanged?.Invoke();
     }
 
     private void ApplySystemColors()
@@ -147,6 +155,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (string.Equals(path, worktree, StringComparison.OrdinalIgnoreCase) && branch == mainBranch) { RequestRefresh(); return; }
         ++generation;
         ++refreshEpoch; refreshRunning = refreshPending = false;
+        RefreshActivityChanged?.Invoke();
         overflowPending = false;
         debounce.Stop(); invalidation.Reset();
         lazyCancellation?.Cancel(); lazyCancellation?.Dispose(); lazyCancellation = null;
@@ -159,7 +168,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         worktree = path; mainBranch = branch;
         if (hadSelection) SelectionInvalidated?.Invoke();
         coordinator.Select(path, branch);
-        status.Text = coordinator.StopMessage ?? (coordinator.IsPaused ? "Git refresh stopped. Automatic refresh is paused. Retry to update." : "Loading changes…");
+        SetStatus(coordinator.StopMessage ?? (coordinator.IsPaused ? "Git refresh stopped. Automatic refresh is paused. Retry to update." : string.Empty));
         rows.Children.Clear();
         retryReviewRefresh.Visibility = coordinator.IsPaused ? Visibility.Visible : Visibility.Collapsed;
         cancelReviewRefresh.Visibility = Visibility.Collapsed;
@@ -173,6 +182,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (disposed) return;
         ++generation;
         ++refreshEpoch; refreshRunning = refreshPending = false;
+        RefreshActivityChanged?.Invoke();
         overflowPending = false;
         invalidation.Reset();
         debounce.Stop(); poll.Stop();
@@ -184,7 +194,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         worktree = null; mainBranch = null;
         coordinator.Select(null, null);
         rows.Children.Clear(); fileButtons.Clear(); sections.Clear();
-        status.Text = "Review unavailable for orphaned terminals. Select an available worktree.";
+        SetStatus("Review unavailable for orphaned terminals. Select an available worktree.");
         if (hadSelection) SelectionInvalidated?.Invoke();
     }
 
@@ -195,7 +205,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         foreach (var watcher in watchers) watcher.Dispose();
         watchers.Clear();
         overflowPending = false;
-        watcherWarning = "File watcher unavailable; periodic and manual refresh remain active.";
+        watcherWarning = "File watcher unavailable; periodic refresh remains active.";
         var watcherGeneration = invalidation.Generation;
         try
         {
@@ -308,6 +318,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (!coordinator.CanRefresh) { Render(coordinator.Snapshot); return; }
         if (refreshRunning) { refreshPending = true; return; }
         refreshRunning = true;
+        RefreshActivityChanged?.Invoke();
         cancelReviewRefresh.Visibility = Visibility.Visible;
         retryReviewRefresh.Visibility = Visibility.Collapsed;
         var epoch = refreshEpoch;
@@ -318,7 +329,6 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             {
                 refreshPending = false;
                 var readVersion = overflowVersion;
-                status.Text = "Refreshing changes…";
                 await coordinator.RefreshAsync();
                 if (disposed || epoch != refreshEpoch) return;
                 if (coordinator.IsPaused && !coordinator.CanRefresh) { refreshPending = false; Render(coordinator.Snapshot); break; }
@@ -349,8 +359,15 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             if (epoch == refreshEpoch)
             {
                 refreshRunning = false;
+                RefreshActivityChanged?.Invoke();
+                var returnFocus = cancelReviewRefresh.IsKeyboardFocused;
                 cancelReviewRefresh.Visibility = Visibility.Collapsed;
                 retryReviewRefresh.Visibility = coordinator.IsPaused ? Visibility.Visible : Visibility.Collapsed;
+                if (returnFocus)
+                {
+                    if (retryReviewRefresh.Visibility == Visibility.Visible) retryReviewRefresh.Focus();
+                    else scroller.Focus();
+                }
             }
         }
     }
@@ -359,7 +376,6 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     {
         if (disposed || worktree is null) return;
         if (!coordinator.CanRefresh) { Render(coordinator.Snapshot); return; }
-        status.Text = "Refreshing changes…";
         _ = RefreshReviewAsync();
     }
 
@@ -406,13 +422,12 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         }
         if (workingOffset >= snapshot.Working.Count) workingOffset = 0;
         var workingPage = snapshot.Working.Skip(workingOffset).Take(WorkingPageSize).ToArray();
-        status.Text = snapshot.IsStale
+        var message = snapshot.IsStale
             ? $"Git refresh stopped. {(!snapshot.WasSuccessful ? "No current review data." : "Showing previous results.")} {(coordinator.IsPaused ? "Automatic refresh is paused. " : string.Empty)}{snapshot.Error}"
-            :
-            $"Selected worktree: {Path.GetFileName(worktree.TrimEnd(Path.DirectorySeparatorChar))}" +
-            (watcherWarning is null ? string.Empty : ". " + watcherWarning);
+            : watcherWarning ?? string.Empty;
         if (snapshot.Working.Count > WorkingPageSize)
-            status.Text += $" Showing working changes {workingOffset + 1}–{workingOffset + workingPage.Length} of {snapshot.Working.Count}; not all rows are visible.";
+            message += $" Showing working changes {workingOffset + 1}–{workingOffset + workingPage.Length} of {snapshot.Working.Count}; not all rows are visible.";
+        SetStatus(message.Trim());
         rows.Children.Clear(); fileButtons.Clear(); sections.Clear();
         if (snapshot.IsStale && !snapshot.WasSuccessful) { rows.Children.Add(Notice("No current review data. Retry refresh.")); return; }
         AddSection(rows, "Working changes", "working", content =>
@@ -583,6 +598,12 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         }
     }
 
+    private void SetStatus(string message)
+    {
+        status.Text = message;
+        status.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private static TextBlock Notice(string message) => new() { Text = message, Margin = new Thickness(10, 3, 0, 3), TextWrapping = TextWrapping.Wrap, Foreground = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.White };
 
     private async Task ValidateSelectedCommitAsync(string identity, string requestedHead, string requestedMainHead)
@@ -614,7 +635,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             Render(coordinator.Snapshot);
         }
         catch (OperationCanceledException) { }
-        catch (Exception error) { if (current == generation) { status.Text = "Commit files unavailable: " + error.Message; } }
+        catch (Exception error) { if (current == generation) SetStatus("Commit files unavailable: " + error.Message); }
         finally { if (current == generation) loadingCommits.Remove(sha); }
     }
 
@@ -636,13 +657,15 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             Render(coordinator.Snapshot);
         }
         catch (OperationCanceledException) { }
-        catch (Exception error) { if (current == generation) status.Text = "Commit page unavailable: " + error.Message; }
+        catch (Exception error) { if (current == generation) SetStatus("Commit page unavailable: " + error.Message); }
     }
 
     public void Dispose()
     {
         if (disposed) return;
         disposed = true;
+        refreshRunning = refreshPending = false;
+        RefreshActivityChanged?.Invoke();
         ++generation;
         ++refreshEpoch; invalidation.Reset();
         SystemParameters.StaticPropertyChanged -= SystemParameters_Changed;
