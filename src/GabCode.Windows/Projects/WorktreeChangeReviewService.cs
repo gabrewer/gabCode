@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
 using System.Text;
 
@@ -7,13 +8,14 @@ namespace GabCode.Windows.Projects;
 internal enum ReviewGroup { Staged, Unstaged, Commit }
 internal enum ReviewStatus { Added, Modified, Deleted, Renamed, Untracked, Conflicted, Binary }
 internal enum ReviewDiffState { Patch, Binary, Oversized, Truncated, Conflict, Timeout, Unavailable }
+internal enum ReviewStopReason { None, Limit, Cancelled }
 
 internal sealed record ReviewFile(string Path, string? OldPath, ReviewGroup Group, ReviewStatus Status, string? CommitSha = null, string? Comparison = null)
 {
     internal string Identity => $"{Group}:{CommitSha}:{OldPath}:{Path}";
 }
 internal sealed record ReviewCommit(string Sha, string Subject, string Author, DateTimeOffset Timestamp, IReadOnlyList<string> Parents, string Summary);
-internal sealed record ReviewSnapshot(string Worktree, string? Head, string? MainHead, IReadOnlyList<ReviewFile> Working, IReadOnlyList<ReviewCommit> Commits, bool IsStale, string? Error);
+internal sealed record ReviewSnapshot(string Worktree, string? Head, string? MainHead, IReadOnlyList<ReviewFile> Working, IReadOnlyList<ReviewCommit> Commits, bool IsStale, string? Error, ReviewStopReason StopReason = ReviewStopReason.None, bool WasSuccessful = false);
 internal sealed record ReviewDiff(ReviewDiffState State, string? Patch, string? Error = null);
 
 /// <summary>Windows-owned, bounded Git observation; never calls worktree prune or changes the index.</summary>
@@ -22,39 +24,51 @@ internal sealed class WorktreeChangeReviewService
     private const string EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
     private const int MaximumOutputBytes = 2 * 1024 * 1024;
     private const int PageSize = 100;
+    // All updated gabCode instances for this Windows user share an exclusive OS file handle.
+    // File handles close on process death; unlike a named semaphore there is no stranded count.
+    private static readonly SemaphoreSlim GitSlots = new(1, 1);
+    private static readonly List<FileStream> QuarantinedSlots = [];
+    private static readonly string MachineSlotPath = Path.Combine(Path.GetTempPath(), "gabCode.windows.git-review-slot.lock");
     private readonly string executable;
     private readonly TimeSpan timeout;
 
     internal WorktreeChangeReviewService(string executable = "git", TimeSpan? timeout = null)
     {
         this.executable = executable;
-        this.timeout = timeout ?? TimeSpan.FromSeconds(10);
+        this.timeout = timeout ?? TimeSpan.FromSeconds(5);
     }
 
     internal async Task<ReviewSnapshot> GetSnapshotAsync(string worktree, string? mainBranch, CancellationToken token = default)
     {
         var root = Path.GetFullPath(worktree);
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
+        budget.CancelAfter(TimeSpan.FromSeconds(8));
+        var readToken = budget.Token;
         string? head = null;
         string? mainHead = null;
         IReadOnlyList<ReviewFile> working = [];
         try
         {
-            head = (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], token)).Trim();
-            var status = await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no"], token);
+            head = (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken).ConfigureAwait(false)).Trim();
+            var status = await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no"], readToken).ConfigureAwait(false);
             working = ParseStatus(status);
             if (string.IsNullOrWhiteSpace(mainBranch)) return new(root, head, null, working, [], true, "Configured local main branch is unavailable.");
-            mainHead = (await RunAsync(root, ["rev-parse", "--verify", $"refs/heads/{mainBranch}^{{commit}}"], token)).Trim();
-            var commits = await GetCommitsAsync(root, head, mainHead, 0, token);
+            mainHead = (await RunAsync(root, ["rev-parse", "--verify", $"refs/heads/{mainBranch}^{{commit}}"], readToken).ConfigureAwait(false)).Trim();
+            var commits = await GetCommitsAsync(root, head, mainHead, 0, readToken).ConfigureAwait(false);
             return new(root, head, mainHead, working, commits, false, null);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) when (budget.IsCancellationRequested)
+        { return new(root, head, mainHead, working, [], true, "Git refresh exceeded its eight-second budget.", ReviewStopReason.Limit); }
+        catch (Exception exception) when (exception is TimeoutException or InvalidDataException)
+        { return new(root, head, mainHead, working, [], true, exception.Message, ReviewStopReason.Limit); }
         catch (Exception exception) { return new(root, head, mainHead, working, [], true, exception.Message); }
     }
 
     internal async Task<IReadOnlyList<ReviewCommit>> GetCommitsAsync(string worktree, string head, string mainHead, int skip, CancellationToken token = default)
     {
         if (skip < 0) throw new ArgumentOutOfRangeException(nameof(skip));
-        var raw = await RunAsync(worktree, ["log", "--topo-order", $"--skip={skip}", $"--max-count={PageSize}", "--format=%H%x00%s%x00%an%x00%aI%x00%P%x00", "--shortstat", head, $"^{mainHead}"], token);
+        var raw = await RunAsync(worktree, ["log", "--topo-order", $"--skip={skip}", $"--max-count={PageSize}", "--format=%H%x00%s%x00%an%x00%aI%x00%P%x00", "--shortstat", head, $"^{mainHead}"], token).ConfigureAwait(false);
         var commits = new List<ReviewCommit>();
         foreach (var line in raw.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -184,6 +198,7 @@ internal sealed class WorktreeChangeReviewService
 
     private async Task<string> RunAsync(string worktree, IReadOnlyList<string> args, CancellationToken token)
     {
+        token.ThrowIfCancellationRequested();
         using var timeoutSource = new CancellationTokenSource(timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutSource.Token);
         var info = new ProcessStartInfo(executable) { WorkingDirectory = worktree, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
@@ -192,40 +207,108 @@ internal sealed class WorktreeChangeReviewService
         info.ArgumentList.Add("--no-pager");
         info.ArgumentList.Add("--literal-pathspecs");
         foreach (var arg in args) info.ArgumentList.Add(arg);
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("Git could not be started.");
+        try { await GitSlots.WaitAsync(linked.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutSource.IsCancellationRequested)
+        { throw new TimeoutException("Read-only Git query could not acquire capacity before its deadline."); }
+        var safeToRelease = true;
+        FileStream? machineSlot = null;
         try
         {
-            var stdout = ReadBoundedAsync(process.StandardOutput, linked.Token);
-            var stderr = ReadBoundedAsync(process.StandardError, linked.Token);
-            await Task.WhenAll(stdout, stderr, process.WaitForExitAsync(linked.Token));
+            try { machineSlot = await AcquireMachineSlotAsync(linked.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutSource.IsCancellationRequested)
+            { throw new TimeoutException("Read-only Git query could not acquire cross-process capacity before its deadline."); }
+            using var process = Process.Start(info) ?? throw new InvalidOperationException("Git could not be started.");
+            Task<string>? stdout = null;
+            Task<string>? stderr = null;
+            try
+            {
+            stdout = ReadBoundedAsync(process.StandardOutput, linked.Token);
+            stderr = ReadBoundedAsync(process.StandardError, linked.Token);
+            var exit = process.WaitForExitAsync(linked.Token);
+            // Task.WhenAll would wait for a hung child even after a reader rejected oversized output.
+            // Observe each completed operation immediately so the catch can stop the owned process.
+            var pending = new List<Task> { stdout, stderr, exit };
+            while (pending.Count > 0)
+            {
+                var completed = await Task.WhenAny(pending).ConfigureAwait(false);
+                await completed.ConfigureAwait(false);
+                pending.Remove(completed);
+            }
             var output = await stdout;
             var error = await stderr;
             if (process.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"Git exited {process.ExitCode}." : error.Trim());
             return output;
         }
-        catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutSource.IsCancellationRequested)
-        {
-            TryStop(process);
-            await process.WaitForExitAsync(CancellationToken.None);
-            throw new TimeoutException("Read-only Git query timed out.");
+            catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutSource.IsCancellationRequested)
+            {
+                TryStop(process);
+                try { await WaitForCleanupAsync(process).ConfigureAwait(false); await ObserveReadersAsync(stdout, stderr).ConfigureAwait(false); }
+                catch (TimeoutException) { safeToRelease = false; throw; }
+                throw new TimeoutException("Read-only Git query timed out.");
+            }
+            catch
+            {
+                TryStop(process);
+                try { await WaitForCleanupAsync(process).ConfigureAwait(false); await ObserveReadersAsync(stdout, stderr).ConfigureAwait(false); }
+                catch (TimeoutException) { safeToRelease = false; throw; }
+                throw;
+            }
         }
-        catch
+        finally
         {
-            TryStop(process);
-            await process.WaitForExitAsync(CancellationToken.None);
-            throw;
+            if (safeToRelease)
+            {
+                machineSlot?.Dispose();
+                GitSlots.Release();
+            }
+            else if (machineSlot is not null)
+            {
+                // Keep the OS-wide slot occupied after uncertain cleanup, including across other instances.
+                QuarantineMachineSlot(machineSlot);
+            }
         }
+    }
+
+    internal static void QuarantineMachineSlot(FileStream slot)
+    {
+        lock (QuarantinedSlots) QuarantinedSlots.Add(slot);
+    }
+
+    internal static async Task<FileStream> AcquireMachineSlotAsync(CancellationToken token)
+    {
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            try { return new FileStream(MachineSlotPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (IOException) when (!token.IsCancellationRequested)
+            { await Task.Delay(50, token).ConfigureAwait(false); }
+        }
+    }
+
+    private static async Task ObserveReadersAsync(Task<string>? stdout, Task<string>? stderr)
+    {
+        if (stdout is null || stderr is null) return;
+        try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+        catch (Exception error) when (error is not TimeoutException) { /* original read failure remains authoritative */ }
+    }
+
+    private static async Task WaitForCleanupAsync(Process process)
+    {
+        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (TimeoutException) { throw new TimeoutException("Owned Git process did not exit within the cleanup limit."); }
     }
 
     private static async Task<string> ReadBoundedAsync(StreamReader reader, CancellationToken token)
     {
         var data = new StringBuilder();
         var buffer = new char[4096];
+        var capturedBytes = 0;
         while (true)
         {
-            var read = await reader.ReadAsync(buffer.AsMemory(), token);
+            var read = await reader.ReadAsync(buffer.AsMemory(), token).ConfigureAwait(false);
             if (read == 0) return data.ToString();
-            if (data.Length + read > MaximumOutputBytes) throw new InvalidDataException("Git output exceeded the review limit.");
+            capturedBytes += Encoding.UTF8.GetByteCount(buffer.AsSpan(0, read));
+            if (capturedBytes > MaximumOutputBytes) throw new InvalidDataException("Git output exceeded the review limit.");
             data.Append(buffer, 0, read);
         }
     }
@@ -234,5 +317,6 @@ internal sealed class WorktreeChangeReviewService
     {
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
         catch (InvalidOperationException) { }
+        catch (Win32Exception) { /* bounded exit wait will quarantine capacity if the child remains alive */ }
     }
 }
