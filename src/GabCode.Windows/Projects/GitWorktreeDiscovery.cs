@@ -74,9 +74,27 @@ internal sealed class GitWorktreeDiscovery
             .ToDictionary(entry => entry.Branch!, entry => entry.Path, StringComparer.Ordinal);
     }
 
-    internal async Task<IReadOnlyList<GitWorktreeEntry>> DiscoverEntriesAsync(string projectRoot, IProgress<GitDiscoveryProgress>? progress = null, CancellationToken cancellationToken = default)
+    internal Task<IReadOnlyList<GitWorktreeEntry>> DiscoverEntriesAsync(string projectRoot, IProgress<GitDiscoveryProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        // Directory.EnumerateDirectories and filesystem metadata calls must never run on WPF's dispatcher.
+        return Task.Run(async () =>
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(TimeSpan.FromSeconds(3));
+            try { return await DiscoverEntriesCoreAsync(projectRoot, progress, budget.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && budget.IsCancellationRequested)
+            { throw new TimeoutException("Git discovery exceeded its three-second opening budget."); }
+        }, cancellationToken);
+    }
+
+    // User-confirmed removal and its reconciliation do not inherit the short opening budget.
+    private Task<IReadOnlyList<GitWorktreeEntry>> DiscoverForRemovalAsync(string projectRoot, CancellationToken cancellationToken) =>
+        Task.Run(() => DiscoverEntriesCoreAsync(projectRoot, null, cancellationToken), cancellationToken);
+
+    private async Task<IReadOnlyList<GitWorktreeEntry>> DiscoverEntriesCoreAsync(string projectRoot, IProgress<GitDiscoveryProgress>? progress, CancellationToken cancellationToken)
+    {
+        var scanToken = cancellationToken;
         var root = Path.GetFullPath(projectRoot);
         var repositories = new Dictionary<string, IReadOnlyList<GitWorktreeEntry>>(StringComparer.OrdinalIgnoreCase);
         var coveredWorktrees = new List<string>();
@@ -85,15 +103,15 @@ internal sealed class GitWorktreeDiscovery
         pending.Push(root);
         while (pending.TryPop(out var candidate))
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            scanToken.ThrowIfCancellationRequested();
             foldersScanned++;
-            if ((foldersScanned & 63) == 0) await Task.Yield();
-            progress?.Report(new GitDiscoveryProgress("Searching for Git repositories", foldersScanned, repositories.Count));
+            if (foldersScanned == 1 || (foldersScanned & 63) == 0)
+                progress?.Report(new GitDiscoveryProgress("Searching for Git repositories", foldersScanned, repositories.Count));
             if (ShouldSkipDirectory(candidate, root)) continue;
             if (coveredWorktrees.Any(path => candidate.StartsWith(path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase))) continue;
             if (HasGitMarker(candidate))
             {
-                var output = await RunAsync(candidate, cancellationToken);
+                var output = await RunAsync(candidate, scanToken).ConfigureAwait(false);
                 if (output is null) continue;
                 var entries = ParseEntries(output);
                 if (entries.Count == 0) continue;
@@ -108,7 +126,7 @@ internal sealed class GitWorktreeDiscovery
             var childrenScanned = 0;
             foreach (var child in Directory.EnumerateDirectories(candidate))
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                scanToken.ThrowIfCancellationRequested();
                 if ((++childrenScanned & 63) == 0) await Task.Yield();
                 if (!ShouldSkipDirectory(child, root)) pending.Push(child);
             }
@@ -306,7 +324,7 @@ internal sealed class GitWorktreeDiscovery
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var entries = await DiscoverForRemovalAsync(projectRoot, cancellationToken);
         var normalizedPath = WorktreePath.Normalize(path);
         var target = entries.SingleOrDefault(entry => WorktreePath.Comparer.Equals(entry.Path, normalizedPath))
             ?? throw new InvalidOperationException($"No registered worktree exists at '{normalizedPath}'.");
@@ -324,7 +342,7 @@ internal sealed class GitWorktreeDiscovery
             var delete = await RunGitAsync(primary, branchArguments, cancellationToken);
             if (delete.ExitCode != 0) throw GitFailure($"Worktree was removed, but local branch '{target.Branch}' could not be deleted.", delete);
         }
-        return await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        return await DiscoverForRemovalAsync(projectRoot, cancellationToken);
     }
 
     internal async Task<GitWorktreeRemovalOutcome> RemoveWorktreeWithOutcomeAsync(
@@ -334,7 +352,7 @@ internal sealed class GitWorktreeDiscovery
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var entries = await DiscoverEntriesAsync(projectRoot, cancellationToken: cancellationToken);
+        var entries = await DiscoverForRemovalAsync(projectRoot, cancellationToken);
         var normalizedPath = WorktreePath.Normalize(path);
         var target = entries.SingleOrDefault(entry => WorktreePath.Comparer.Equals(entry.Path, normalizedPath))
             ?? throw new InvalidOperationException($"No registered worktree exists at '{normalizedPath}'.");
@@ -350,7 +368,7 @@ internal sealed class GitWorktreeDiscovery
         catch (OperationCanceledException exception) { attemptFailure = exception; attempt = GitWorktreeRemovalAttempt.Cancelled; }
 
         IReadOnlyList<GitWorktreeEntry> reconciled;
-        try { reconciled = await DiscoverEntriesAsync(projectRoot, cancellationToken: CancellationToken.None); }
+        try { reconciled = await DiscoverForRemovalAsync(projectRoot, CancellationToken.None); }
         catch (Exception exception)
         {
             return new(GitWorktreeRemovalState.ReconciliationUnavailable, attempt, normalizedPath, entries, attemptFailure?.Message ?? exception.Message);
@@ -452,11 +470,11 @@ internal sealed class GitWorktreeDiscovery
 
     private async Task<string?> RunAsync(string directory, CancellationToken cancellationToken)
     {
-        var result = await RunGitAsync(directory, ["worktree", "list", "--porcelain"], cancellationToken);
+        var result = await RunGitAsync(directory, ["worktree", "list", "--porcelain"], cancellationToken, strictOutput: true);
         return result.ExitCode == 0 ? result.StandardOutput : null;
     }
 
-    private async Task<GitProcessResult> RunGitAsync(string directory, IReadOnlyList<string> arguments, CancellationToken cancellationToken, TimeSpan? operationTimeout = null)
+    private async Task<GitProcessResult> RunGitAsync(string directory, IReadOnlyList<string> arguments, CancellationToken cancellationToken, TimeSpan? operationTimeout = null, bool strictOutput = false)
     {
         var effectiveTimeout = operationTimeout ?? timeout;
         using var timeoutCancellation = effectiveTimeout == Timeout.InfiniteTimeSpan ? new CancellationTokenSource() : new CancellationTokenSource(effectiveTimeout);
@@ -472,38 +490,67 @@ internal sealed class GitWorktreeDiscovery
             CreateNoWindow = true,
         };
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
+        FileStream? machineSlot = null;
+        var cleanupVerified = true;
         try
         {
+            if (strictOutput)
+            {
+                try { machineSlot = await WorktreeChangeReviewService.AcquireMachineSlotAsync(cancellation.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCancellation.IsCancellationRequested)
+                { throw new TimeoutException("Git discovery admission timed out."); }
+            }
+            cancellation.Token.ThrowIfCancellationRequested();
             using var process = Process.Start(info) ?? throw new InvalidOperationException("Git could not be started.");
-            var outputTask = ReadBoundedAsync(process.StandardOutput);
-            var errorTask = ReadBoundedAsync(process.StandardError);
+            var outputTask = ReadBoundedAsync(process.StandardOutput, strictOutput);
+            var errorTask = ReadBoundedAsync(process.StandardError, strictOutput);
             try
             {
-                await process.WaitForExitAsync(cancellation.Token);
+                var pending = new List<Task> { outputTask, errorTask, process.WaitForExitAsync(cancellation.Token) };
+                while (pending.Count > 0)
+                {
+                    var completed = await Task.WhenAny(pending).ConfigureAwait(false);
+                    await completed.ConfigureAwait(false);
+                    pending.Remove(completed);
+                }
+                return new GitProcessResult(process.ExitCode, await outputTask.ConfigureAwait(false), await errorTask.ConfigureAwait(false));
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCancellation.IsCancellationRequested)
             {
-                TryStop(process);
-                await Task.WhenAll(outputTask, errorTask);
+                try { await StopAndDrainAsync(process, outputTask, errorTask).ConfigureAwait(false); }
+                catch (TimeoutException) { cleanupVerified = false; throw; }
                 throw new TimeoutException("Git operation timed out.");
             }
             catch
             {
-                TryStop(process);
-                await Task.WhenAll(outputTask, errorTask);
+                try { await StopAndDrainAsync(process, outputTask, errorTask).ConfigureAwait(false); }
+                catch (TimeoutException) { cleanupVerified = false; throw; }
                 throw;
             }
-            return new GitProcessResult(process.ExitCode, await outputTask, await errorTask);
         }
         catch (Win32Exception)
         {
             throw new InvalidOperationException("Git could not be started.");
         }
+        finally
+        {
+            if (cleanupVerified) machineSlot?.Dispose();
+            else if (machineSlot is not null) WorktreeChangeReviewService.QuarantineMachineSlot(machineSlot);
+        }
+    }
+
+    private static async Task StopAndDrainAsync(Process process, Task<string> output, Task<string> error)
+    {
+        TryStop(process);
+        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+        catch (TimeoutException) { throw new TimeoutException("Owned Git process did not exit within the cleanup limit."); }
+        try { await Task.WhenAll(output, error).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+        catch (Exception problem) when (problem is not TimeoutException) { /* preserve the original read or process failure */ }
     }
 
     private sealed record GitProcessResult(int ExitCode, string StandardOutput, string StandardError);
 
-    private static async Task<string> ReadBoundedAsync(StreamReader reader)
+    private static async Task<string> ReadBoundedAsync(StreamReader reader, bool strictOutput)
     {
         var buffer = new char[4096];
         var output = new StringBuilder();
@@ -511,10 +558,10 @@ internal sealed class GitWorktreeDiscovery
         {
             var read = await reader.ReadAsync(buffer.AsMemory());
             if (read == 0) return output.ToString();
+            if (output.Length + read > MaximumGitOutputCharacters && strictOutput)
+                throw new InvalidDataException("Git output exceeded the discovery limit; no truncated result was accepted.");
             if (output.Length < MaximumGitOutputCharacters)
-            {
                 output.Append(buffer, 0, Math.Min(read, MaximumGitOutputCharacters - output.Length));
-            }
         }
     }
 
@@ -526,6 +573,10 @@ internal sealed class GitWorktreeDiscovery
         }
         catch (InvalidOperationException)
         {
+        }
+        catch (Win32Exception)
+        {
+            // Bounded exit/drain waits will quarantine read-only capacity if the child is still live.
         }
     }
 }

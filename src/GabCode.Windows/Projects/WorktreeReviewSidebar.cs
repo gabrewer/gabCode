@@ -24,15 +24,21 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private long overflowVersion;
     private readonly DockPanel root;
     private readonly TextBlock titleText;
+    private readonly Button cancelReviewRefresh;
+    private readonly Button retryReviewRefresh;
     private readonly StackPanel rows = new();
     private readonly ScrollViewer scroller;
     private readonly Dictionary<string, Button> fileButtons = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Expander> sections = new(StringComparer.Ordinal);
     private readonly TextBlock status = new() { Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap };
     private readonly Dictionary<string, IReadOnlyList<ReviewFile>> commitFiles = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> commitFileOffsets = new(StringComparer.Ordinal);
     private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
     private readonly HashSet<string> loadingCommits = new(StringComparer.Ordinal);
     private readonly List<ReviewCommit> history = [];
+    private int workingOffset;
+    private const int WorkingPageSize = 200;
+    private const int MaximumHistoryPages = 4;
     private readonly List<FileSystemWatcher> watchers = [];
     private string? watcherWarning;
     private CancellationTokenSource? lazyCancellation;
@@ -76,7 +82,27 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         var button = new Button { Content = "Refresh changes", Padding = new Thickness(5, 2, 5, 2) };
         AutomationProperties.SetName(button, "Refresh selected worktree changes and commits");
         button.Click += (_, _) => { if (worktree is not null && watchers.Count == 0) StartWatchers(worktree); _ = RefreshReviewAsync(); };
+        cancelReviewRefresh = new Button { Content = "Cancel", Padding = new Thickness(5, 2, 5, 2), Visibility = Visibility.Collapsed };
+        retryReviewRefresh = new Button { Content = "Retry", Padding = new Thickness(5, 2, 5, 2), Visibility = Visibility.Collapsed };
+        AutomationProperties.SetName(cancelReviewRefresh, "Cancel review refresh");
+        cancelReviewRefresh.Click += (_, _) =>
+        {
+            refreshPending = false;
+            coordinator.CancelAndPause();
+            cancelReviewRefresh.Visibility = Visibility.Collapsed;
+            retryReviewRefresh.Visibility = Visibility.Visible;
+            retryReviewRefresh.Focus();
+        };
+        AutomationProperties.SetName(retryReviewRefresh, "Retry review refresh");
+        retryReviewRefresh.Click += (_, _) =>
+        {
+            if (!coordinator.Retry()) { status.Text = coordinator.StopMessage ?? "Waiting for the previous Git refresh to stop. Retry again shortly."; return; }
+            retryReviewRefresh.Visibility = Visibility.Collapsed;
+            _ = RefreshReviewAsync();
+        };
         DockPanel.SetDock(button, Dock.Right); title.Children.Add(button);
+        DockPanel.SetDock(cancelReviewRefresh, Dock.Right); title.Children.Add(cancelReviewRefresh);
+        DockPanel.SetDock(retryReviewRefresh, Dock.Right); title.Children.Add(retryReviewRefresh);
         titleText = new TextBlock { Text = "Changes and commits", FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center };
         title.Children.Add(titleText);
         DockPanel.SetDock(title, Dock.Top); root.Children.Add(title);
@@ -127,14 +153,16 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         foreach (var watcher in watchers) watcher.Dispose();
         watchers.Clear(); watcherWarning = null;
         expanded.Clear(); expanded.UnionWith(["working", "staged", "unstaged"]);
-        commitFiles.Clear(); loadingCommits.Clear(); history.Clear(); head = null; mainHead = null; moreAvailable = true;
+        commitFiles.Clear(); commitFileOffsets.Clear(); loadingCommits.Clear(); history.Clear(); head = null; mainHead = null; moreAvailable = true; workingOffset = 0;
         var hadSelection = activeFileIdentity is not null;
         activeFileIdentity = null;
         worktree = path; mainBranch = branch;
         if (hadSelection) SelectionInvalidated?.Invoke();
         coordinator.Select(path, branch);
-        status.Text = "Loading changes…";
+        status.Text = coordinator.StopMessage ?? (coordinator.IsPaused ? "Git refresh stopped. Automatic refresh is paused. Retry to update." : "Loading changes…");
         rows.Children.Clear();
+        retryReviewRefresh.Visibility = coordinator.IsPaused ? Visibility.Visible : Visibility.Collapsed;
+        cancelReviewRefresh.Visibility = Visibility.Collapsed;
         StartWatchers(path);
         poll.Start();
         _ = RefreshReviewAsync();
@@ -277,9 +305,13 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private async Task RefreshReviewAsync()
     {
         if (disposed || worktree is null) return;
+        if (!coordinator.CanRefresh) { Render(coordinator.Snapshot); return; }
         if (refreshRunning) { refreshPending = true; return; }
         refreshRunning = true;
+        cancelReviewRefresh.Visibility = Visibility.Visible;
+        retryReviewRefresh.Visibility = Visibility.Collapsed;
         var epoch = refreshEpoch;
+        var followups = 0;
         try
         {
             do
@@ -289,6 +321,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                 status.Text = "Refreshing changes…";
                 await coordinator.RefreshAsync();
                 if (disposed || epoch != refreshEpoch) return;
+                if (coordinator.IsPaused && !coordinator.CanRefresh) { refreshPending = false; Render(coordinator.Snapshot); break; }
                 // A read that began before an overflow cannot repair the lost notifications.
                 if (overflowPending && coordinator.Snapshot?.IsStale is false && watchers.Count > 0 &&
                     readVersion == overflowVersion)
@@ -297,14 +330,35 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                     watcherWarning = null;
                     Render(coordinator.Snapshot);
                 }
-            } while (refreshPending);
+                if (refreshPending && coordinator.CanRefresh)
+                {
+                    if (++followups > 2)
+                    {
+                        refreshPending = false;
+                        coordinator.PauseForSafety("Git refresh stopped to keep the app responsive after sustained changes. Automatic refresh is paused; Retry to reconcile.");
+                        break;
+                    }
+                    // Coalesce continuing watcher/focus hints instead of immediately repeating expensive Git reads.
+                    await Task.Delay(TimeSpan.FromSeconds(followups));
+                    if (disposed || epoch != refreshEpoch) return;
+                }
+            } while (refreshPending && coordinator.CanRefresh);
         }
-        finally { if (epoch == refreshEpoch) refreshRunning = false; }
+        finally
+        {
+            if (epoch == refreshEpoch)
+            {
+                refreshRunning = false;
+                cancelReviewRefresh.Visibility = Visibility.Collapsed;
+                retryReviewRefresh.Visibility = coordinator.IsPaused ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
     }
 
     internal void RequestRefresh()
     {
         if (disposed || worktree is null) return;
+        if (!coordinator.CanRefresh) { Render(coordinator.Snapshot); return; }
         status.Text = "Refreshing changes…";
         _ = RefreshReviewAsync();
     }
@@ -331,7 +385,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             lazyCancellation?.Cancel(); lazyCancellation?.Dispose(); lazyCancellation = null;
             loadingCommits.Clear();
             head = newHead; mainHead = snapshot.MainHead;
-            history.Clear(); commitFiles.Clear(); moreAvailable = true;
+            history.Clear(); commitFiles.Clear(); commitFileOffsets.Clear(); moreAvailable = true;
             if (activeFileIdentity is { } selected && selected.StartsWith("Commit:", StringComparison.Ordinal) &&
                 !snapshot.IsStale && newHead is not null && mainHead is not null &&
                 !snapshot.Commits.Any(commit => selected.StartsWith("Commit:" + commit.Sha + ":", StringComparison.Ordinal)))
@@ -350,16 +404,36 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             history.RemoveRange(0, Math.Min(snapshot.Commits.Count, history.Count));
             history.InsertRange(0, snapshot.Commits);
         }
-        status.Text = snapshot.IsStale ? $"Git review unavailable; showing last known state. {snapshot.Error}" :
+        if (workingOffset >= snapshot.Working.Count) workingOffset = 0;
+        var workingPage = snapshot.Working.Skip(workingOffset).Take(WorkingPageSize).ToArray();
+        status.Text = snapshot.IsStale
+            ? $"Git refresh stopped. {(!snapshot.WasSuccessful ? "No current review data." : "Showing previous results.")} {(coordinator.IsPaused ? "Automatic refresh is paused. " : string.Empty)}{snapshot.Error}"
+            :
             $"Selected worktree: {Path.GetFileName(worktree.TrimEnd(Path.DirectorySeparatorChar))}" +
             (watcherWarning is null ? string.Empty : ". " + watcherWarning);
+        if (snapshot.Working.Count > WorkingPageSize)
+            status.Text += $" Showing working changes {workingOffset + 1}–{workingOffset + workingPage.Length} of {snapshot.Working.Count}; not all rows are visible.";
         rows.Children.Clear(); fileButtons.Clear(); sections.Clear();
-        if (snapshot.IsStale && snapshot.Head is null) { rows.Children.Add(Notice("No current review data. Retry refresh.")); return; }
+        if (snapshot.IsStale && !snapshot.WasSuccessful) { rows.Children.Add(Notice("No current review data. Retry refresh.")); return; }
         AddSection(rows, "Working changes", "working", content =>
         {
             if (snapshot.Working.Count == 0) content.Children.Add(Notice("Working tree clean"));
-            AddGroup(content, "Staged", snapshot.Working.Where(f => f.Group == ReviewGroup.Staged).ToArray(), "staged");
-            AddGroup(content, "Unstaged", snapshot.Working.Where(f => f.Group == ReviewGroup.Unstaged).ToArray(), "unstaged");
+            AddGroup(content, "Staged", workingPage.Where(f => f.Group == ReviewGroup.Staged).ToArray(), "staged");
+            AddGroup(content, "Unstaged", workingPage.Where(f => f.Group == ReviewGroup.Unstaged).ToArray(), "unstaged");
+            if (workingOffset > 0)
+            {
+                var previous = new Button { Content = "Previous working changes" };
+                AutomationProperties.SetName(previous, "Previous working changes");
+                previous.Click += (_, _) => { workingOffset -= WorkingPageSize; Render(coordinator.Snapshot ?? snapshot); };
+                content.Children.Add(previous);
+            }
+            if (workingOffset + WorkingPageSize < snapshot.Working.Count)
+            {
+                var next = new Button { Content = "Next working changes" };
+                AutomationProperties.SetName(next, "Next working changes");
+                next.Click += (_, _) => { workingOffset += WorkingPageSize; Render(coordinator.Snapshot ?? snapshot); };
+                content.Children.Add(next);
+            }
         });
         var commits = history.ToArray();
         AddSection(rows, $"Commits ahead of main ({commits.Length})", "commits", content =>
@@ -372,7 +446,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                     (commit.Parents.Count > 1 ? " — Merge (compared with first parent)" : string.Empty);
                 var commitSection = AddSection(content, caption, key, filesPanel =>
                 {
-                    if (commitFiles.TryGetValue(commit.Sha, out var files)) AddFiles(filesPanel, files);
+                    if (commitFiles.TryGetValue(commit.Sha, out var files)) AddCommitFiles(filesPanel, commit.Sha, files);
                     else
                     {
                         filesPanel.Children.Add(Notice("Loading files…"));
@@ -381,7 +455,9 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                 });
                 AutomationProperties.SetName(commitSection, "Commit " + caption);
             }
-            if (moreAvailable && commits.Length > 0 && commits.Length % 100 == 0)
+            if (!moreAvailable && commits.Length >= 100 * MaximumHistoryPages)
+                content.Children.Add(Notice("Only the first 400 commits are shown; more history may exist."));
+            if (moreAvailable && commits.Length > 0 && commits.Length % 100 == 0 && commits.Length < 100 * MaximumHistoryPages)
             {
                 var more = new Button { Content = "Load more commits", Margin = new Thickness(12, 3, 0, 3) };
                 more.Click += async (_, _) => await LoadMoreAsync();
@@ -435,6 +511,16 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         section.Expanded += (_, e) =>
         {
             if (!ReferenceEquals(e.OriginalSource, section)) return;
+            if (key.StartsWith("commit:", StringComparison.Ordinal))
+            {
+                foreach (var oldKey in expanded.Where(value => value.StartsWith("commit:", StringComparison.Ordinal) && value != key).ToArray())
+                {
+                    expanded.Remove(oldKey);
+                    commitFiles.Remove(oldKey[7..]);
+                    commitFileOffsets.Remove(oldKey[7..]);
+                    if (sections.TryGetValue(oldKey, out var oldSection)) oldSection.IsExpanded = false;
+                }
+            }
             expanded.Add(key);
             content.Children.Clear(); renderChildren(content);
         };
@@ -442,12 +528,40 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         {
             if (!ReferenceEquals(e.OriginalSource, section)) return;
             expanded.Remove(key);
+            if (key.StartsWith("commit:", StringComparison.Ordinal))
+            {
+                commitFiles.Remove(key[7..]);
+                commitFileOffsets.Remove(key[7..]);
+            }
             content.Children.Clear();
         };
         target.Children.Add(section);
         sections[key] = section;
         if (section.IsExpanded) renderChildren(content);
         return section;
+    }
+
+    private void AddCommitFiles(Panel target, string sha, IReadOnlyList<ReviewFile> files)
+    {
+        var offset = commitFileOffsets.GetValueOrDefault(sha);
+        if (offset >= files.Count) offset = 0;
+        AddFiles(target, files.Skip(offset).Take(WorkingPageSize));
+        if (files.Count <= WorkingPageSize) return;
+        target.Children.Add(Notice($"Showing commit files {offset + 1}–{Math.Min(offset + WorkingPageSize, files.Count)} of {files.Count}; not all rows are visible."));
+        if (offset > 0)
+        {
+            var previous = new Button { Content = "Previous commit files" };
+            AutomationProperties.SetName(previous, "Previous commit files");
+            previous.Click += (_, _) => { commitFileOffsets[sha] = offset - WorkingPageSize; Render(coordinator.Snapshot); };
+            target.Children.Add(previous);
+        }
+        if (offset + WorkingPageSize < files.Count)
+        {
+            var next = new Button { Content = "Next commit files" };
+            AutomationProperties.SetName(next, "Next commit files");
+            next.Click += (_, _) => { commitFileOffsets[sha] = offset + WorkingPageSize; Render(coordinator.Snapshot); };
+            target.Children.Add(next);
+        }
     }
 
     private void AddFiles(Panel target, IEnumerable<ReviewFile> files)
@@ -518,7 +632,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             var page = await service.GetCommitsAsync(path!, requestedHead, requestedMainHead, offset, lazyCancellation.Token);
             if (current != generation || disposed || head != requestedHead || mainHead != requestedMainHead || offset != history.Count) return;
             history.AddRange(page);
-            moreAvailable = page.Count == 100;
+            moreAvailable = page.Count == 100 && history.Count < 100 * MaximumHistoryPages;
             Render(coordinator.Snapshot);
         }
         catch (OperationCanceledException) { }

@@ -247,6 +247,120 @@ public sealed class WorktreeChangeReviewBoundaryTests
     }
 
     [Fact]
+    public async Task A_separate_process_holding_the_review_slot_blocks_new_Git_reads_until_it_exits()
+    {
+        var repo = new Repo(); await repo.Initialize();
+        var path = (string)typeof(WorktreeChangeReviewService).GetField("MachineSlotPath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.GetValue(null)!;
+        var marker = Path.Combine(repo.Path, "held.marker");
+        var script = Path.Combine(repo.Path, "hold-slot.ps1");
+        await File.WriteAllTextAsync(script, "param($slot,$marker)\n$handle=[IO.File]::Open($slot,'OpenOrCreate','ReadWrite','None')\ntry { [IO.File]::WriteAllText($marker,'held'); Start-Sleep -Seconds 2 } finally { $handle.Dispose() }\n");
+        var info = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true };
+        foreach (var arg in new[] { "-NoProfile", "-NonInteractive", "-File", script, path, marker }) info.ArgumentList.Add(arg);
+        using var holder = Process.Start(info)!;
+        try
+        {
+            var until = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            while (!File.Exists(marker) && DateTime.UtcNow < until && !holder.HasExited) await Task.Delay(20);
+            Assert.True(File.Exists(marker), "Separate lock-holder process did not acquire the slot.");
+            var result = await new WorktreeChangeReviewService("git", TimeSpan.FromMilliseconds(150)).GetSnapshotAsync(repo.Path, "trunk");
+            Assert.Equal(ReviewStopReason.Limit, result.StopReason);
+            await holder.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(4));
+            var resumed = await new WorktreeChangeReviewService().GetSnapshotAsync(repo.Path, "trunk");
+            Assert.False(resumed.IsStale, resumed.Error);
+        }
+        finally
+        {
+            if (!holder.HasExited) { holder.Kill(entireProcessTree: true); await holder.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)); }
+            try { repo.Dispose(); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task Discovery_rejects_oversized_output_before_a_hung_child_exits()
+    {
+        var repo = new Repo(); await repo.Initialize();
+        try
+        {
+            var fake = Path.Combine(repo.Path, "discover-overflow.cmd");
+            await File.WriteAllTextAsync(fake, "@echo off\r\nfor /L %%i in (1,1,300) do @echo " + new string('x', 400) + "\r\nping -n 20 127.0.0.1 > nul\r\n");
+            var elapsed = Stopwatch.StartNew();
+            await Assert.ThrowsAsync<InvalidDataException>(() => new GitWorktreeDiscovery(fake, TimeSpan.FromSeconds(6)).DiscoverEntriesAsync(repo.Path));
+            Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5), $"Discovery took {elapsed.Elapsed} after exceeding its output limit.");
+        }
+        finally { try { repo.Dispose(); } catch (IOException) { } }
+    }
+
+    [Fact]
+    public async Task Timed_out_admission_is_classified_as_a_safety_stop()
+    {
+        var repo = new Repo(); await repo.Initialize();
+        try
+        {
+            var fake = Path.Combine(repo.Path, "busy.cmd");
+            var marker = Path.Combine(repo.Path, "active.marker");
+            await File.WriteAllTextAsync(fake, "@echo off\r\necho active > active.marker\r\nping -n 4 127.0.0.1 > nul\r\n");
+            var first = new WorktreeChangeReviewService(fake).GetDiffAsync(repo.Path,
+                new ReviewFile("base.txt", null, ReviewGroup.Staged, ReviewStatus.Modified));
+            var until = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            while (!File.Exists(marker) && DateTime.UtcNow < until) await Task.Delay(10);
+            Assert.True(File.Exists(marker));
+            var second = await new WorktreeChangeReviewService(fake, TimeSpan.FromMilliseconds(100))
+                .GetSnapshotAsync(repo.Path, "main");
+            Assert.Equal(ReviewStopReason.Limit, second.StopReason);
+            await first;
+        }
+        finally { try { repo.Dispose(); } catch (IOException) { } }
+    }
+
+    [Fact]
+    public async Task Pre_cancelled_review_never_launches_a_child_process()
+    {
+        using var repo = new Repo(); await repo.Initialize();
+        var marker = Path.Combine(repo.Path, "launched.marker");
+        var fake = Path.Combine(repo.Path, "would-launch.cmd");
+        await File.WriteAllTextAsync(fake, "@echo off\r\necho launched > launched.marker\r\n");
+        using var cancel = new CancellationTokenSource(); cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new WorktreeChangeReviewService(fake)
+            .GetSnapshotAsync(repo.Path, "trunk", cancel.Token));
+        Assert.False(File.Exists(marker));
+    }
+
+    [Fact]
+    public async Task Concurrent_review_services_do_not_launch_two_Git_children_at_once()
+    {
+        var repo = new Repo(); await repo.Initialize();
+        try
+        {
+        var marker = Path.Combine(repo.Path, "active.marker");
+        var collision = Path.Combine(repo.Path, "collision.marker");
+        var fake = Path.Combine(repo.Path, "serial.cmd");
+        await File.WriteAllTextAsync(fake, "@echo off\r\nif exist active.marker echo overlap > collision.marker\r\necho running > active.marker\r\nping -n 3 127.0.0.1 > nul\r\ndel active.marker\r\n");
+        var file = new ReviewFile("base.txt", null, ReviewGroup.Staged, ReviewStatus.Modified);
+        var first = new WorktreeChangeReviewService(fake).GetDiffAsync(repo.Path, file);
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (!File.Exists(marker) && DateTime.UtcNow < until) await Task.Delay(10);
+        Assert.True(File.Exists(marker), "The first fake Git process never entered its busy section.");
+        var second = new WorktreeChangeReviewService(fake).GetDiffAsync(repo.Path, file);
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(9));
+        Assert.False(File.Exists(collision), "Separate review services launched Git processes concurrently.");
+        }
+        finally { try { repo.Dispose(); } catch (IOException) { /* child handle may outlive cmd briefly */ } }
+    }
+
+    [Fact]
+    public async Task Oversized_child_output_stops_the_owned_process_without_waiting_for_a_hung_child()
+    {
+        using var repo = new Repo(); await repo.Initialize();
+        var fake = Path.Combine(repo.Path, "burst-then-hang.cmd");
+        await File.WriteAllTextAsync(fake, "@echo off\r\nfor /L %%i in (1,1,6000) do @echo " + new string('x', 500) + "\r\nping -n 20 127.0.0.1 > nul\r\n");
+        var clock = Stopwatch.StartNew();
+        var diff = await new WorktreeChangeReviewService(fake, TimeSpan.FromSeconds(6))
+            .GetDiffAsync(repo.Path, new("base.txt", null, ReviewGroup.Staged, ReviewStatus.Modified));
+        Assert.Equal(ReviewDiffState.Truncated, diff.State);
+        Assert.InRange(clock.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(4));
+    }
+
+    [Fact]
     public async Task Oversized_child_output_is_explicitly_truncated_and_does_not_publish_partial_patch()
     {
         using var repo = new Repo(); await repo.Initialize();

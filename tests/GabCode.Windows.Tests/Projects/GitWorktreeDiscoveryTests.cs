@@ -105,6 +105,25 @@ public sealed class GitWorktreeDiscoveryTests
     }
 
     [Fact]
+    public async Task Discovers_a_repository_after_more_than_4096_folders_within_the_time_budget()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabCode wide timed discovery", Guid.NewGuid().ToString("N"));
+        var main = Path.Combine(root, "main");
+        Directory.CreateDirectory(main);
+        try
+        {
+            await Git(main, ["init", "--initial-branch", "trunk"]);
+            for (var index = 0; index < 4100; index++)
+                Directory.CreateDirectory(Path.Combine(root, $"child-{index:D4}"));
+
+            var entries = await new GitWorktreeDiscovery().DiscoverEntriesAsync(root);
+
+            Assert.Equal(Path.GetFullPath(main), Assert.Single(entries).Path);
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public async Task Cancels_discovery_in_a_wide_tree_without_a_directory_count_failure()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabCode wide discovery", Guid.NewGuid().ToString("N"));
@@ -114,13 +133,13 @@ public sealed class GitWorktreeDiscoveryTests
             for (var index = 0; index < 256; index++) Directory.CreateDirectory(Path.Combine(root, $"child-{index:D3}"));
             using var cancellation = new CancellationTokenSource();
             cancellation.Cancel();
-            await Assert.ThrowsAsync<OperationCanceledException>(() => new GitWorktreeDiscovery().DiscoverEntriesAsync(root, cancellationToken: cancellation.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new GitWorktreeDiscovery().DiscoverEntriesAsync(root, cancellationToken: cancellation.Token));
         }
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
     }
 
     [Fact]
-    public async Task Drains_noisy_stdout_and_stderr_without_retaining_unbounded_output()
+    public async Task Rejects_noisy_stdout_and_stderr_instead_of_accepting_truncated_discovery()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabCode noisy discovery", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -130,10 +149,28 @@ public sealed class GitWorktreeDiscoveryTests
             var fakeGit = Path.Combine(root, "noisy-git.cmd");
             await File.WriteAllTextAsync(fakeGit, "@echo off\r\necho worktree %CD%\r\necho HEAD 000\r\necho branch refs/heads/trunk\r\necho.\r\nfor /L %%i in (1,1,5000) do @echo 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789\r\nfor /L %%i in (1,1,5000) do @echo 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 1>&2\r\n");
 
-            var entries = await new GitWorktreeDiscovery(fakeGit, TimeSpan.FromSeconds(5)).DiscoverEntriesAsync(root);
+            await Assert.ThrowsAsync<InvalidDataException>(() => new GitWorktreeDiscovery(fakeGit, TimeSpan.FromSeconds(5)).DiscoverEntriesAsync(root));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
 
-            Assert.Single(entries);
-            Assert.Equal("trunk", entries[0].Branch);
+    [Fact]
+    public async Task Opening_discovery_stops_at_three_seconds_even_when_a_git_probe_allows_longer()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabCode three second discovery", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await Git(root, ["init", "--initial-branch", "trunk"]);
+            var fakeGit = Path.Combine(root, "slow-discovery.cmd");
+            await File.WriteAllTextAsync(fakeGit, "@echo off\r\nping -n 9 127.0.0.1 > nul\r\n");
+            var elapsed = Stopwatch.StartNew();
+
+            var error = await Assert.ThrowsAsync<TimeoutException>(() =>
+                new GitWorktreeDiscovery(fakeGit, TimeSpan.FromSeconds(10)).DiscoverEntriesAsync(root));
+
+            Assert.Contains("three-second opening budget", error.Message);
+            Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(6), $"Discovery took {elapsed.Elapsed}.");
         }
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
     }
