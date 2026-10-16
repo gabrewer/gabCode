@@ -85,8 +85,7 @@ public sealed class WorktreeRefreshSafetyTests
                     var end = DateTime.UtcNow + TimeSpan.FromSeconds(6);
                     while (DateTime.UtcNow < end)
                     {
-                        if (sidebar.Content is System.Windows.Controls.DockPanel root &&
-                            root.Children.OfType<System.Windows.Controls.TextBlock>().Any(status => status.Text.StartsWith("Selected worktree:"))) break;
+                        if (!sidebar.IsRefreshing && sidebar.HasFreshSnapshot) break;
                         await Task.Delay(25);
                     }
                     Assert.True(maxBeat > TimeSpan.Zero, "No dispatcher heartbeat ran.");

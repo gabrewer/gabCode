@@ -153,6 +153,11 @@ public partial class MainWindow : Window
         if (reviewSidebar is null)
         {
             reviewSidebar = new WorktreeReviewSidebar(reviewService);
+            reviewSidebar.RefreshActivityChanged += () =>
+            {
+                if (!closeInProgress && !Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+                    UpdateSidebarIndicators();
+            };
             reviewSidebar.DiffRequested += (file, focus) => _ = OpenReviewDiffAsync(file, focus);
             reviewSidebar.SelectionRetained += file => _ = RefreshReviewDiffAsync(file);
             reviewSidebar.SelectionInvalidated += () =>
@@ -591,7 +596,7 @@ public partial class MainWindow : Window
             if (sidebarItem is null) continue;
             var selected = WorktreePath.Comparer.Equals(entry.Path, project?.ProjectFolder);
             var running = (terminalRegistry?.GetActiveTerminalCount(entry.Path) ?? 0) > 0;
-            sidebarItem.UpdateState(selected, running);
+            sidebarItem.UpdateState(selected, running, selected && reviewSidebar?.IsRefreshing is true);
             var name = AutomationProperties.GetName(sidebarItem);
             AutomationProperties.SetName(item, entry.MissingRefreshes >= 2 ? $"Orphaned terminals: {name}" : name);
         }
