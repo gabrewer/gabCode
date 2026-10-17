@@ -5,6 +5,7 @@ import SwiftUI
 struct WorktreeChangeReviewSidebar: View {
     @ObservedObject var coordinator: WorktreeChangeReviewCoordinator
     let presentation: () -> TerminalWorkspacePresentation?
+    @FocusState private var focusedCommit: String?
     @ScaledMetric(relativeTo: .subheadline) private var commitRowHeight = 30.0
 
     var body: some View {
@@ -83,10 +84,35 @@ struct WorktreeChangeReviewSidebar: View {
         }
     }
 
+    private func statusBadge(for file: ReviewFile) -> (glyph: String, accessibilityName: String) {
+        let state: String
+        switch file.status {
+        case .added: state = "Added"
+        case .modified, .changed: state = "Modified"
+        case .deleted: state = "Deleted"
+        case .renamed: state = "Renamed"
+        case .untracked: state = "Untracked"
+        case .conflicted: state = "Conflicted"
+        case .copied: state = "Copied"
+        }
+        let group = file.group == .staged ? "Staged" : file.group == .unstaged ? "Unstaged" : "Commit"
+        let glyph: String
+        switch file.status {
+        case .added, .untracked: glyph = file.status == .untracked ? "U" : "A"
+        case .modified, .changed: glyph = "M"
+        case .deleted: glyph = "D"
+        case .renamed: glyph = "R"
+        case .conflicted: glyph = "!"
+        case .copied: glyph = "C"
+        }
+        return (glyph, "\(state), \(group)")
+    }
+
     private func fileButton(_ file: ReviewFile) -> some View {
         let comparison = file.group == .commit
             ? (file.comparison.hasPrefix("empty tree →") ? "Root commit · empty tree → commit" : "First parent → commit")
             : file.comparison
+        let badge = statusBadge(for: file)
         return Button {
             guard let presentation = presentation() else {
                 coordinator.reportUnavailableSelection()
@@ -95,14 +121,17 @@ struct WorktreeChangeReviewSidebar: View {
             coordinator.open(file: file, in: presentation)
         } label: {
             HStack(alignment: .top, spacing: 6) {
-                Text(file.status.rawValue.prefix(1).uppercased())
-                    .font(.caption.monospaced()).frame(width: 18)
-                    .accessibilityHidden(true)
+                Text(badge.glyph)
+                    .font(.caption.monospaced().weight(.semibold)).frame(width: 18)
+                    .foregroundStyle(file.status == .conflicted ? Color.orange : Color.primary)
+                    .accessibilityLabel(badge.accessibilityName)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
                         .lineLimit(2).truncationMode(.middle)
-                    Text("\(file.status.rawValue.capitalized) · \(comparison)")
-                        .font(.caption2).foregroundStyle(.secondary)
+                    if !comparison.isEmpty {
+                        Text(comparison)
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -111,7 +140,7 @@ struct WorktreeChangeReviewSidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(file.status.rawValue.capitalized), \(file.path), \(comparison)\(file.oldPath.map { ", renamed from \($0)" } ?? "")")
+        .accessibilityLabel("\(badge.accessibilityName), \(file.path)\(comparison.isEmpty ? "" : ", \(comparison)")\(file.oldPath.map { ", renamed from \($0)" } ?? "")")
         .accessibilityAddTraits(coordinator.selectedFile?.id == file.id ? [.isSelected] : [])
         .accessibilityValue(coordinator.selectedFile?.id == file.id ? "Selected diff" : "Not selected")
         .accessibilityIdentifier("review-file-\(file.group.rawValue)-\(file.path)")
@@ -137,7 +166,10 @@ struct WorktreeChangeReviewSidebar: View {
                             .foregroundStyle(commit.parents.count > 1 ? Color.orange : Color.accentColor)
                             .frame(width: 16, height: 24)
                             .accessibilityHidden(true)
-                        Button { coordinator.toggleCommit(commit.sha) } label: {
+                        Button {
+                            coordinator.toggleCommit(commit.sha)
+                            focusedCommit = commit.sha
+                        } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                                     .font(.caption2).frame(width: 10).accessibilityHidden(true)
@@ -167,7 +199,15 @@ struct WorktreeChangeReviewSidebar: View {
                             .background(selected ? Color.accentColor.opacity(0.14) : Color.clear)
                         }
                         .buttonStyle(.plain)
-                        .help("\(commit.subject) · \(commit.author)")
+                        .focused($focusedCommit, equals: commit.sha)
+                        .help("\(commit.sha)\n\(commit.subject)\n\(commit.author) · \(commit.timestamp.formatted())\n\(commit.summary)")
+                        .contextMenu {
+                            Button("Copy Commit Hash") { coordinator.copyCommitHash(commit.sha) }
+                                .accessibilityIdentifier("copy-commit-hash-\(commit.sha)")
+                        }
+                        .accessibilityAction(named: Text("Copy Commit Hash")) {
+                            coordinator.copyCommitHash(commit.sha)
+                        }
                         .accessibilityLabel("\(commit.parents.count > 1 ? "Merge commit" : "Commit"), \(isHead ? "HEAD, " : "")\(commit.sha), \(commit.subject), \(commit.author), \(commit.timestamp.formatted()), \(commit.summary)")
                         .accessibilityValue("\(expanded ? "Expanded" : "Collapsed")\(selected ? ", selected diff" : "")")
                         .accessibilityIdentifier("review-commit-\(commit.sha)")
@@ -181,9 +221,20 @@ struct WorktreeChangeReviewSidebar: View {
                     }
                     if expanded {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(commit.subject)\n\(commit.author) · \(commit.timestamp.formatted(date: .abbreviated, time: .shortened))\n\(commit.summary)")
-                                .font(.caption2).foregroundStyle(.secondary)
-                                .accessibilityIdentifier("review-commit-details-\(commit.sha)")
+                            HStack(alignment: .top, spacing: 4) {
+                                Text("\(commit.subject)\n\(commit.author) · \(commit.timestamp.formatted(date: .abbreviated, time: .shortened))\n\(commit.summary)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("review-commit-details-\(commit.sha)")
+                                Spacer(minLength: 0)
+                                Button("Copy Commit Hash", systemImage: "doc.on.doc") {
+                                    coordinator.copyCommitHash(commit.sha)
+                                }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                                .help("Copy Commit Hash")
+                                .accessibilityLabel("Copy Commit Hash")
+                                .accessibilityIdentifier("copy-commit-hash-button-\(commit.sha)")
+                            }
                             if let files = coordinator.commitFiles[commit.sha] {
                                 if files.isEmpty { Text("No files changed").font(.caption) }
                                 ForEach(files) { file in fileButton(file) }
