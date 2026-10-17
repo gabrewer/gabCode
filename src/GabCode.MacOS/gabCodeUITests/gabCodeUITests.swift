@@ -336,22 +336,21 @@ final class gabCodeUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         let details = app.staticTexts["review-commit-details-\(head)"]
-        XCTAssertFalse(details.exists, "Metadata belongs in expanded details, not each collapsed row")
+        XCTAssertFalse(details.exists, "Commit metadata must never create an expanded block")
         first.click()
-        XCTAssertTrue(details.waitForExistence(timeout: 8))
-        let detailText = "\(details.label) \(details.value as? String ?? "")"
-        XCTAssertFalse(detailText.contains(String(head.prefix(8))), "Expanded details should not repeat the commit hash")
-        XCTAssertTrue(detailText.contains("Reviewer"))
         let historyFile = app.buttons["review-file-commit-history.txt"]
         XCTAssertTrue(historyFile.waitForExistence(timeout: 8))
+        XCTAssertFalse(details.exists, "Files follow the commit row directly, without duplicate metadata")
         XCTAssertFalse(historyFile.label.contains(head), "Historical file rows should not render raw commit IDs")
-        XCTAssertTrue(historyFile.label.contains("First parent"), "The comparison basis must remain understandable")
+        XCTAssertTrue(historyFile.label.contains("First parent"), "Comparison basis remains accessible without a second visual line")
+        XCTAssertLessThanOrEqual(historyFile.frame.height, 30, "File rows must fit on a single compact line")
+        XCTAssertLessThanOrEqual(historyFile.frame.minY - first.frame.maxY, 10, "Files must appear directly under their commit")
         let expandedScreenshot = XCTAttachment(screenshot: app.screenshot())
-        expandedScreenshot.name = "Expanded history without commit hashes"
+        expandedScreenshot.name = "Expanded compact branch tree with files directly beneath commits"
         expandedScreenshot.lifetime = .keepAlways
         add(expandedScreenshot)
         first.click()
-        XCTAssertFalse(details.exists)
+        XCTAssertFalse(historyFile.exists)
     }
 
     @MainActor
@@ -391,7 +390,7 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertTrue(commit.exists, "Copy must not change the selected review target")
         commit.click()
         let keyboardCopy = app.buttons["copy-commit-hash-button-\(head)"]
-        XCTAssertTrue(keyboardCopy.waitForExistence(timeout: 5), "Expanded commit offers a focusable native button")
+        XCTAssertTrue(keyboardCopy.waitForExistence(timeout: 5), "Commit row offers a focusable native copy action")
         NSPasteboard.general.clearContents()
         XCTAssertTrue(keyboardCopy.isHittable)
         // Commit activation establishes focus; Tab reaches the adjacent native copy button.
@@ -418,6 +417,16 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertTrue(secondaryRow.waitForExistence(timeout: 5))
         secondaryRow.click()
         XCTAssertTrue(app.staticTexts["Working tree clean"].waitForExistence(timeout: 12))
+        let stagedGroup = app.buttons["review-group-staged"]
+        let unstagedGroup = app.buttons["review-group-unstaged"]
+        XCTAssertTrue(stagedGroup.exists, "Empty staged group must remain in the tree")
+        XCTAssertTrue(unstagedGroup.exists, "Empty unstaged group must remain in the tree")
+        XCTAssertTrue(app.staticTexts["No staged files."].exists)
+        XCTAssertTrue(app.staticTexts["No unstaged files."].exists)
+        stagedGroup.click()
+        XCTAssertFalse(app.staticTexts["No staged files."].exists, "Group disclosure collapses empty content")
+        stagedGroup.click()
+        XCTAssertTrue(app.staticTexts["No staged files."].exists)
         let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
         XCTAssertTrue(commit.waitForExistence(timeout: 8))
         commit.click()
