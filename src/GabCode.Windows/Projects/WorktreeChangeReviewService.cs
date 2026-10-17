@@ -8,7 +8,7 @@ namespace GabCode.Windows.Projects;
 internal enum ReviewGroup { Staged, Unstaged, Commit }
 internal enum ReviewStatus { Added, Modified, Deleted, Renamed, Untracked, Conflicted, Binary }
 internal enum ReviewDiffState { Patch, Binary, Oversized, Truncated, Conflict, Timeout, Unavailable }
-internal enum ReviewStopReason { None, Limit, Cancelled }
+internal enum ReviewStopReason { None, Limit, Cancelled, Budget }
 
 internal sealed record ReviewFile(string Path, string? OldPath, ReviewGroup Group, ReviewStatus Status, string? CommitSha = null, string? Comparison = null)
 {
@@ -31,18 +31,21 @@ internal sealed class WorktreeChangeReviewService
     private static readonly string MachineSlotPath = Path.Combine(Path.GetTempPath(), "gabCode.windows.git-review-slot.lock");
     private readonly string executable;
     private readonly TimeSpan timeout;
+    private readonly TimeSpan snapshotBudget;
 
-    internal WorktreeChangeReviewService(string executable = "git", TimeSpan? timeout = null)
+    internal WorktreeChangeReviewService(string executable = "git", TimeSpan? timeout = null, TimeSpan? snapshotBudget = null)
     {
         this.executable = executable;
         this.timeout = timeout ?? TimeSpan.FromSeconds(5);
+        this.snapshotBudget = snapshotBudget ?? TimeSpan.FromSeconds(8);
+        if (this.snapshotBudget <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(snapshotBudget));
     }
 
     internal async Task<ReviewSnapshot> GetSnapshotAsync(string worktree, string? mainBranch, CancellationToken token = default)
     {
         var root = Path.GetFullPath(worktree);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
-        budget.CancelAfter(TimeSpan.FromSeconds(8));
+        budget.CancelAfter(snapshotBudget);
         var readToken = budget.Token;
         string? head = null;
         string? mainHead = null;
@@ -59,7 +62,7 @@ internal sealed class WorktreeChangeReviewService
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (OperationCanceledException) when (budget.IsCancellationRequested)
-        { return new(root, head, mainHead, working, [], true, "Git refresh exceeded its eight-second budget.", ReviewStopReason.Limit); }
+        { return new(root, head, mainHead, working, [], true, "Git refresh exceeded its eight-second budget.", ReviewStopReason.Budget); }
         catch (Exception exception) when (exception is TimeoutException or InvalidDataException)
         { return new(root, head, mainHead, working, [], true, exception.Message, ReviewStopReason.Limit); }
         catch (Exception exception) { return new(root, head, mainHead, working, [], true, exception.Message); }
