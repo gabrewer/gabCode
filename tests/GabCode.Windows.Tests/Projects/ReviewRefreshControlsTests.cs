@@ -110,6 +110,11 @@ public sealed class ReviewRefreshControlsTests
                 var nameRow = Assert.IsType<Grid>(name.Parent);
                 Assert.Contains(spinner, nameRow.Children.OfType<System.Windows.Shapes.Path>());
                 Assert.Same(nameRow, name.Parent);
+                Assert.Equal(0, Grid.GetColumn(name));
+                Assert.Equal(1, Grid.GetColumn(spinner));
+                Assert.Equal(HorizontalAlignment.Right, spinner.HorizontalAlignment);
+                Assert.Equal(GridUnitType.Star, nameRow.ColumnDefinitions[0].Width.GridUnitType);
+                Assert.Equal(22, nameRow.ColumnDefinitions[1].Width.Value);
                 var dock = Assert.IsType<DockPanel>(sidebar.Content);
                 dock.Measure(new Size(380, 600));
                 dock.Arrange(new Rect(0, 0, 380, 600));
