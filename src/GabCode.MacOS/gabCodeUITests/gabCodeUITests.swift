@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import XCTest
 
@@ -351,6 +352,52 @@ final class gabCodeUITests: XCTestCase {
         add(expandedScreenshot)
         first.click()
         XCTAssertFalse(details.exists)
+    }
+
+    @MainActor
+    func testReviewBadgesAndFullHashCopyFromNativeCommitMenu() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let secondary = fixture.primary.appendingPathComponent(".worktrees/secondary", isDirectory: true)
+        let git = URL(fileURLWithPath: try developerToolPath("git"))
+        try Data("committed\n".utf8).write(to: secondary.appendingPathComponent("history.txt"))
+        try run(git, ["-C", secondary.path, "add", "history.txt"])
+        try run(git, ["-C", secondary.path, "-c", "user.name=Reviewer", "-c", "user.email=reviewer@example.invalid", "commit", "-m", "History"])
+        let head = try run(git, ["-C", secondary.path, "rev-parse", "HEAD"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try Data("staged\n".utf8).write(to: secondary.appendingPathComponent("staged-new.txt"))
+        try run(git, ["-C", secondary.path, "add", "staged-new.txt"])
+        try Data("untracked\n".utf8).write(to: secondary.appendingPathComponent("untracked-new.txt"))
+        app.launchArguments += ["-AppleKeyboardUIMode", "3", fixture.descriptor.path]
+        app.launch()
+        let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
+        XCTAssertTrue(secondaryRow.waitForExistence(timeout: 12))
+        secondaryRow.click()
+        let staged = app.buttons["review-file-staged-staged-new.txt"]
+        let untracked = app.buttons["review-file-unstaged-untracked-new.txt"]
+        XCTAssertTrue(staged.waitForExistence(timeout: 12))
+        XCTAssertTrue(untracked.exists)
+        XCTAssertTrue(staged.label.contains("Added, Staged"))
+        XCTAssertTrue(untracked.label.contains("Untracked, Unstaged"))
+        XCTAssertFalse(staged.label.contains("Added ·"), "Do not repeat status as row detail")
+        let commit = app.buttons["review-commit-\(head)"]
+        XCTAssertTrue(commit.waitForExistence(timeout: 12))
+        XCTAssertTrue(commit.label.contains(head), "Full SHA remains accessible without showing a row hash")
+        commit.rightClick()
+        let copy = app.menuItems["Copy Commit Hash"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), "Commit menu exposes a native full-SHA action")
+        copy.click()
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), head)
+        XCTAssertTrue(commit.exists, "Copy must not change the selected review target")
+        commit.click()
+        let keyboardCopy = app.buttons["copy-commit-hash-button-\(head)"]
+        XCTAssertTrue(keyboardCopy.waitForExistence(timeout: 5), "Expanded commit offers a focusable native button")
+        NSPasteboard.general.clearContents()
+        XCTAssertTrue(keyboardCopy.isHittable)
+        // Commit activation establishes focus; Tab reaches the adjacent native copy button.
+        app.typeKey(.tab, modifierFlags: [])
+        app.typeKey(.space, modifierFlags: [])
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), head, "Native keyboard activation copies the exact SHA")
     }
 
     @MainActor

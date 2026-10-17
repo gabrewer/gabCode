@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -169,6 +170,14 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
 
     func reportUnavailableSelection() {
         notice = "The selected worktree is unavailable. Select a recognized worktree and retry."
+    }
+
+    func copyCommitHash(_ sha: String) {
+        guard snapshot?.commits.contains(where: { $0.sha == sha }) == true else { return }
+        NSPasteboard.general.clearContents()
+        notice = NSPasteboard.general.setString(sha, forType: .string)
+            ? "Commit hash copied to clipboard."
+            : "Could not copy commit hash. Try again."
     }
 
     func closeDocument() {

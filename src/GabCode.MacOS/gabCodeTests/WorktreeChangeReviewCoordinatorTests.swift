@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 @testable import gabCode
 import XCTest
@@ -29,6 +30,31 @@ final class WorktreeChangeReviewCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.selectedFile)
         XCTAssertFalse(presentation.reviewDocument.isOpen)
         XCTAssertNotNil(coordinator.notice)
+    }
+
+    func testCopyCommitHashPreservesDiffAndRejectsStaleCommitAfterWorktreeSwitch() async throws {
+        let root = URL(fileURLWithPath: "/tmp/review copy \(UUID())", isDirectory: true)
+        let sha = String(repeating: "a", count: 40)
+        let file = ReviewFile(worktree: root, group: .unstaged, status: .modified, path: "file.txt", oldPath: nil, commitSHA: nil, comparison: "index → worktree")
+        let commit = ReviewCommit(sha: sha, subject: "feature", author: "Tester", timestamp: .now, summary: "1 file changed", parents: [])
+        let loader = SnapshotSequence([snapshot(root, working: [file], commits: [commit])])
+        let coordinator = WorktreeChangeReviewCoordinator(snapshotLoader: { _, _ in try await loader.next() })
+        coordinator.activate(worktree: root, mainBranch: "trunk")
+        defer { coordinator.deactivate() }
+        await coordinator.refresh()
+        let presentation = TerminalWorkspacePresentation(workingDirectory: root)
+        coordinator.open(file: file, in: presentation)
+        let revision = presentation.reviewDocument.revision
+        coordinator.copyCommitHash(sha)
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), sha)
+        XCTAssertEqual(coordinator.selectedFile, file)
+        XCTAssertEqual(presentation.reviewDocument.revision, revision)
+        XCTAssertEqual(coordinator.notice, "Commit hash copied to clipboard.")
+        coordinator.activate(worktree: root.appendingPathComponent("another"), mainBranch: "trunk")
+        let changeCount = NSPasteboard.general.changeCount
+        coordinator.copyCommitHash(sha)
+        XCTAssertEqual(NSPasteboard.general.changeCount, changeCount, "A stale menu action must not touch the clipboard")
+        XCTAssertNil(coordinator.notice)
     }
 
     func testFailureKeepsLastGoodDataMarkedStaleAndManualRefreshRecovers() async throws {
