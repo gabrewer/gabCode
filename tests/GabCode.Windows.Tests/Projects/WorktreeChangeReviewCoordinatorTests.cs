@@ -90,11 +90,9 @@ public sealed class WorktreeChangeReviewCoordinatorTests
     public async Task Budget_exhaustion_retries_silently_then_pauses_on_the_fourth_attempt()
     {
         var calls = 0;
-        var delays = new List<int>();
         using var coordinator = new WorktreeChangeReviewCoordinator((path, _, _) => Task.FromResult(++calls == 1
             ? new ReviewSnapshot(path, "known-good", "main", [], [], false, null)
-            : new ReviewSnapshot(path, null, null, [], [], true, "Eight-second budget exceeded", ReviewStopReason.Budget)),
-            (attempt, _) => { delays.Add(attempt); return Task.CompletedTask; });
+            : new ReviewSnapshot(path, null, null, [], [], true, "Eight-second budget exceeded", ReviewStopReason.Budget)));
         coordinator.Select("C:\\repo\\one", "main");
         await coordinator.RefreshAsync();
         var updates = new List<ReviewSnapshot?>();
@@ -103,7 +101,6 @@ public sealed class WorktreeChangeReviewCoordinatorTests
         await coordinator.RefreshAsync();
 
         Assert.Equal(5, calls); // One successful baseline plus exactly four budgeted attempts.
-        Assert.Equal([1, 2, 3], delays);
         Assert.Single(updates); // No intermediate error published while retrying.
         Assert.True(coordinator.IsPaused);
         Assert.Equal("known-good", coordinator.Snapshot?.Head);
@@ -116,8 +113,7 @@ public sealed class WorktreeChangeReviewCoordinatorTests
         var calls = 0;
         using var coordinator = new WorktreeChangeReviewCoordinator((path, _, _) => Task.FromResult(++calls < 3
             ? new ReviewSnapshot(path, null, null, [], [], true, "budget", ReviewStopReason.Budget)
-            : new ReviewSnapshot(path, "success", "main", [], [], false, null)),
-            (_, _) => Task.CompletedTask);
+            : new ReviewSnapshot(path, "success", "main", [], [], false, null)));
         coordinator.Select("C:\\repo\\one", "main");
         var updates = new List<ReviewSnapshot?>();
         coordinator.Changed += updates.Add;
@@ -131,46 +127,47 @@ public sealed class WorktreeChangeReviewCoordinatorTests
     }
 
     [Fact]
-    public async Task Switching_worktrees_cancels_a_pending_budget_retry()
+    public async Task Switching_worktrees_cancels_an_in_flight_immediate_budget_retry()
     {
         var calls = 0;
-        var delayStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var neverReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRead = new TaskCompletionSource<ReviewSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var coordinator = new WorktreeChangeReviewCoordinator((path, _, _) =>
         {
-            ++calls;
-            return Task.FromResult(new ReviewSnapshot(path, null, null, [], [], true, "budget", ReviewStopReason.Budget));
-        }, (_, _) => { delayStarted.TrySetResult(); return neverReleased.Task; });
+            if (++calls == 1) return Task.FromResult(new ReviewSnapshot(path, null, null, [], [], true, "budget", ReviewStopReason.Budget));
+            secondStarted.TrySetResult();
+            return secondRead.Task;
+        });
         coordinator.Select("C:\\repo\\one", "main");
         var refresh = coordinator.RefreshAsync();
-        await delayStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         coordinator.Select("C:\\repo\\two", "main");
+        secondRead.SetResult(new ReviewSnapshot("C:\\repo\\one", null, null, [], [], true, "budget", ReviewStopReason.Budget));
 
         await refresh.WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Equal(1, calls);
+        Assert.Equal(2, calls);
         Assert.Null(coordinator.Snapshot);
     }
 
     [Fact]
-    public async Task Cancel_during_budget_backoff_stops_retries_without_erasing_the_cancel_state()
+    public async Task Cancel_during_immediate_budget_retry_stops_future_attempts_and_preserves_cancel_state()
     {
         var calls = 0;
-        var delayStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var blockedDelay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRead = new TaskCompletionSource<ReviewSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var coordinator = new WorktreeChangeReviewCoordinator((path, _, _) =>
-        {
-            ++calls;
-            return Task.FromResult(new ReviewSnapshot(path, null, null, [], [], true, "budget", ReviewStopReason.Budget));
-        }, (_, _) => { delayStarted.TrySetResult(); return blockedDelay.Task; });
+            ++calls == 1
+                ? Task.FromResult(new ReviewSnapshot(path, null, null, [], [], true, "budget", ReviewStopReason.Budget))
+                : secondRead.Task);
         coordinator.Select("C:\\repo\\one", "main");
         var refresh = coordinator.RefreshAsync();
-        await delayStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(2, calls);
         coordinator.CancelAndPause();
+        secondRead.SetResult(new ReviewSnapshot("C:\\repo\\one", null, null, [], [], true, "budget", ReviewStopReason.Budget));
 
         await refresh.WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Equal(1, calls);
+        Assert.Equal(2, calls);
         Assert.True(coordinator.IsPaused);
         Assert.Equal(ReviewStopReason.Cancelled, coordinator.Snapshot?.StopReason);
     }
