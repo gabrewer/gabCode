@@ -43,26 +43,6 @@ public sealed class WorktreeSidebarItemTests
     }
 
     [Fact]
-    public async Task Busy_circle_appears_only_for_the_selected_refreshing_worktree_and_is_named()
-    {
-        await RunOnStaAsync(() =>
-        {
-            var entry = new WorktreeNavigationEntry("C:\\repo\\wt\\feature", "feature/demo", false,
-                WorktreeAvailability.Available, 0, HasTerminalPair: false);
-            var item = WorktreeSidebarItem.Create(entry, selected: true, hasRunningTerminals: false);
-            item.UpdateState(selected: true, hasRunningTerminals: false, isRefreshingChanges: true);
-            Assert.Equal(Visibility.Visible, item.RefreshIcon.Visibility);
-            Assert.Contains("refreshing changes", AutomationProperties.GetName(item), StringComparison.OrdinalIgnoreCase);
-            item.UpdateState(selected: false, hasRunningTerminals: false, isRefreshingChanges: true);
-            Assert.Equal(Visibility.Collapsed, item.RefreshIcon.Visibility);
-            Assert.DoesNotContain("refreshing changes", AutomationProperties.GetName(item), StringComparison.OrdinalIgnoreCase);
-            item.UpdateState(selected: true, hasRunningTerminals: false, isRefreshingChanges: false);
-            Assert.Equal(Visibility.Collapsed, item.RefreshIcon.Visibility);
-            return Task.CompletedTask;
-        });
-    }
-
-    [Fact]
     public async Task Icon_rendering_does_not_create_or_start_a_terminal_pair()
     {
         await RunOnStaAsync(() =>

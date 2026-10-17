@@ -97,11 +97,26 @@ public sealed class ReviewRefreshControlsTests
             await OnSta(async () =>
             {
                 using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
-                var activity = new List<bool>();
-                sidebar.RefreshActivityChanged += () => activity.Add(sidebar.IsRefreshing);
                 sidebar.Select(root, "main");
                 Assert.True(sidebar.IsRefreshing);
-                Assert.Contains(true, activity);
+                var type = typeof(WorktreeReviewSidebar);
+                var spinner = Assert.IsType<System.Windows.Shapes.Path>(type.GetField("refreshIcon",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar));
+                Assert.Equal(Visibility.Visible, spinner.Visibility);
+                var name = Assert.IsType<TextBlock>(type.GetField("worktreeNameText",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar));
+                Assert.Equal(Path.GetFileName(root), name.Text);
+                Assert.Equal(Visibility.Visible, name.Visibility);
+                var nameRow = Assert.IsType<Grid>(name.Parent);
+                Assert.Contains(spinner, nameRow.Children.OfType<System.Windows.Shapes.Path>());
+                Assert.Same(nameRow, name.Parent);
+                var dock = Assert.IsType<DockPanel>(sidebar.Content);
+                dock.Measure(new Size(380, 600));
+                dock.Arrange(new Rect(0, 0, 380, 600));
+                var nameTop = nameRow.TranslatePoint(new Point(0, 0), dock).Y;
+                var scroller = Assert.Single(dock.Children.OfType<ScrollViewer>());
+                var contentTop = scroller.TranslatePoint(new Point(0, 0), dock).Y;
+                Assert.InRange(nameRow.ActualHeight, 24, 35);
                 Assert.DoesNotContain(FindButtons((DependencyObject)sidebar.Content), button =>
                     AutomationProperties.GetName(button) == "Refresh selected worktree changes and commits");
                 typeof(WorktreeReviewSidebar).GetMethod("Render", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
@@ -110,14 +125,22 @@ public sealed class ReviewRefreshControlsTests
                 var status = Assert.Single(LogicalTreeHelper.GetChildren((DependencyObject)sidebar.Content).OfType<TextBlock>(),
                     text => AutomationProperties.GetLiveSetting(text) == AutomationLiveSetting.Polite);
                 Assert.True(string.IsNullOrEmpty(status.Text));
+                Assert.Equal(Path.GetFileName(root), name.Text);
+                Assert.Same(nameRow, name.Parent);
                 Assert.Equal(Visibility.Collapsed, status.Visibility);
+                dock.Measure(new Size(380, 600));
+                dock.Arrange(new Rect(0, 0, 380, 600));
+                Assert.Equal(nameTop, nameRow.TranslatePoint(new Point(0, 0), dock).Y);
+                Assert.Equal(contentTop, scroller.TranslatePoint(new Point(0, 0), dock).Y);
                 var cancel = Assert.Single(FindButtons((DependencyObject)sidebar.Content), button =>
                     AutomationProperties.GetName(button) == "Cancel review refresh");
                 cancel.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                 var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(4);
                 while (sidebar.IsRefreshing && DateTime.UtcNow < deadline) await Task.Delay(25);
                 Assert.False(sidebar.IsRefreshing);
-                Assert.Contains(false, activity);
+                Assert.Equal(Visibility.Hidden, spinner.Visibility);
+                Assert.Equal(Path.GetFileName(root), name.Text);
+                Assert.Same(nameRow, name.Parent);
                 Assert.Equal(Visibility.Visible, Assert.Single(FindButtons((DependencyObject)sidebar.Content), button =>
                     AutomationProperties.GetName(button) == "Retry review refresh").Visibility);
                 await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
@@ -136,13 +159,13 @@ public sealed class ReviewRefreshControlsTests
             await OnSta(async () =>
             {
                 using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
-                var activity = new List<bool>();
-                sidebar.RefreshActivityChanged += () => activity.Add(sidebar.IsRefreshing);
                 sidebar.Select(root, "main");
                 Assert.True(sidebar.IsRefreshing);
+                var spinner = Assert.IsType<System.Windows.Shapes.Path>(typeof(WorktreeReviewSidebar).GetField("refreshIcon",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar));
                 sidebar.Suspend();
                 Assert.False(sidebar.IsRefreshing);
-                Assert.False(activity[^1]);
+                Assert.Equal(Visibility.Hidden, spinner.Visibility);
                 await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             });
         }
