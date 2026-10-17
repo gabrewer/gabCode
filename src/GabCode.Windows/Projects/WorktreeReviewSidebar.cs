@@ -116,8 +116,8 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         DockPanel.SetDock(title, Dock.Top); root.Children.Add(title);
         // Keep the worktree name and the spinner's footprint in the same permanent row.
         var worktreeRow = new Grid { MinHeight = 24, Margin = new Thickness(0, 0, 0, 4) };
-        worktreeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
         worktreeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        worktreeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
         refreshIcon = new System.Windows.Shapes.Path
         {
             Data = Geometry.Parse("M9,2 A7,7 0 1 1 2,9"),
@@ -125,7 +125,8 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             Stroke = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.White,
             Fill = Brushes.Transparent, Stretch = Stretch.Uniform,
             RenderTransform = new RotateTransform(), RenderTransformOrigin = new Point(0.5, 0.5),
-            Visibility = Visibility.Hidden, VerticalAlignment = VerticalAlignment.Center
+            Visibility = Visibility.Hidden, VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right
         };
         AutomationProperties.SetName(refreshIcon, string.Empty);
         refreshIcon.Loaded += (_, _) => UpdateRefreshIndicator();
@@ -136,7 +137,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetColumn(worktreeNameText, 1);
+        Grid.SetColumn(refreshIcon, 1);
         worktreeRow.Children.Add(refreshIcon);
         worktreeRow.Children.Add(worktreeNameText);
         DockPanel.SetDock(worktreeRow, Dock.Top); root.Children.Add(worktreeRow);
