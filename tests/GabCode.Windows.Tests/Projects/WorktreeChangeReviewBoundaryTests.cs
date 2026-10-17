@@ -247,6 +247,23 @@ public sealed class WorktreeChangeReviewBoundaryTests
     }
 
     [Fact]
+    public async Task Aggregate_snapshot_budget_reports_retryable_budget_only_after_child_cleanup()
+    {
+        var repo = new Repo(); await repo.Initialize();
+        try
+        {
+            var fake = Path.Combine(repo.Path, "slow-budget.cmd");
+            await File.WriteAllTextAsync(fake, "@echo off\r\nping -n 4 127.0.0.1 > nul\r\n");
+            var clock = Stopwatch.StartNew();
+            var result = await new WorktreeChangeReviewService(fake, TimeSpan.FromSeconds(4),
+                snapshotBudget: TimeSpan.FromMilliseconds(120)).GetSnapshotAsync(repo.Path, "trunk");
+            Assert.Equal(ReviewStopReason.Budget, result.StopReason);
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(3), $"Budget cleanup took {clock.Elapsed}.");
+        }
+        finally { try { repo.Dispose(); } catch (IOException) { } }
+    }
+
+    [Fact]
     public async Task A_separate_process_holding_the_review_slot_blocks_new_Git_reads_until_it_exits()
     {
         var repo = new Repo(); await repo.Initialize();

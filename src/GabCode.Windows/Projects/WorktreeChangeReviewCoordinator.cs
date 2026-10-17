@@ -6,6 +6,7 @@ namespace GabCode.Windows.Projects;
 internal sealed class WorktreeChangeReviewCoordinator : IDisposable
 {
     private readonly Func<string, string?, CancellationToken, Task<ReviewSnapshot>> read;
+    private readonly Func<int, CancellationToken, Task> waitBeforeRetry;
     private readonly object gate = new();
     // Cancellation invalidates a result immediately, but capacity is held until its reader exits.
     private readonly SemaphoreSlim readSlot = new(1, 1);
@@ -22,7 +23,13 @@ internal sealed class WorktreeChangeReviewCoordinator : IDisposable
     private const string ScopeLimitMessage = "Git refresh is paused across this app instance because too many worktrees stopped. Restart the app to recover; no automatic refresh will run.";
     private bool disposed;
 
-    internal WorktreeChangeReviewCoordinator(Func<string, string?, CancellationToken, Task<ReviewSnapshot>> read) => this.read = read;
+    internal WorktreeChangeReviewCoordinator(
+        Func<string, string?, CancellationToken, Task<ReviewSnapshot>> read,
+        Func<int, CancellationToken, Task>? waitBeforeRetry = null)
+    {
+        this.read = read;
+        this.waitBeforeRetry = waitBeforeRetry ?? ((attempt, token) => Task.Delay(TimeSpan.FromSeconds(1 << (attempt - 1)), token));
+    }
     internal ReviewSnapshot? Snapshot { get; private set; }
     internal bool IsPaused { get { lock (gate) return worktree is not null && (scopeOverflow || paused.Contains(worktree)); } }
     internal bool CanRefresh { get { lock (gate) return worktree is not null && !scopeOverflow && (!paused.Contains(worktree) || retryScope == worktree); } }
@@ -135,7 +142,14 @@ internal sealed class WorktreeChangeReviewCoordinator : IDisposable
             await readSlot.WaitAsync(token).ConfigureAwait(false);
             acquired = true;
             token.ThrowIfCancellationRequested();
-            result = await read(path, branch, token).ConfigureAwait(false);
+            for (var attempt = 1; ; attempt++)
+            {
+                result = await read(path, branch, token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                if (result.StopReason != ReviewStopReason.Budget || attempt == 4) break;
+                // Hold the reader slot and publish nothing until success or the fourth failure.
+                await waitBeforeRetry(attempt, token).WaitAsync(token).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
         catch (Exception error) { result = new ReviewSnapshot(path, null, null, [], [], true, error.Message); }
@@ -144,7 +158,7 @@ internal sealed class WorktreeChangeReviewCoordinator : IDisposable
         lock (gate)
         {
             if (disposed || current != generation) return;
-            if (result.StopReason == ReviewStopReason.Limit) Pause(path);
+            if (result.StopReason is ReviewStopReason.Limit or ReviewStopReason.Budget) Pause(path);
             if (retry && !result.IsStale)
             {
                 paused.Remove(path);
