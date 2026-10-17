@@ -4,6 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Input;
 using System.Windows.Threading;
 
@@ -24,6 +25,9 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private long overflowVersion;
     private readonly DockPanel root;
     private readonly TextBlock titleText;
+    private readonly TextBlock worktreeNameText;
+    private readonly System.Windows.Shapes.Path refreshIcon;
+    private bool refreshAnimationActive;
     private readonly Button cancelReviewRefresh;
     private readonly Button retryReviewRefresh;
     private readonly StackPanel rows = new();
@@ -59,7 +63,6 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     internal bool IsDisposed => disposed;
     internal bool IsRefreshing => refreshRunning && !disposed;
     internal bool HasFreshSnapshot => coordinator.Snapshot is { IsStale: false };
-    internal event Action? RefreshActivityChanged;
     internal event Action<ReviewFile, UIElement>? DiffRequested;
     internal event Action<ReviewFile>? SelectionRetained;
     internal event Action? SelectionInvalidated;
@@ -82,14 +85,14 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         poll.Tick += (_, _) => { if (worktree is null) return; if (watchers.Count == 0) StartWatchers(worktree); _ = RefreshReviewAsync(); };
         root = new DockPanel { Background = new SolidColorBrush(Color.FromRgb(29, 30, 36)) };
         var title = new DockPanel { Margin = new Thickness(0, 8, 0, 4) };
-        cancelReviewRefresh = new Button { Content = "Cancel", Padding = new Thickness(5, 2, 5, 2), Visibility = Visibility.Collapsed };
-        retryReviewRefresh = new Button { Content = "Retry", Padding = new Thickness(5, 2, 5, 2), Visibility = Visibility.Collapsed };
+        cancelReviewRefresh = new Button { Content = "Cancel", Padding = new Thickness(5, 2, 5, 2), Visibility = Visibility.Hidden };
+        retryReviewRefresh = new Button { Content = "Retry", Padding = new Thickness(5, 2, 5, 2), Visibility = Visibility.Hidden };
         AutomationProperties.SetName(cancelReviewRefresh, "Cancel review refresh");
         cancelReviewRefresh.Click += (_, _) =>
         {
             refreshPending = false;
             coordinator.CancelAndPause();
-            cancelReviewRefresh.Visibility = Visibility.Collapsed;
+            cancelReviewRefresh.Visibility = Visibility.Hidden;
             retryReviewRefresh.Visibility = Visibility.Visible;
             retryReviewRefresh.Focus();
         };
@@ -98,7 +101,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         {
             if (!coordinator.Retry()) { SetStatus(coordinator.StopMessage ?? "Waiting for the previous Git refresh to stop. Retry again shortly."); return; }
             var returnFocus = retryReviewRefresh.IsKeyboardFocused;
-            retryReviewRefresh.Visibility = Visibility.Collapsed;
+            retryReviewRefresh.Visibility = Visibility.Hidden;
             _ = RefreshReviewAsync();
             if (returnFocus)
             {
@@ -111,6 +114,32 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         titleText = new TextBlock { Text = "Changes and commits", FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center };
         title.Children.Add(titleText);
         DockPanel.SetDock(title, Dock.Top); root.Children.Add(title);
+        // Keep the worktree name and the spinner's footprint in the same permanent row.
+        var worktreeRow = new Grid { MinHeight = 24, Margin = new Thickness(0, 0, 0, 4) };
+        worktreeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+        worktreeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        refreshIcon = new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse("M9,2 A7,7 0 1 1 2,9"),
+            Width = 16, Height = 16, StrokeThickness = 2,
+            Stroke = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.White,
+            Fill = Brushes.Transparent, Stretch = Stretch.Uniform,
+            RenderTransform = new RotateTransform(), RenderTransformOrigin = new Point(0.5, 0.5),
+            Visibility = Visibility.Hidden, VerticalAlignment = VerticalAlignment.Center
+        };
+        AutomationProperties.SetName(refreshIcon, string.Empty);
+        refreshIcon.Loaded += (_, _) => UpdateRefreshIndicator();
+        refreshIcon.Unloaded += (_, _) => StopRefreshAnimation();
+        worktreeNameText = new TextBlock
+        {
+            Foreground = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.White,
+            FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(worktreeNameText, 1);
+        worktreeRow.Children.Add(refreshIcon);
+        worktreeRow.Children.Add(worktreeNameText);
+        DockPanel.SetDock(worktreeRow, Dock.Top); root.Children.Add(worktreeRow);
         AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
         DockPanel.SetDock(status, Dock.Top); root.Children.Add(status);
         scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rows };
@@ -127,17 +156,17 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         {
             ApplySystemColors();
             Render(coordinator.Snapshot);
-            RefreshActivityChanged?.Invoke();
+            UpdateRefreshIndicator();
         }
         else if (e.PropertyName is nameof(SystemParameters.ClientAreaAnimation))
-            RefreshActivityChanged?.Invoke();
+            UpdateRefreshIndicator();
     }
 
     private void ApplySystemColors()
     {
         var contrast = SystemParameters.HighContrast;
         root.Background = contrast ? SystemColors.WindowBrush : new SolidColorBrush(Color.FromRgb(29, 30, 36));
-        titleText.Foreground = status.Foreground = contrast ? SystemColors.WindowTextBrush : Brushes.White;
+        titleText.Foreground = status.Foreground = worktreeNameText.Foreground = contrast ? SystemColors.WindowTextBrush : Brushes.White;
         if (contrast)
         {
             var systemButton = new Style(typeof(Button));
@@ -155,7 +184,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (string.Equals(path, worktree, StringComparison.OrdinalIgnoreCase) && branch == mainBranch) { RequestRefresh(); return; }
         ++generation;
         ++refreshEpoch; refreshRunning = refreshPending = false;
-        RefreshActivityChanged?.Invoke();
+        UpdateRefreshIndicator();
         overflowPending = false;
         debounce.Stop(); invalidation.Reset();
         lazyCancellation?.Cancel(); lazyCancellation?.Dispose(); lazyCancellation = null;
@@ -166,12 +195,14 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         var hadSelection = activeFileIdentity is not null;
         activeFileIdentity = null;
         worktree = path; mainBranch = branch;
+        worktreeNameText.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } name ? name : path;
+        AutomationProperties.SetName(worktreeNameText, "Worktree " + worktreeNameText.Text);
         if (hadSelection) SelectionInvalidated?.Invoke();
         coordinator.Select(path, branch);
         SetStatus(coordinator.StopMessage ?? (coordinator.IsPaused ? "Git refresh stopped. Automatic refresh is paused. Retry to update." : string.Empty));
         rows.Children.Clear();
-        retryReviewRefresh.Visibility = coordinator.IsPaused ? Visibility.Visible : Visibility.Collapsed;
-        cancelReviewRefresh.Visibility = Visibility.Collapsed;
+        retryReviewRefresh.Visibility = coordinator.IsPaused ? Visibility.Visible : Visibility.Hidden;
+        cancelReviewRefresh.Visibility = Visibility.Hidden;
         StartWatchers(path);
         poll.Start();
         _ = RefreshReviewAsync();
@@ -182,7 +213,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (disposed) return;
         ++generation;
         ++refreshEpoch; refreshRunning = refreshPending = false;
-        RefreshActivityChanged?.Invoke();
+        UpdateRefreshIndicator();
         overflowPending = false;
         invalidation.Reset();
         debounce.Stop(); poll.Stop();
@@ -192,6 +223,8 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         var hadSelection = activeFileIdentity is not null;
         activeFileIdentity = null;
         worktree = null; mainBranch = null;
+        worktreeNameText.Text = string.Empty;
+        AutomationProperties.SetName(worktreeNameText, string.Empty);
         coordinator.Select(null, null);
         rows.Children.Clear(); fileButtons.Clear(); sections.Clear();
         SetStatus("Review unavailable for orphaned terminals. Select an available worktree.");
@@ -318,9 +351,9 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (!coordinator.CanRefresh) { Render(coordinator.Snapshot); return; }
         if (refreshRunning) { refreshPending = true; return; }
         refreshRunning = true;
-        RefreshActivityChanged?.Invoke();
+        UpdateRefreshIndicator();
         cancelReviewRefresh.Visibility = Visibility.Visible;
-        retryReviewRefresh.Visibility = Visibility.Collapsed;
+        retryReviewRefresh.Visibility = Visibility.Hidden;
         var epoch = refreshEpoch;
         var followups = 0;
         try
@@ -359,10 +392,10 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             if (epoch == refreshEpoch)
             {
                 refreshRunning = false;
-                RefreshActivityChanged?.Invoke();
+                UpdateRefreshIndicator();
                 var returnFocus = cancelReviewRefresh.IsKeyboardFocused;
-                cancelReviewRefresh.Visibility = Visibility.Collapsed;
-                retryReviewRefresh.Visibility = coordinator.IsPaused ? Visibility.Visible : Visibility.Collapsed;
+                cancelReviewRefresh.Visibility = Visibility.Hidden;
+                retryReviewRefresh.Visibility = coordinator.IsPaused ? Visibility.Visible : Visibility.Hidden;
                 if (returnFocus)
                 {
                     if (retryReviewRefresh.Visibility == Visibility.Visible) retryReviewRefresh.Focus();
@@ -598,6 +631,26 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         }
     }
 
+    private void UpdateRefreshIndicator()
+    {
+        var busy = IsRefreshing;
+        refreshIcon.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
+        refreshIcon.Stroke = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.White;
+        AutomationProperties.SetHelpText(worktreeNameText, busy ? "Refreshing changes" : string.Empty);
+        var animate = busy && refreshIcon.IsLoaded && SystemParameters.ClientAreaAnimation && !SystemParameters.HighContrast;
+        if (refreshAnimationActive == animate) return;
+        ((RotateTransform)refreshIcon.RenderTransform).BeginAnimation(RotateTransform.AngleProperty,
+            animate ? new DoubleAnimation(0, 360, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever } : null);
+        refreshAnimationActive = animate;
+    }
+
+    private void StopRefreshAnimation()
+    {
+        if (!refreshAnimationActive) return;
+        ((RotateTransform)refreshIcon.RenderTransform).BeginAnimation(RotateTransform.AngleProperty, null);
+        refreshAnimationActive = false;
+    }
+
     private void SetStatus(string message)
     {
         status.Text = message;
@@ -665,7 +718,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (disposed) return;
         disposed = true;
         refreshRunning = refreshPending = false;
-        RefreshActivityChanged?.Invoke();
+        UpdateRefreshIndicator();
         ++generation;
         ++refreshEpoch; invalidation.Reset();
         SystemParameters.StaticPropertyChanged -= SystemParameters_Changed;
