@@ -40,6 +40,10 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
     private readonly HashSet<string> loadingCommits = new(StringComparer.Ordinal);
     private readonly List<ReviewCommit> history = [];
+    private BranchFileComparison? branchComparison;
+    private string? branchError;
+    private bool loadingBranch;
+    private int branchOffset;
     private int workingOffset;
     private const int WorkingPageSize = 200;
     private const int MaximumHistoryPages = 4;
@@ -196,6 +200,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         watchers.Clear(); watcherWarning = null;
         expanded.Clear(); expanded.UnionWith(["working", "staged", "unstaged"]);
         commitFiles.Clear(); commitFileOffsets.Clear(); loadingCommits.Clear(); history.Clear(); head = null; mainHead = null; moreAvailable = true; loadingHistoryPage = false; loadMoreButton = null; workingOffset = 0;
+        branchComparison = null; branchError = null; loadingBranch = false; branchOffset = 0;
         var hadSelection = activeFileIdentity is not null;
         activeFileIdentity = null;
         worktree = path; mainBranch = branch;
@@ -224,6 +229,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         lazyCancellation?.Cancel(); lazyCancellation?.Dispose(); lazyCancellation = null;
         foreach (var watcher in watchers) watcher.Dispose();
         watchers.Clear();
+        branchComparison = null; branchError = null; loadingBranch = false; branchOffset = 0;
         var hadSelection = activeFileIdentity is not null;
         activeFileIdentity = null;
         worktree = null; mainBranch = null;
@@ -444,13 +450,20 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             loadingCommits.Clear();
             head = newHead; mainHead = snapshot.MainHead;
             history.Clear(); commitFiles.Clear(); commitFileOffsets.Clear(); moreAvailable = true;
+            branchComparison = null; branchError = null; loadingBranch = false; branchOffset = 0;
+            if (activeFileIdentity?.StartsWith("Branch:", StringComparison.Ordinal) is true)
+            {
+                activeFileIdentity = null;
+                SelectionInvalidated?.Invoke();
+            }
             loadingHistoryPage = false; loadMoreButton = null;
             if (activeFileIdentity is { } selected && selected.StartsWith("Commit:", StringComparison.Ordinal) &&
                 !snapshot.IsStale && newHead is not null && mainHead is not null &&
                 !snapshot.Commits.Any(commit => selected.StartsWith("Commit:" + commit.Sha + ":", StringComparison.Ordinal)))
                 _ = ValidateSelectedCommitAsync(selected, newHead, mainHead);
         }
-        if (activeFileIdentity is { } identity && !snapshot.IsStale && !identity.StartsWith("Commit:", StringComparison.Ordinal))
+        if (activeFileIdentity is { } identity && !snapshot.IsStale &&
+            (identity.StartsWith("Staged:", StringComparison.Ordinal) || identity.StartsWith("Unstaged:", StringComparison.Ordinal)))
         {
             var retained = snapshot.Working.FirstOrDefault(file => file.Identity == identity);
             if (retained is null) { activeFileIdentity = null; SelectionInvalidated?.Invoke(); }
@@ -527,6 +540,43 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                 content.Children.Add(more);
             }
         });
+        var branchFiles = branchComparison?.Files ?? [];
+        var branchTitle = snapshot.IsStale || head is null || mainHead is null ? "Branch changes (unavailable)" :
+            branchComparison is null ? "Branch changes (expand to load)" : $"Branch changes ({branchFiles.Count})";
+        AddSection(rows, branchTitle, "branch", content =>
+        {
+            if (snapshot.IsStale || head is null || mainHead is null || mainBranch is null)
+            {
+                content.Children.Add(Notice(snapshot.Error ?? "Branch changes unavailable: configured local main or HEAD is missing."));
+                return;
+            }
+            if (branchError is not null)
+            {
+                content.Children.Add(Notice("Branch changes unavailable: " + branchError));
+                var retry = new Button { Content = "Retry branch changes", Margin = new Thickness(10, 3, 0, 3) };
+                AutomationProperties.SetName(retry, "Retry branch changes from Git");
+                retry.Click += (_, _) => { branchError = null; Render(coordinator.Snapshot); };
+                content.Children.Add(retry);
+                return;
+            }
+            if (branchComparison is null)
+            {
+                content.Children.Add(Notice("Loading branch files from the configured local main…"));
+                if (!loadingBranch) _ = LoadBranchFilesAsync();
+                return;
+            }
+            if (branchFiles.Count == 0) content.Children.Add(Notice("No files changed between the selected base and HEAD."));
+            if (branchOffset >= branchFiles.Count) branchOffset = 0;
+            AddFiles(content, branchFiles.Skip(branchOffset).Take(WorkingPageSize));
+            if (branchFiles.Count > WorkingPageSize)
+            {
+                content.Children.Add(Notice($"Showing branch files {branchOffset + 1}–{Math.Min(branchFiles.Count, branchOffset + WorkingPageSize)} of {branchFiles.Count}."));
+                if (branchOffset > 0)
+                    content.Children.Add(ActionPage("Previous branch files", () => { branchOffset -= WorkingPageSize; Render(coordinator.Snapshot); }));
+                if (branchOffset + WorkingPageSize < branchFiles.Count)
+                    content.Children.Add(ActionPage("Next branch files", () => { branchOffset += WorkingPageSize; Render(coordinator.Snapshot); }));
+            }
+        });
         Dispatcher.BeginInvoke(() =>
         {
             if (disposed || epoch != renderEpoch || !string.Equals(worktree, renderedWorktree, StringComparison.OrdinalIgnoreCase) || !ReferenceEquals(coordinator.Snapshot, renderedSnapshot)) return;
@@ -539,6 +589,47 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                 else section.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
             }
         }, DispatcherPriority.Loaded);
+    }
+
+    private static Button ActionPage(string caption, Action action)
+    {
+        var button = new Button { Content = caption, Margin = new Thickness(10, 3, 0, 3) };
+        AutomationProperties.SetName(button, caption);
+        button.Click += (_, _) => action();
+        return button;
+    }
+
+    private async Task LoadBranchFilesAsync()
+    {
+        if (disposed || loadingBranch || worktree is null || mainBranch is null || head is null || mainHead is null) return;
+        loadingBranch = true;
+        var current = generation;
+        var path = worktree;
+        var branch = mainBranch;
+        var requestedHead = head;
+        var requestedMain = mainHead;
+        lazyCancellation ??= new CancellationTokenSource();
+        try
+        {
+            var result = await service.GetBranchFilesAsync(path, branch, requestedHead, requestedMain, lazyCancellation.Token);
+            if (disposed || current != generation || path != worktree || requestedHead != head || requestedMain != mainHead ||
+                coordinator.Snapshot?.IsStale is true || !expanded.Contains("branch")) return;
+            branchComparison = result;
+            branchError = null;
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception error)
+        {
+            if (current == generation) branchError = error.Message;
+        }
+        finally
+        {
+            if (current == generation && !disposed)
+            {
+                loadingBranch = false;
+                Render(coordinator.Snapshot);
+            }
+        }
     }
 
     private static string? FocusedSectionKey(DependencyObject? focused)
