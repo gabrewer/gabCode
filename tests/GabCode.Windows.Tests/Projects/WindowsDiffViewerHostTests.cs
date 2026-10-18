@@ -35,6 +35,17 @@ public sealed class WindowsDiffViewerHostTests
                     var value = await host.ReadDocumentForTestAsync();
                     Assert.Equal("committed\n", value.Before);
                     Assert.Equal("staged\n", value.After);
+                    Assert.Contains("Change 1 of 1", await host.WaitForChangeStatusForTestAsync());
+                    host.Select(2, "fixture:inline");
+                    await host.ShowAsync(new WindowsDiffViewerHost.Snapshot(2, "fixture:inline", "src/app.cs", "committed\n", "staged\n", "HEAD", "index", "inline"));
+                    Assert.Equal("inline", await host.WaitForModeForTestAsync("inline"));
+                    host.Select(3, "fixture:file");
+                    await host.ShowAsync(new WindowsDiffViewerHost.Snapshot(3, "fixture:file", "src/app.cs", "committed\n", "staged\n", "HEAD", "index", "file"));
+                    Assert.Equal("file", await host.WaitForModeForTestAsync("file"));
+                    Assert.Contains("Change 1 of 1", await host.WaitForChangeStatusForTestAsync());
+                    Assert.Equal("staged\n", (await host.ReadDocumentForTestAsync()).After);
+                    await host.AttemptTypingForTestAsync();
+                    Assert.Equal("staged\n", (await host.ReadDocumentForTestAsync()).After);
                     finished.TrySetResult();
                 }
                 catch (Exception error) { finished.TrySetException(error); }

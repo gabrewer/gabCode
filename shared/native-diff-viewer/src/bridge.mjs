@@ -9,6 +9,14 @@ const facts = value => value && typeof value === 'object' &&
 export function acceptHostMessage(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const keys = ['kind', 'generation', 'identity', 'path', 'before', 'after', 'beforeLabel', 'afterLabel', 'mode', 'beforeFacts', 'afterFacts'];
+  if (value.kind === 'mode' || value.kind === 'change') {
+    const controlKeys = value.kind === 'mode' ? ['kind', 'generation', 'identity', 'mode'] : ['kind', 'generation', 'identity', 'direction'];
+    if (Object.keys(value).length !== 4 || !Object.keys(value).every(key => controlKeys.includes(key)) ||
+        !Number.isSafeInteger(value.generation) || value.generation < 0 ||
+        typeof value.identity !== 'string' || value.identity.length === 0 || value.identity.length > 512) return null;
+    if (value.kind === 'mode') return ['side-by-side', 'inline', 'file'].includes(value.mode) ? value : null;
+    return ['next', 'previous'].includes(value.direction) ? value : null;
+  }
   if (!Object.keys(value).every(key => keys.includes(key))) return null;
   if (value.kind !== 'snapshot' || !Number.isSafeInteger(value.generation) || value.generation < 0 ||
       !['side-by-side', 'inline', 'file'].includes(value.mode) ||

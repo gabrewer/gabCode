@@ -181,6 +181,41 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
         }));
     }
 
+    internal async Task AttemptTypingForTestAsync()
+    {
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        var focused = await webView.ExecuteScriptAsync("(() => { const input = [...document.querySelectorAll('.monaco-editor textarea')].at(-1); input?.focus(); return !!input; })()");
+        if (focused != "true") throw new InvalidOperationException("File editor input could not be focused for the read-only test.");
+        await webView.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.insertText", "{\"text\":\"tampered\"}");
+    }
+
+    internal async Task<string> WaitForChangeStatusForTestAsync()
+    {
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        var last = string.Empty;
+        for (var attempt = 0; attempt < 80; attempt++)
+        {
+            var json = await webView.ExecuteScriptAsync("document.querySelector('[role=status]')?.textContent ?? ''");
+            last = JsonSerializer.Deserialize<string>(json) ?? string.Empty;
+            if (last.Contains("Change 1 of 1", StringComparison.Ordinal)) return last;
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("Monaco did not compute the shared change map: " + last);
+    }
+
+    internal async Task<string> WaitForModeForTestAsync(string expectedMode)
+    {
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        for (var attempt = 0; attempt < 80; attempt++)
+        {
+            var json = await webView.ExecuteScriptAsync("window.gabCodeViewer?.models?.()?.mode ?? null");
+            var actual = JsonSerializer.Deserialize<string?>(json);
+            if (actual == expectedMode) return actual;
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("Packaged viewer did not enter the requested mode.");
+    }
+
     // Narrow test probe for the actual renderer: evaluate only a fixed model-content read,
     // never an untrusted script or a native file path.
     internal async Task<(string Before, string After)> ReadDocumentForTestAsync()
