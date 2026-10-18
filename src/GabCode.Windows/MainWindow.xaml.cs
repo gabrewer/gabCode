@@ -416,16 +416,28 @@ public partial class MainWindow : Window
         AutomationProperties.SetName(secondTab, "Second terminal");
         tabs.Items.Add(firstTab);
         tabs.Items.Add(secondTab);
+        var previousView = diffView;
         terminalLayout.OpenDocument(view, terminalLayout.HasDocument ? (TabControl)BottomTerminalRegion.Content : tabs);
+        previousView?.DisposeViewer();
         diffView = view;
         SwapTerminalsButton.IsEnabled = false;
         view.FocusDocument();
         try
         {
-            var result = await reviewService.GetDiffAsync(worktree, file, token);
-            if (generation == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, worktree)) view.Show(result);
+            if (file.Group == ReviewGroup.Staged && file.Status == ReviewStatus.Modified)
+            {
+                var document = await reviewService.GetStagedDocumentAsync(worktree, file, token);
+                if (generation == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, worktree))
+                    await view.ShowStagedAsync(document, generation, worktree + ":" + file.Identity, file.Path, token);
+            }
+            else
+            {
+                var result = await reviewService.GetDiffAsync(worktree, file, token);
+                if (generation == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, worktree)) view.Show(result);
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) when (generation == diffGeneration && ReferenceEquals(diffView, view)) { view.ShowUnavailable(error.Message); }
     }
 
     private async Task RefreshReviewDiffAsync(ReviewFile file)
@@ -439,10 +451,20 @@ public partial class MainWindow : Window
         var view = diffView;
         try
         {
-            var result = await reviewService.GetDiffAsync(path, file, token);
-            if (current == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, path)) view.Show(result);
+            if (file.Group == ReviewGroup.Staged && file.Status == ReviewStatus.Modified)
+            {
+                var document = await reviewService.GetStagedDocumentAsync(path, file, token);
+                if (current == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, path))
+                    await view.ShowStagedAsync(document, current, path + ":" + file.Identity, file.Path, token);
+            }
+            else
+            {
+                var result = await reviewService.GetDiffAsync(path, file, token);
+                if (current == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, path)) view.Show(result);
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) when (current == diffGeneration && ReferenceEquals(diffView, view)) { view.ShowUnavailable(error.Message); }
     }
 
     private void CloseReviewDiff(bool restoreFocus = true)
@@ -452,8 +474,10 @@ public partial class MainWindow : Window
         diffCancellation?.Dispose();
         diffCancellation = null;
         if (diffView is null) return;
+        var closingView = diffView;
         diffView = null;
         terminalLayout?.CloseDocument();
+        closingView.DisposeViewer();
         SwapTerminalsButton.IsEnabled = terminalLayout is not null;
         var target = diffReturnFocus;
         var file = activeDiffFile;

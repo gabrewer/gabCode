@@ -17,13 +17,15 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
     private readonly string profile;
     private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource lifetime = new();
-    private int selectedGeneration = -1;
+    private long selectedGeneration = -1;
     private string selectedIdentity = string.Empty;
     private bool disposed;
     internal event EventHandler<string>? Unavailable;
 
-    internal sealed record Snapshot(int Generation, string Identity, string Path, string Before, string After,
-        string BeforeLabel, string AfterLabel, string Mode);
+    internal sealed record Snapshot(long Generation, string Identity, string Path, string Before, string After,
+        string BeforeLabel, string AfterLabel, string Mode,
+        bool BeforeBom = false, bool AfterBom = false, string BeforeEol = "LF", string AfterEol = "LF",
+        bool BeforeFinalNewline = true, bool AfterFinalNewline = true);
 
     internal WindowsDiffViewerHost(string assets, string profile)
     {
@@ -41,7 +43,7 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
         };
     }
 
-    internal void Select(int generation, string identity)
+    internal void Select(long generation, string identity)
     {
         if (disposed) throw new ObjectDisposedException(nameof(WindowsDiffViewerHost));
         if (generation < 0 || identity.Length is < 1 or > 512) throw new ArgumentException("Invalid selection identity.");
@@ -49,12 +51,15 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
         selectedIdentity = identity;
     }
 
-    internal static bool IsValidSnapshot(Snapshot? value, int expectedGeneration, string expectedIdentity) =>
-        value is not null && value.Generation >= 0 && value.Generation == expectedGeneration &&
+    internal static bool IsValidSnapshot(Snapshot? value, long expectedGeneration, string expectedIdentity) =>
+        value is not null && value.Generation is >= 0 and <= 9007199254740991L && value.Generation == expectedGeneration &&
         value.Identity == expectedIdentity && value.Identity.Length is > 0 and <= 512 &&
         value.Path is { Length: <= 4096 } && value.Before is { Length: <= 1048576 } &&
         value.After is { Length: <= 1048576 } && value.BeforeLabel is { Length: <= 256 } &&
-        value.AfterLabel is { Length: <= 256 } && value.Mode is "side-by-side" or "inline" or "file";
+        value.AfterLabel is { Length: <= 256 } &&
+        value.BeforeEol is "LF" or "CRLF" or "CR" or "mixed" or "none" &&
+        value.AfterEol is "LF" or "CRLF" or "CR" or "mixed" or "none" &&
+        value.Mode is "side-by-side" or "inline" or "file";
 
     internal static bool IsAllowedViewerMessage(string source, string json, string expectedOrigin)
     {
@@ -138,9 +143,21 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
             await ready.Task.WaitAsync(work.Token);
             work.Token.ThrowIfCancellationRequested();
         }
-        catch (WebView2RuntimeNotFoundException)
+        catch (WebView2RuntimeNotFoundException runtimeError)
         {
+            ready.TrySetException(runtimeError);
             Unavailable?.Invoke(this, "Diff unavailable: Microsoft Edge WebView2 Runtime is required.");
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            ready.TrySetCanceled();
+            throw;
+        }
+        catch (Exception initializationError)
+        {
+            ready.TrySetException(initializationError);
+            Unavailable?.Invoke(this, "Diff unavailable: " + initializationError.Message);
             throw;
         }
     }
@@ -159,8 +176,8 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
             kind = "snapshot", generation = snapshot.Generation, identity = snapshot.Identity,
             path = snapshot.Path, before = snapshot.Before, after = snapshot.After,
             beforeLabel = snapshot.BeforeLabel, afterLabel = snapshot.AfterLabel, mode = snapshot.Mode,
-            beforeFacts = new { bom = false, eol = "LF", finalNewline = snapshot.Before.EndsWith('\n') },
-            afterFacts = new { bom = false, eol = "LF", finalNewline = snapshot.After.EndsWith('\n') }
+            beforeFacts = new { bom = snapshot.BeforeBom, eol = snapshot.BeforeEol, finalNewline = snapshot.BeforeFinalNewline },
+            afterFacts = new { bom = snapshot.AfterBom, eol = snapshot.AfterEol, finalNewline = snapshot.AfterFinalNewline }
         }));
     }
 
@@ -168,6 +185,7 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
     // never an untrusted script or a native file path.
     internal async Task<(string Before, string After)> ReadDocumentForTestAsync()
     {
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
         for (var attempt = 0; attempt < 80; attempt++)
         {
             var json = await webView.ExecuteScriptAsync("(() => { const pair = window.gabCodeViewer?.models?.(); return pair ? JSON.stringify(pair) : null; })()");
