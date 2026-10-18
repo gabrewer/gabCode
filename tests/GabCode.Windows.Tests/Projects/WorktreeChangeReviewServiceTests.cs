@@ -84,6 +84,175 @@ public sealed class WorktreeChangeReviewServiceTests
     }
 
     [Fact]
+    public async Task Review_documents_use_selected_Git_basis_for_unstaged_untracked_history_and_branch()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "core.autocrlf", "false");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "base\n");
+        await repo.Git("add", "file.txt");
+        await repo.Git("commit", "-m", "base");
+        await repo.Git("switch", "-c", "feature/review");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "historical\n");
+        await repo.Git("commit", "-am", "history");
+        var selectedSha = (await repo.Git("rev-parse", "HEAD")).Trim();
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "staged\n");
+        await repo.Git("add", "file.txt");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "today\n");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "untracked.txt"), "");
+        var service = new WorktreeChangeReviewService();
+        var unstaged = await service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("file.txt", null, ReviewGroup.Unstaged, ReviewStatus.Modified), "trunk");
+        Assert.Equal("staged\n", unstaged.Before);
+        Assert.Equal("today\n", unstaged.After);
+        Assert.Equal("index → worktree", unstaged.Comparison);
+        var untracked = await service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("untracked.txt", null, ReviewGroup.Unstaged, ReviewStatus.Untracked), "trunk");
+        Assert.Equal("", untracked.Before);
+        Assert.Equal("", untracked.After);
+        var historical = await service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("file.txt", null, ReviewGroup.Commit, ReviewStatus.Modified, selectedSha), "trunk");
+        Assert.Equal("base\n", historical.Before);
+        Assert.Equal("historical\n", historical.After);
+        Assert.Equal("first parent → selected commit", historical.Comparison);
+        var branch = await service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("file.txt", null, ReviewGroup.Branch, ReviewStatus.Modified), "trunk");
+        Assert.Equal("base\n", branch.Before);
+        Assert.Equal("historical\n", branch.After);
+        Assert.Equal("base → tip", branch.Comparison);
+        Assert.Equal((await repo.Git("rev-parse", "trunk")).Trim(), branch.BaseRevision);
+        Assert.Equal(selectedSha, branch.TargetRevision);
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("file.txt", null, ReviewGroup.Branch, ReviewStatus.Modified), "missing"));
+    }
+
+    [Fact]
+    public async Task Worktree_document_does_not_read_outside_selected_root()
+    {
+        using var repo = new ReviewRepository();
+        var service = new WorktreeChangeReviewService();
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("../private.txt", null, ReviewGroup.Unstaged, ReviewStatus.Untracked), "trunk"));
+    }
+
+    [Fact]
+    public async Task Snapshot_status_does_not_execute_configured_clean_filter()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "base\n");
+        await repo.Git("add", "tracked.txt");
+        await repo.Git("commit", "-m", "base");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, ".gitattributes"), "tracked.txt filter=sentinel\n");
+        await repo.Git("config", "filter.sentinel.clean", "cmd /d /c echo invoked>marker-sentinel.txt");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "changed\n");
+        var marker = Path.Combine(repo.Path, "marker-sentinel.txt");
+        await repo.Git("diff", "--", "tracked.txt");
+        Assert.True(File.Exists(marker));
+        File.Delete(marker);
+        var result = await new WorktreeChangeReviewService().GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(File.Exists(marker));
+        Assert.Contains(result.Working, file => file.Path == "tracked.txt");
+    }
+
+    [Fact]
+    public async Task Unborn_snapshot_retains_staged_file_but_no_history_base()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "new.txt"), "new\n");
+        await repo.Git("add", "new.txt");
+        var snapshot = await new WorktreeChangeReviewService().GetSnapshotAsync(repo.Path, "trunk");
+        Assert.Null(snapshot.Head);
+        Assert.False(snapshot.IsStale);
+        Assert.Contains("no commit yet", snapshot.Error);
+        Assert.Contains(snapshot.Working, file => file.Group == ReviewGroup.Staged && file.Path == "new.txt");
+    }
+
+    [Fact]
+    public async Task Deleted_and_untracked_rows_reject_stale_file_or_index_truth()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "base\n");
+        await repo.Git("add", "tracked.txt");
+        await repo.Git("commit", "-m", "base");
+        File.Delete(Path.Combine(repo.Path, "tracked.txt"));
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "reappeared\n");
+        var service = new WorktreeChangeReviewService();
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("tracked.txt", null, ReviewGroup.Unstaged, ReviewStatus.Deleted), "trunk"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("tracked.txt", null, ReviewGroup.Unstaged, ReviewStatus.Untracked), "trunk"));
+    }
+
+    [Fact]
+    public async Task Staged_add_rename_delete_and_unborn_HEAD_have_distinct_empty_sides()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "old.txt"), "value\n");
+        await repo.Git("add", "old.txt");
+        var service = new WorktreeChangeReviewService();
+        var added = await service.GetStagedDocumentAsync(repo.Path,
+            new ReviewFile("old.txt", null, ReviewGroup.Staged, ReviewStatus.Added));
+        Assert.Equal("", added.Before);
+        Assert.Equal("value\n", added.After);
+        await repo.Git("commit", "-m", "base");
+        await repo.Git("mv", "old.txt", "new.txt");
+        var renamed = await service.GetStagedDocumentAsync(repo.Path,
+            new ReviewFile("new.txt", "old.txt", ReviewGroup.Staged, ReviewStatus.Renamed));
+        Assert.Equal("value\n", renamed.Before);
+        Assert.Equal("value\n", renamed.After);
+        await repo.Git("commit", "-m", "rename");
+        await repo.Git("rm", "new.txt");
+        var deleted = await service.GetStagedDocumentAsync(repo.Path,
+            new ReviewFile("new.txt", null, ReviewGroup.Staged, ReviewStatus.Deleted));
+        Assert.Equal("value\n", deleted.Before);
+        Assert.Equal("", deleted.After);
+    }
+
+    [Fact]
+    public async Task Root_rename_and_deleted_history_use_selected_object_paths()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "old.txt"), "first\n");
+        await repo.Git("add", "old.txt");
+        await repo.Git("commit", "-m", "root");
+        var rootSha = (await repo.Git("rev-parse", "HEAD")).Trim();
+        var service = new WorktreeChangeReviewService();
+        var initial = await service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("old.txt", null, ReviewGroup.Commit, ReviewStatus.Added, rootSha), "trunk");
+        Assert.Equal("", initial.Before);
+        Assert.Equal("first\n", initial.After);
+        await repo.Git("mv", "old.txt", "new.txt");
+        await repo.Git("commit", "-m", "rename");
+        var renameSha = (await repo.Git("rev-parse", "HEAD")).Trim();
+        var rename = await service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("new.txt", "old.txt", ReviewGroup.Commit, ReviewStatus.Renamed, renameSha), "trunk");
+        Assert.Equal("first\n", rename.Before);
+        Assert.Equal("first\n", rename.After);
+        await repo.Git("rm", "new.txt");
+        await repo.Git("commit", "-m", "delete");
+        var deleteSha = (await repo.Git("rev-parse", "HEAD")).Trim();
+        var deleted = await service.GetReviewDocumentAsync(repo.Path,
+            new ReviewFile("new.txt", null, ReviewGroup.Commit, ReviewStatus.Deleted, deleteSha), "trunk");
+        Assert.Equal("first\n", deleted.Before);
+        Assert.Equal("", deleted.After);
+    }
+
+    [Fact]
     public async Task Reads_real_worktree_index_working_files_and_branch_unique_commits_without_mutation()
     {
         using var repo = new ReviewRepository();
