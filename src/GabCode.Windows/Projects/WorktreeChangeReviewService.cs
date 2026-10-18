@@ -21,7 +21,8 @@ internal sealed record ReviewDiff(ReviewDiffState State, string? Patch, string? 
 internal sealed record ReviewDocument(string Before, string After, string Comparison,
     bool BeforeBom, bool AfterBom, string BeforeEol, string AfterEol,
     bool BeforeFinalNewline, bool AfterFinalNewline, bool RawFilter,
-    string? BaseRevision = null, string? TargetRevision = null);
+    string? BaseRevision = null, string? TargetRevision = null,
+    bool BeforeExists = true, bool AfterExists = true);
 
 /// <summary>Windows-owned, bounded Git observation; never calls worktree prune or changes the index.</summary>
 internal sealed class WorktreeChangeReviewService
@@ -262,7 +263,8 @@ internal sealed class WorktreeChangeReviewService
                 afterEntry != await TryReadIndexEntryAsync(root, file.Path, readToken))
                 throw new InvalidDataException("Staged file changed while loading; refresh review.");
             return new ReviewDocument(before.Text, after.Text, "HEAD → index",
-                before.Bom, after.Bom, before.Eol, after.Eol, before.FinalNewline, after.FinalNewline, rawFilter);
+                before.Bom, after.Bom, before.Eol, after.Eol, before.FinalNewline, after.FinalNewline, rawFilter,
+                BeforeExists: beforeEntry is not null, AfterExists: afterEntry is not null);
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
         { throw new TimeoutException("Diff unavailable: staged snapshot exceeded its twelve-second budget."); }
@@ -312,7 +314,7 @@ internal sealed class WorktreeChangeReviewService
                     throw new InvalidDataException("Selected commit changed or is unavailable.");
                 beforeOid = parents.Length > 1 ? await TryReadTreeEntryAsync(root, parents[1], file.OldPath ?? file.Path, readToken) : null;
                 afterOid = await TryReadTreeEntryAsync(root, file.CommitSha, file.Path, readToken);
-                basis = "first parent → selected commit";
+                basis = parents.Length == 1 ? "empty tree → selected commit" : "first parent → selected commit";
             }
             else if (file.Group == ReviewGroup.Branch)
             {
@@ -353,7 +355,8 @@ internal sealed class WorktreeChangeReviewService
             var rawFilter = parts.Length >= 3 && parts[1] == "filter" && parts[2] is not ("unspecified" or "unset" or "");
             return new ReviewDocument(before.Text, after.Text, basis, before.Bom, after.Bom,
                 before.Eol, after.Eol, before.FinalNewline, after.FinalNewline, rawFilter,
-                branchBase, file.Group == ReviewGroup.Branch ? validateHead : null);
+                branchBase, file.Group == ReviewGroup.Branch ? validateHead : null,
+                beforeOid is not null, validateWorktree || afterOid is not null);
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
         { throw new TimeoutException("Diff unavailable: snapshot exceeded its twelve-second budget."); }

@@ -155,6 +155,13 @@ public partial class MainWindow : Window
             reviewSidebar = new WorktreeReviewSidebar(reviewService);
             reviewSidebar.DiffRequested += (file, focus) => _ = OpenReviewDiffAsync(file, focus);
             reviewSidebar.SelectionRetained += file => _ = RefreshReviewDiffAsync(file);
+            reviewSidebar.DocumentStale += reason =>
+            {
+                if (diffView is null) return;
+                ++diffGeneration;
+                diffCancellation?.Cancel();
+                diffView.MarkStale(reason);
+            };
             reviewSidebar.SelectionInvalidated += () =>
             {
                 CloseReviewDiff(restoreFocus: false);
@@ -402,6 +409,7 @@ public partial class MainWindow : Window
         var currentFile = ReadOnlyDiffView.CurrentFile(worktree, file);
         var view = new ReadOnlyDiffView(label, currentFile);
         view.CloseRequested += (_, _) => { if (ReferenceEquals(diffView, view)) CloseReviewDiff(); };
+        view.RetryRequested += (_, _) => { if (ReferenceEquals(diffView, view)) _ = RefreshReviewDiffAsync(file); };
         view.OpenCurrentFileRequested += (_, _) =>
         {
             if (!ReferenceEquals(diffView, view) || currentFile is null || project is null ||
@@ -424,17 +432,14 @@ public partial class MainWindow : Window
         view.FocusDocument();
         try
         {
-            if (file.Group == ReviewGroup.Staged && file.Status == ReviewStatus.Modified)
+            if (file.Status == ReviewStatus.Conflicted)
             {
-                var document = await reviewService.GetStagedDocumentAsync(worktree, file, token);
-                if (generation == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, worktree))
-                    await view.ShowStagedAsync(document, generation, worktree + ":" + file.Identity, file.Path, token);
+                view.ShowUnavailable("Unresolved conflict — normal two-way diff unavailable.");
+                return;
             }
-            else
-            {
-                var result = await reviewService.GetDiffAsync(worktree, file, token);
-                if (generation == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, worktree)) view.Show(result);
-            }
+            var document = await reviewService.GetReviewDocumentAsync(worktree, file, project.MainBranch, token);
+            if (generation == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, worktree))
+                await view.ShowDocumentAsync(document, generation, worktree + ":" + file.Identity, file.Path, token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error) when (generation == diffGeneration && ReferenceEquals(diffView, view)) { view.ShowUnavailable(error.Message); }
@@ -451,17 +456,14 @@ public partial class MainWindow : Window
         var view = diffView;
         try
         {
-            if (file.Group == ReviewGroup.Staged && file.Status == ReviewStatus.Modified)
+            if (file.Status == ReviewStatus.Conflicted)
             {
-                var document = await reviewService.GetStagedDocumentAsync(path, file, token);
-                if (current == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, path))
-                    await view.ShowStagedAsync(document, current, path + ":" + file.Identity, file.Path, token);
+                view.ShowUnavailable("Unresolved conflict — normal two-way diff unavailable.");
+                return;
             }
-            else
-            {
-                var result = await reviewService.GetDiffAsync(path, file, token);
-                if (current == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, path)) view.Show(result);
-            }
+            var document = await reviewService.GetReviewDocumentAsync(path, file, project.MainBranch, token);
+            if (current == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, path))
+                await view.ShowDocumentAsync(document, current, path + ":" + file.Identity, file.Path, token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error) when (current == diffGeneration && ReferenceEquals(diffView, view)) { view.ShowUnavailable(error.Message); }

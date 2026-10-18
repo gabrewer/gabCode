@@ -67,6 +67,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     internal bool HasFreshSnapshot => coordinator.Snapshot is { IsStale: false };
     internal event Action<ReviewFile, UIElement>? DiffRequested;
     internal event Action<ReviewFile>? SelectionRetained;
+    internal event Action<string>? DocumentStale;
     internal event Action? SelectionInvalidated;
 
     internal WorktreeReviewSidebar(WorktreeChangeReviewService service)
@@ -431,7 +432,12 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         var epoch = ++renderEpoch;
         if (snapshot is null) { rows.Children.Clear(); return; }
         var newHead = snapshot.Head;
-        if (newHead != head || snapshot.MainHead != mainHead)
+        var refsChanged = newHead != head || snapshot.MainHead != mainHead;
+        if (activeFileIdentity is not null && snapshot.IsStale)
+            DocumentStale?.Invoke(snapshot.Error ?? "Git refresh stopped; retry review.");
+        else if (activeFileIdentity is not null && refsChanged)
+            DocumentStale?.Invoke("Git refs changed; refreshing selected review.");
+        if (refsChanged)
         {
             ++generation;
             lazyCancellation?.Cancel(); lazyCancellation?.Dispose(); lazyCancellation = null;
@@ -448,7 +454,11 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         {
             var retained = snapshot.Working.FirstOrDefault(file => file.Identity == identity);
             if (retained is null) { activeFileIdentity = null; SelectionInvalidated?.Invoke(); }
-            else SelectionRetained?.Invoke(retained);
+            else
+            {
+                DocumentStale?.Invoke("Refreshing selected review snapshot.");
+                SelectionRetained?.Invoke(retained);
+            }
         }
         if (history.Count == 0) history.AddRange(snapshot.Commits);
         else if (!snapshot.IsStale)
@@ -461,7 +471,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         var workingPage = snapshot.Working.Skip(workingOffset).Take(WorkingPageSize).ToArray();
         var message = snapshot.IsStale
             ? $"Git refresh stopped. {(!snapshot.WasSuccessful ? "No current review data." : "Showing previous results.")} {(coordinator.IsPaused ? "Automatic refresh is paused. " : string.Empty)}{snapshot.Error}"
-            : watcherWarning ?? string.Empty;
+            : snapshot.Error ?? watcherWarning ?? string.Empty;
         if (snapshot.Working.Count > WorkingPageSize)
             message += $" Showing working changes {workingOffset + 1}–{workingOffset + workingPage.Length} of {snapshot.Working.Count}; not all rows are visible.";
         SetStatus(message.Trim());

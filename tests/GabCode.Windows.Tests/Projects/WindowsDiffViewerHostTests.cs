@@ -36,14 +36,26 @@ public sealed class WindowsDiffViewerHostTests
                     Assert.Equal("committed\n", value.Before);
                     Assert.Equal("staged\n", value.After);
                     Assert.Contains("Change 1 of 1", await host.WaitForChangeStatusForTestAsync());
+                    await host.SetLineForTestAsync(2);
                     host.Select(2, "fixture:inline");
                     await host.ShowAsync(new WindowsDiffViewerHost.Snapshot(2, "fixture:inline", "src/app.cs", "committed\n", "staged\n", "HEAD", "index", "inline"));
                     Assert.Equal("inline", await host.WaitForModeForTestAsync("inline"));
+                    Assert.Equal(2, await host.WaitForLineForTestAsync(2));
                     host.Select(3, "fixture:file");
                     await host.ShowAsync(new WindowsDiffViewerHost.Snapshot(3, "fixture:file", "src/app.cs", "committed\n", "staged\n", "HEAD", "index", "file"));
                     Assert.Equal("file", await host.WaitForModeForTestAsync("file"));
                     Assert.Contains("Change 1 of 1", await host.WaitForChangeStatusForTestAsync());
                     Assert.Equal("staged\n", (await host.ReadDocumentForTestAsync()).After);
+                    await host.SendControlAsync(3, "fixture:file", "mode", "inline");
+                    Assert.Equal("inline", await host.WaitForModeForTestAsync("inline"));
+                    await host.SendControlAsync(3, "fixture:file", "change", "next");
+                    await host.SendControlAsync(3, "fixture:file", "find");
+                    await host.SendControlAsync(3, "fixture:file", "focus");
+                    Assert.Equal("staged\n", (await host.ReadDocumentForTestAsync()).After);
+                    await Assert.ThrowsAsync<OperationCanceledException>(() =>
+                        host.SendControlAsync(2, "fixture:inline", "change", "next"));
+                    await host.SendControlAsync(3, "fixture:file", "mode", "file");
+                    Assert.Equal("file", await host.WaitForModeForTestAsync("file"));
                     await host.AttemptTypingForTestAsync();
                     Assert.Equal("staged\n", (await host.ReadDocumentForTestAsync()).After);
                     finished.TrySetResult();
@@ -124,6 +136,9 @@ public sealed class WindowsDiffViewerHostTests
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"save\"}", origin));
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"ready\",\"path\":\"secret\"}", origin));
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"failure\",\"message\":\"" + new string('z', 2049) + "\"}", origin));
+        Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"failure\",\"message\":\"old selection\"}", origin));
+        Assert.True(WindowsDiffViewerHost.IsAllowedViewerMessage(origin,
+            "{\"kind\":\"failure\",\"message\":\"unavailable\",\"generation\":2,\"identity\":\"selected\"}", origin));
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{", origin));
     }
 
