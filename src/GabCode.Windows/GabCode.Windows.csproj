@@ -13,7 +13,16 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="GabCode.Windows.Tests" />
+    <Content Include="..\..\shared\native-diff-viewer\dist\**\*"
+             Link="NativeDiffViewer\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="ValidateDiffViewerAssets" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\shared\native-diff-viewer\dist\manifest.json')"
+           Text="Missing bundled diff viewer. Run npm ci and npm run build in shared/native-diff-viewer." />
+  </Target>
 
   <ItemGroup>
     <Reference Include="Microsoft.Terminal.Wpf">

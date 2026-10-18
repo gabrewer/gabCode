@@ -8,6 +8,82 @@ namespace GabCode.Windows.Tests.Projects;
 public sealed class WorktreeChangeReviewServiceTests
 {
     [Fact]
+    public async Task Staged_document_uses_raw_committed_and_index_bytes_never_current_worktree()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        const string path = "both ü.txt";
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, path), "committed\n");
+        await repo.Git("add", "--", path);
+        await repo.Git("commit", "-m", "base");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, path), "staged\n");
+        await repo.Git("add", "--", path);
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, path), "worktree-only\n");
+        var service = new WorktreeChangeReviewService();
+        var selected = Assert.Single((await service.GetSnapshotAsync(repo.Path, "trunk")).Working,
+            item => item.Group == ReviewGroup.Staged && item.Path == path);
+        var document = await service.GetStagedDocumentAsync(repo.Path, selected);
+        Assert.Equal("committed\n", document.Before);
+        Assert.Equal("staged\n", document.After);
+        Assert.Equal("HEAD → index", document.Comparison);
+        Assert.DoesNotContain("worktree-only", document.After);
+        Assert.Equal("worktree-only\n", await File.ReadAllTextAsync(Path.Combine(repo.Path, path)));
+    }
+
+    [Fact]
+    public async Task Staged_byte_facts_and_raw_filter_label_are_reported_without_running_filter()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "core.autocrlf", "false");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        await File.WriteAllBytesAsync(Path.Combine(repo.Path, "text.txt"), [0xEF, 0xBB, 0xBF, (byte)'a', 13, 10]);
+        await repo.Git("add", "text.txt");
+        await repo.Git("commit", "-m", "base");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, ".gitattributes"), "text.txt filter=nonexistent\n");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "text.txt"), "b");
+        await repo.Git("add", "text.txt");
+        var document = await new WorktreeChangeReviewService().GetStagedDocumentAsync(repo.Path,
+            new ReviewFile("text.txt", null, ReviewGroup.Staged, ReviewStatus.Modified));
+        Assert.Equal("a\r\n", document.Before);
+        Assert.Equal("b", document.After);
+        Assert.True(document.BeforeBom);
+        Assert.False(document.AfterBom);
+        Assert.Equal("CRLF", document.BeforeEol);
+        Assert.Equal("none", document.AfterEol);
+        Assert.True(document.BeforeFinalNewline);
+        Assert.False(document.AfterFinalNewline);
+        Assert.True(document.RawFilter);
+    }
+
+    [Fact]
+    public async Task Invalid_UTF8_and_symlink_stage_are_not_rendered_as_text()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "text.txt"), "ok\n");
+        await repo.Git("add", "text.txt");
+        await repo.Git("commit", "-m", "base");
+        await File.WriteAllBytesAsync(Path.Combine(repo.Path, "text.txt"), [0xFF, 0xFE, 0x61, 0]);
+        await repo.Git("add", "text.txt");
+        var service = new WorktreeChangeReviewService();
+        var file = new ReviewFile("text.txt", null, ReviewGroup.Staged, ReviewStatus.Modified);
+        var invalid = await Assert.ThrowsAsync<InvalidDataException>(() => service.GetStagedDocumentAsync(repo.Path, file));
+        Assert.Contains("unsupported text encoding", invalid.Message, StringComparison.Ordinal);
+        await repo.Git("rm", "-f", "text.txt");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "link-target"), "target.txt");
+        var oid = await repo.Git("hash-object", "-w", "link-target");
+        await repo.Git("update-index", "--add", "--cacheinfo", $"120000,{oid.Trim()},text.txt");
+        var unsafeEntry = await Assert.ThrowsAsync<InvalidDataException>(() => service.GetStagedDocumentAsync(repo.Path, file));
+        Assert.Contains("not a regular file", unsafeEntry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Reads_real_worktree_index_working_files_and_branch_unique_commits_without_mutation()
     {
         using var repo = new ReviewRepository();

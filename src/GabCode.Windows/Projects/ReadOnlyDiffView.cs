@@ -14,6 +14,8 @@ internal sealed class ReadOnlyDiffView : UserControl
     private readonly TextBox patch;
     private readonly Button closeButton;
     private readonly Button openButton;
+    private WindowsDiffViewerHost? stagedViewer;
+    private Task? stagedInitialization;
     internal event EventHandler? CloseRequested;
     internal event EventHandler? OpenCurrentFileRequested;
 
@@ -69,6 +71,58 @@ internal sealed class ReadOnlyDiffView : UserControl
             closeButton.Style = openButton.Style = systemButton;
         }
         else closeButton.Style = openButton.Style = null;
+    }
+
+    internal async Task ShowStagedAsync(ReviewDocument document, long generation, string identity, string path, CancellationToken token)
+    {
+        if (stagedViewer is not null)
+        {
+            stagedViewer.Select(generation, identity);
+        }
+        else
+        {
+            var assets = Path.Combine(AppContext.BaseDirectory, "NativeDiffViewer");
+            var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "gabCode", "DiffViewerProfile");
+            stagedViewer = new WindowsDiffViewerHost(assets, profile);
+            stagedViewer.Unavailable += (_, reason) =>
+            {
+                status.Text = "Diff unavailable: " + reason;
+                AutomationProperties.SetName(status, status.Text);
+            };
+            stagedViewer.Select(generation, identity);
+            Grid.SetRow(stagedViewer, 2);
+            root.Children.Add(stagedViewer);
+            patch.Visibility = Visibility.Collapsed;
+            stagedInitialization = stagedViewer.InitializeAsync();
+        }
+        // Refreshing the same selection cancels that request, not the shared host bootstrap.
+        // Closing/replacing the document disposes the host and cancels its own lifetime.
+        await stagedInitialization!.WaitAsync(token);
+        token.ThrowIfCancellationRequested();
+        status.Text = document.Comparison + " — read-only viewer" +
+            (document.RawFilter ? " — Raw content — Git filters not applied" : "") +
+            (document.BeforeBom != document.AfterBom ? " — UTF-8 BOM differs" : "") +
+            (document.BeforeEol != document.AfterEol ? $" — line endings {document.BeforeEol} → {document.AfterEol}" : "") +
+            (document.BeforeFinalNewline != document.AfterFinalNewline ? " — final newline differs" : "");
+        AutomationProperties.SetName(status, status.Text);
+        await stagedViewer.ShowAsync(new WindowsDiffViewerHost.Snapshot(generation, identity, path,
+            document.Before, document.After, "HEAD", "index", "side-by-side",
+            document.BeforeBom, document.AfterBom, document.BeforeEol, document.AfterEol,
+            document.BeforeFinalNewline, document.AfterFinalNewline), token);
+    }
+
+    internal void DisposeViewer() => stagedViewer?.Dispose();
+
+    internal bool HasStagedViewer => stagedViewer is not null;
+
+    internal Task<(string Before, string After)> ReadViewerPairForTestAsync() =>
+        stagedViewer?.ReadDocumentForTestAsync() ?? throw new InvalidOperationException("Staged viewer is not open.");
+
+    internal void ShowUnavailable(string reason)
+    {
+        status.Text = "Diff unavailable: " + reason;
+        AutomationProperties.SetName(status, status.Text);
+        patch.Visibility = Visibility.Collapsed;
     }
 
     internal void Show(ReviewDiff result)

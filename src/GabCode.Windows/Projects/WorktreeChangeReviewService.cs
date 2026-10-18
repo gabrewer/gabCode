@@ -17,6 +17,9 @@ internal sealed record ReviewFile(string Path, string? OldPath, ReviewGroup Grou
 internal sealed record ReviewCommit(string Sha, string Subject, string Author, DateTimeOffset Timestamp, IReadOnlyList<string> Parents, string Summary);
 internal sealed record ReviewSnapshot(string Worktree, string? Head, string? MainHead, IReadOnlyList<ReviewFile> Working, IReadOnlyList<ReviewCommit> Commits, bool IsStale, string? Error, ReviewStopReason StopReason = ReviewStopReason.None, bool WasSuccessful = false);
 internal sealed record ReviewDiff(ReviewDiffState State, string? Patch, string? Error = null);
+internal sealed record ReviewDocument(string Before, string After, string Comparison,
+    bool BeforeBom, bool AfterBom, string BeforeEol, string AfterEol,
+    bool BeforeFinalNewline, bool AfterFinalNewline, bool RawFilter);
 
 /// <summary>Windows-owned, bounded Git observation; never calls worktree prune or changes the index.</summary>
 internal sealed class WorktreeChangeReviewService
@@ -199,7 +202,93 @@ internal sealed class WorktreeChangeReviewService
         return output.OrderBy(x => x.Group).ThenBy(x => x.Path, StringComparer.Ordinal).ToArray();
     }
 
-    private async Task<string> RunAsync(string worktree, IReadOnlyList<string> args, CancellationToken token)
+    internal async Task<ReviewDocument> GetStagedDocumentAsync(string worktree, ReviewFile file, CancellationToken token = default)
+    {
+        if (file.Group != ReviewGroup.Staged || file.Status != ReviewStatus.Modified ||
+            Path.IsPathFullyQualified(file.Path) || file.Path.Contains('\\') ||
+            file.Path.Split('/').Any(segment => segment is "" or "." or "..") || file.Path.Contains('\0'))
+            throw new InvalidDataException("Selected staged file is not a regular tracked text path.");
+        var root = Path.GetFullPath(worktree);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(12));
+        var readToken = deadline.Token;
+        try
+        {
+            var head = (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken)).Trim();
+            var beforeEntry = await ReadTreeEntryAsync(root, head, file.Path, readToken);
+            var afterEntry = await ReadIndexEntryAsync(root, file.Path, readToken);
+            var before = DecodeReviewBytes(await RunBytesAsync(root, ["cat-file", "blob", beforeEntry], readToken));
+            var after = DecodeReviewBytes(await RunBytesAsync(root, ["cat-file", "blob", afterEntry], readToken));
+            var attribute = await RunAsync(root, ["check-attr", "-z", "filter", "--", file.Path], readToken);
+            var parts = attribute.Split('\0');
+            var rawFilter = parts.Length >= 3 && parts[1] == "filter" && parts[2] is not ("unspecified" or "unset" or "");
+            if (head != (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken)).Trim() ||
+                beforeEntry != await ReadTreeEntryAsync(root, head, file.Path, readToken) ||
+                afterEntry != await ReadIndexEntryAsync(root, file.Path, readToken))
+                throw new InvalidDataException("Staged file changed while loading; refresh review.");
+            return new ReviewDocument(before.Text, after.Text, "HEAD → index",
+                before.Bom, after.Bom, before.Eol, after.Eol, before.FinalNewline, after.FinalNewline, rawFilter);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+        { throw new TimeoutException("Diff unavailable: staged snapshot exceeded its twelve-second budget."); }
+    }
+
+    private async Task<string> ReadTreeEntryAsync(string root, string head, string path, CancellationToken token)
+    {
+        var record = await RunAsync(root, ["ls-tree", "-z", head, "--", path], token);
+        var rows = record.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        if (rows.Length != 1 || !rows[0].EndsWith("\t" + path, StringComparison.Ordinal))
+            throw new InvalidDataException("Selected file is unavailable in HEAD.");
+        var prefix = rows[0][..rows[0].IndexOf('\t')].Split(' ');
+        if (prefix.Length != 3 || prefix[0] is not ("100644" or "100755") || prefix[1] != "blob" || !IsOid(prefix[2]))
+            throw new InvalidDataException("Diff unavailable: selected HEAD entry is not a regular file.");
+        return prefix[2];
+    }
+
+    private async Task<string> ReadIndexEntryAsync(string root, string path, CancellationToken token)
+    {
+        var record = await RunAsync(root, ["ls-files", "--stage", "-z", "--", path], token);
+        var rows = record.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        if (rows.Length != 1 || !rows[0].EndsWith("\t" + path, StringComparison.Ordinal))
+            throw new InvalidDataException("Staged file is unavailable or unmerged.");
+        var prefix = rows[0][..rows[0].IndexOf('\t')].Split(' ');
+        if (prefix.Length != 3 || prefix[0] is not ("100644" or "100755") || prefix[2] != "0" || !IsOid(prefix[1]))
+            throw new InvalidDataException("Diff unavailable: selected index entry is not a regular file.");
+        return prefix[1];
+    }
+
+    private static bool IsOid(string oid) => oid.Length is 40 or 64 && oid.All(Uri.IsHexDigit);
+
+    private static (string Text, bool Bom, string Eol, bool FinalNewline) DecodeReviewBytes(byte[] bytes)
+    {
+        if (bytes.AsSpan().StartsWith(new byte[] { 0xFF, 0xFE }) || bytes.AsSpan().StartsWith(new byte[] { 0xFE, 0xFF }) ||
+            bytes.AsSpan().StartsWith(new byte[] { 0, 0, 0xFE, 0xFF }) || bytes.AsSpan().StartsWith(new byte[] { 0xFF, 0xFE, 0, 0 }))
+            throw new InvalidDataException("Diff unavailable: unsupported text encoding.");
+        var bom = bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF });
+        var data = bytes.AsSpan(bom ? 3 : 0);
+        if (data.Contains((byte)0)) throw new InvalidDataException("Diff unavailable: binary content.");
+        try
+        {
+            var text = new UTF8Encoding(false, true).GetString(data);
+            var crlf = text.Contains("\r\n", StringComparison.Ordinal);
+            var rest = text.Replace("\r\n", "", StringComparison.Ordinal);
+            var lf = rest.Contains('\n');
+            var cr = rest.Contains('\r');
+            var eol = ((crlf ? 1 : 0) + (lf ? 1 : 0) + (cr ? 1 : 0)) switch
+            { 0 => "none", > 1 => "mixed", _ => crlf ? "CRLF" : lf ? "LF" : "CR" };
+            return (text, bom, eol, text.EndsWith('\n') || text.EndsWith('\r'));
+        }
+        catch (DecoderFallbackException) { throw new InvalidDataException("Diff unavailable: unsupported text encoding."); }
+    }
+
+    private Task<string> RunAsync(string worktree, IReadOnlyList<string> args, CancellationToken token) =>
+        RunCoreAsync(worktree, args, (owned, readToken) => ReadBoundedAsync(owned.StandardOutput, readToken), token);
+
+    private Task<byte[]> RunBytesAsync(string worktree, IReadOnlyList<string> args, CancellationToken token) =>
+        RunCoreAsync(worktree, args, (owned, readToken) => ReadBoundedBytesAsync(owned.StandardOutput.BaseStream, readToken), token);
+
+    private async Task<T> RunCoreAsync<T>(string worktree, IReadOnlyList<string> args,
+        Func<OwnedGitProcess, CancellationToken, Task<T>> readOutput, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         using var timeoutSource = new CancellationTokenSource(timeout);
@@ -222,11 +311,11 @@ internal sealed class WorktreeChangeReviewService
             { throw new TimeoutException("Read-only Git query could not acquire cross-process capacity before its deadline."); }
             using var owned = OwnedGitProcess.Start(info);
             var process = owned.Process;
-            Task<string>? stdout = null;
+            Task<T>? stdout = null;
             Task<string>? stderr = null;
             try
             {
-            stdout = ReadBoundedAsync(owned.StandardOutput, linked.Token);
+            stdout = readOutput(owned, linked.Token);
             stderr = ReadBoundedAsync(owned.StandardError, linked.Token);
             var exit = process.WaitForExitAsync(linked.Token);
             // Task.WhenAll would wait for a hung child even after a reader rejected oversized output.
@@ -291,11 +380,24 @@ internal sealed class WorktreeChangeReviewService
         }
     }
 
-    private static async Task ObserveReadersAsync(Task<string>? stdout, Task<string>? stderr)
+    private static async Task ObserveReadersAsync(Task? stdout, Task<string>? stderr)
     {
         if (stdout is null || stderr is null) return;
         try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
         catch (Exception error) when (error is not TimeoutException) { /* original read failure remains authoritative */ }
+    }
+
+    private static async Task<byte[]> ReadBoundedBytesAsync(Stream stream, CancellationToken token)
+    {
+        using var result = new MemoryStream();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            var count = await stream.ReadAsync(buffer, token).ConfigureAwait(false);
+            if (count == 0) return result.ToArray();
+            if (result.Length + count > 1024 * 1024) throw new InvalidDataException("Diff unavailable: text exceeds one-megabyte limit.");
+            result.Write(buffer, 0, count);
+        }
     }
 
     private static async Task<string> ReadBoundedAsync(StreamReader reader, CancellationToken token)

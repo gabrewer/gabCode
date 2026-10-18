@@ -18,6 +18,60 @@ namespace GabCode.Windows.Tests.Projects;
 public sealed class ReadOnlyDiffWindowTests
 {
     [Fact]
+    public async Task Staged_file_selection_opens_real_HEAD_to_index_in_embedded_viewer()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode staged viewer Ω " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        int? piPid = null, commandPid = null;
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await File.WriteAllTextAsync(Path.Combine(root, "selected.txt"), "committed\n");
+            await RunGit(root, "add", "selected.txt");
+            await RunGit(root, "commit", "-m", "base");
+            await File.WriteAllTextAsync(Path.Combine(root, "selected.txt"), "staged\n");
+            await RunGit(root, "add", "selected.txt");
+            await File.WriteAllTextAsync(Path.Combine(root, "selected.txt"), "worktree-only\n");
+            await OnSta(async () =>
+            {
+                var resolver = new TerminalProfileResolver([], [new TerminalShellCandidate(Environment.GetEnvironmentVariable("ComSpec")!, "cmd", "/d /q")]);
+                var window = new MainWindow(new ProjectContext("Review", root, "trunk"), resolver, new AcceptClose());
+                window.Show();
+                try
+                {
+                    var first = Assert.IsType<TerminalSessionView>(window.PiTerminal);
+                    var second = Assert.IsType<TerminalSessionView>(window.CommandsTerminal);
+                    await WaitUntil(() => first.ProcessId is not null && second.ProcessId is not null);
+                    piPid = first.ProcessId; commandPid = second.ProcessId;
+                    var sidebar = Assert.IsType<WorktreeReviewSidebar>(((ContentControl)window.FindName("ReviewSidebarRegion")).Content);
+                    await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Modified: selected.txt")));
+                    var stage = Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Modified: selected.txt") &&
+                        (b.Tag as string)?.StartsWith("Staged:", StringComparison.Ordinal) == true);
+                    stage.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    await WaitUntil(() => ((ContentControl)window.FindName("MainTerminalRegion")).Content is ReadOnlyDiffView);
+                    var view = (ReadOnlyDiffView)((ContentControl)window.FindName("MainTerminalRegion")).Content;
+                    await WaitUntil(() => view.HasStagedViewer);
+                    var pair = await view.ReadViewerPairForTestAsync();
+                    Assert.Equal("committed\n", pair.Before);
+                    Assert.Equal("staged\n", pair.After);
+                    Assert.Contains(Descendants<TextBlock>(view), block => block.Text.Contains("HEAD → index", StringComparison.Ordinal));
+                    Assert.Equal("worktree-only\n", await File.ReadAllTextAsync(Path.Combine(root, "selected.txt")));
+                    Assert.Equal(piPid, first.ProcessId); Assert.Equal(commandPid, second.ProcessId);
+                    view.ApplyTemplate(); view.UpdateLayout();
+                    Assert.Single(Descendants<Button>(view), b => Equals(b.Content, "Close Diff"))
+                        .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    Assert.Equal(piPid, first.ProcessId); Assert.Equal(commandPid, second.ProcessId);
+                }
+                finally { window.Close(); await WaitUntil(() => !window.IsVisible); }
+            });
+            await WaitUntil(() => HasExited(piPid!.Value) && HasExited(commandPid!.Value));
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
     public async Task Opening_and_replacing_document_keeps_live_shells_and_close_restores_original_main()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabcode diff window Ω " + Guid.NewGuid().ToString("N"));
