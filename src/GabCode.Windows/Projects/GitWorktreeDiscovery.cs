@@ -501,36 +501,41 @@ internal sealed class GitWorktreeDiscovery
                 { throw new TimeoutException("Git discovery admission timed out."); }
             }
             cancellation.Token.ThrowIfCancellationRequested();
-            using var process = Process.Start(info) ?? throw new InvalidOperationException("Git could not be started.");
-            var outputTask = ReadBoundedAsync(process.StandardOutput, strictOutput);
-            var errorTask = ReadBoundedAsync(process.StandardError, strictOutput);
+            using var owned = OwnedGitProcess.Start(info);
+            var process = owned.Process;
+            var outputTask = ReadBoundedAsync(owned.StandardOutput, strictOutput);
+            var errorTask = ReadBoundedAsync(owned.StandardError, strictOutput);
             try
             {
                 var pending = new List<Task> { outputTask, errorTask, process.WaitForExitAsync(cancellation.Token) };
                 while (pending.Count > 0)
                 {
-                    var completed = await Task.WhenAny(pending).ConfigureAwait(false);
+                    // Pipe holders can outlive the root; cancellation must still reach cleanup.
+                    var completed = await Task.WhenAny(pending).WaitAsync(cancellation.Token).ConfigureAwait(false);
                     await completed.ConfigureAwait(false);
                     pending.Remove(completed);
                 }
-                return new GitProcessResult(process.ExitCode, await outputTask.ConfigureAwait(false), await errorTask.ConfigureAwait(false));
+                var result = new GitProcessResult(process.ExitCode, await outputTask.ConfigureAwait(false), await errorTask.ConfigureAwait(false));
+                owned.Stop();
+                await owned.WaitForEmptyAsync().ConfigureAwait(false);
+                return result;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCancellation.IsCancellationRequested)
             {
-                try { await StopAndDrainAsync(process, outputTask, errorTask).ConfigureAwait(false); }
-                catch (TimeoutException) { cleanupVerified = false; throw; }
+                try { await StopAndDrainAsync(owned, outputTask, errorTask).ConfigureAwait(false); }
+                catch (Exception error) when (error is TimeoutException or Win32Exception) { cleanupVerified = false; throw; }
                 throw new TimeoutException("Git operation timed out.");
             }
             catch
             {
-                try { await StopAndDrainAsync(process, outputTask, errorTask).ConfigureAwait(false); }
-                catch (TimeoutException) { cleanupVerified = false; throw; }
+                try { await StopAndDrainAsync(owned, outputTask, errorTask).ConfigureAwait(false); }
+                catch (Exception error) when (error is TimeoutException or Win32Exception) { cleanupVerified = false; throw; }
                 throw;
             }
         }
-        catch (Win32Exception)
+        catch (Win32Exception error)
         {
-            throw new InvalidOperationException("Git could not be started.");
+            throw new InvalidOperationException("Git process start or cleanup failed: " + error.Message, error);
         }
         finally
         {
@@ -539,11 +544,10 @@ internal sealed class GitWorktreeDiscovery
         }
     }
 
-    private static async Task StopAndDrainAsync(Process process, Task<string> output, Task<string> error)
+    private static async Task StopAndDrainAsync(OwnedGitProcess owned, Task<string> output, Task<string> error)
     {
-        TryStop(process);
-        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
-        catch (TimeoutException) { throw new TimeoutException("Owned Git process did not exit within the cleanup limit."); }
+        owned.Stop();
+        await owned.WaitForEmptyAsync().ConfigureAwait(false);
         try { await Task.WhenAll(output, error).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
         catch (Exception problem) when (problem is not TimeoutException) { /* preserve the original read or process failure */ }
     }
@@ -565,18 +569,4 @@ internal sealed class GitWorktreeDiscovery
         }
     }
 
-    private static void TryStop(Process process)
-    {
-        try
-        {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-        }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (Win32Exception)
-        {
-            // Bounded exit/drain waits will quarantine read-only capacity if the child is still live.
-        }
-    }
 }
