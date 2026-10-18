@@ -50,5 +50,5 @@ function show(raw) {
 const receive = event => { try { show(event.data); } catch (error) { notify(makeViewerEvent('failure', { message: String(error).slice(0, 2048) })); } };
 window.chrome?.webview?.addEventListener('message', receive);
 window.addEventListener('message', event => { if (event.source === window && event.origin === window.location.origin) receive(event); });
-window.gabCodeViewer = { show }; // Native host calls only this fixed method with a validated JSON value.
+window.gabCodeViewer = { show, models: () => original && modified ? { before: original.getValue(), after: modified.getValue() } : null }; // Native host calls only show; models is a read-only test probe.
 notify(makeViewerEvent('ready'));

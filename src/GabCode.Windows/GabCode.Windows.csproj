@@ -20,21 +20,17 @@
       <HintPath>$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Wpf.dll</HintPath>
       <Private>true</Private>
     </Reference>
-    <Content Include="$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Wpf.dll"
-             Link="Microsoft.Terminal.Wpf.dll"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Control.dll"
-             Link="Microsoft.Terminal.Control.dll"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Wpf.dll" Link="Microsoft.Terminal.Wpf.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Control.dll" Link="Microsoft.Terminal.Control.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>
 
   <Target Name="ValidateWindowsTerminalAssets" BeforeTargets="ResolveReferences">
-    <Error Condition="!Exists('$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Wpf.dll')"
-           Text="Missing approved Windows Terminal WPF asset. Run: pwsh -NoProfile -File eng/windows-terminal/Build-WpfControl.ps1 -Verify" />
-    <Error Condition="!Exists('$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Control.dll')"
-           Text="Missing approved Windows Terminal native asset. Run: pwsh -NoProfile -File eng/windows-terminal/Build-WpfControl.ps1 -Verify" />
+    <Error Condition="!Exists('$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Wpf.dll')" Text="Missing approved Windows Terminal WPF asset. Run: pwsh -NoProfile -File eng/windows-terminal/Build-WpfControl.ps1 -Verify" />
+    <Error Condition="!Exists('$(WindowsTerminalAssetRoot)\Microsoft.Terminal.Control.dll')" Text="Missing approved Windows Terminal native asset. Run: pwsh -NoProfile -File eng/windows-terminal/Build-WpfControl.ps1 -Verify" />
   </Target>
 
 </Project>
