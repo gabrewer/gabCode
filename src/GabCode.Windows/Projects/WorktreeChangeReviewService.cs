@@ -63,7 +63,7 @@ internal sealed class WorktreeChangeReviewService
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (OperationCanceledException) when (budget.IsCancellationRequested)
         { return new(root, head, mainHead, working, [], true, "Git refresh exceeded its eight-second budget.", ReviewStopReason.Budget); }
-        catch (Exception exception) when (exception is TimeoutException or InvalidDataException)
+        catch (Exception exception) when (exception is TimeoutException or InvalidDataException or Win32Exception)
         { return new(root, head, mainHead, working, [], true, exception.Message, ReviewStopReason.Limit); }
         catch (Exception exception) { return new(root, head, mainHead, working, [], true, exception.Message); }
     }
@@ -220,40 +220,43 @@ internal sealed class WorktreeChangeReviewService
             try { machineSlot = await AcquireMachineSlotAsync(linked.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutSource.IsCancellationRequested)
             { throw new TimeoutException("Read-only Git query could not acquire cross-process capacity before its deadline."); }
-            using var process = Process.Start(info) ?? throw new InvalidOperationException("Git could not be started.");
+            using var owned = OwnedGitProcess.Start(info);
+            var process = owned.Process;
             Task<string>? stdout = null;
             Task<string>? stderr = null;
             try
             {
-            stdout = ReadBoundedAsync(process.StandardOutput, linked.Token);
-            stderr = ReadBoundedAsync(process.StandardError, linked.Token);
+            stdout = ReadBoundedAsync(owned.StandardOutput, linked.Token);
+            stderr = ReadBoundedAsync(owned.StandardError, linked.Token);
             var exit = process.WaitForExitAsync(linked.Token);
             // Task.WhenAll would wait for a hung child even after a reader rejected oversized output.
             // Observe each completed operation immediately so the catch can stop the owned process.
             var pending = new List<Task> { stdout, stderr, exit };
             while (pending.Count > 0)
             {
-                var completed = await Task.WhenAny(pending).ConfigureAwait(false);
+                // The root may exit before a descendant releases the pipes. Keep the
+                // deadline active even after the process-exit task leaves this list.
+                var completed = await Task.WhenAny(pending).WaitAsync(linked.Token).ConfigureAwait(false);
                 await completed.ConfigureAwait(false);
                 pending.Remove(completed);
             }
             var output = await stdout;
             var error = await stderr;
             if (process.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"Git exited {process.ExitCode}." : error.Trim());
+            owned.Stop();
+            await owned.WaitForEmptyAsync().ConfigureAwait(false);
             return output;
         }
             catch (OperationCanceledException) when (!token.IsCancellationRequested && timeoutSource.IsCancellationRequested)
             {
-                TryStop(process);
-                try { await WaitForCleanupAsync(process).ConfigureAwait(false); await ObserveReadersAsync(stdout, stderr).ConfigureAwait(false); }
-                catch (TimeoutException) { safeToRelease = false; throw; }
+                try { owned.Stop(); await owned.WaitForEmptyAsync().ConfigureAwait(false); await ObserveReadersAsync(stdout, stderr).ConfigureAwait(false); }
+                catch (Exception error) when (error is TimeoutException or Win32Exception) { safeToRelease = false; throw; }
                 throw new TimeoutException("Read-only Git query timed out.");
             }
             catch
             {
-                TryStop(process);
-                try { await WaitForCleanupAsync(process).ConfigureAwait(false); await ObserveReadersAsync(stdout, stderr).ConfigureAwait(false); }
-                catch (TimeoutException) { safeToRelease = false; throw; }
+                try { owned.Stop(); await owned.WaitForEmptyAsync().ConfigureAwait(false); await ObserveReadersAsync(stdout, stderr).ConfigureAwait(false); }
+                catch (Exception error) when (error is TimeoutException or Win32Exception) { safeToRelease = false; throw; }
                 throw;
             }
         }
@@ -295,12 +298,6 @@ internal sealed class WorktreeChangeReviewService
         catch (Exception error) when (error is not TimeoutException) { /* original read failure remains authoritative */ }
     }
 
-    private static async Task WaitForCleanupAsync(Process process)
-    {
-        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)); }
-        catch (TimeoutException) { throw new TimeoutException("Owned Git process did not exit within the cleanup limit."); }
-    }
-
     private static async Task<string> ReadBoundedAsync(StreamReader reader, CancellationToken token)
     {
         var data = new StringBuilder();
@@ -316,10 +313,4 @@ internal sealed class WorktreeChangeReviewService
         }
     }
 
-    private static void TryStop(Process process)
-    {
-        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-        catch (InvalidOperationException) { }
-        catch (Win32Exception) { /* bounded exit wait will quarantine capacity if the child remains alive */ }
-    }
 }

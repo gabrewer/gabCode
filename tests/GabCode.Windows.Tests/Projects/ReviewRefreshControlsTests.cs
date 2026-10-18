@@ -178,6 +178,39 @@ public sealed class ReviewRefreshControlsTests
     }
 
     [Fact]
+    public async Task Repeated_load_more_requests_keep_only_one_page_read_in_flight()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode page gate Ω " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                sidebar.Select(root, "main");
+                var expanded = (HashSet<string>)typeof(WorktreeReviewSidebar).GetField("expanded",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar)!;
+                expanded.Add("commits");
+                var commits = Enumerable.Range(0, 100).Select(i => new ReviewCommit(
+                    i.ToString("x40"), "commit", "author", DateTimeOffset.UtcNow, [], "summary")).ToArray();
+                typeof(WorktreeReviewSidebar).GetMethod("Render", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                    null, [typeof(ReviewSnapshot)], null)!.Invoke(sidebar,
+                    [new ReviewSnapshot(root, "head", "main", [], commits, false, null)]);
+                var more = Assert.Single(FindButtons((DependencyObject)sidebar.Content), b => b.Content?.ToString() == "Load more commits");
+                more.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Assert.False(more.IsEnabled); // Additional clicks must not queue another Git read.
+                var load = typeof(WorktreeReviewSidebar).GetMethod("LoadMoreAsync",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                for (var i = 0; i < 100; i++)
+                    Assert.True(((Task)load.Invoke(sidebar, null)!).IsCompletedSuccessfully,
+                        "Duplicate lazy requests should return immediately, not queue for capacity.");
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            });
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch (IOException) { } }
+    }
+
+    [Fact]
     public async Task First_partial_result_never_claims_previous_success()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabcode first partial Ω " + Guid.NewGuid().ToString("N"));

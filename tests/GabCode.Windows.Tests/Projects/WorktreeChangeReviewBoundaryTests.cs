@@ -247,6 +247,74 @@ public sealed class WorktreeChangeReviewBoundaryTests
     }
 
     [Fact]
+    public async Task Root_exit_with_pipe_holding_descendant_is_terminated_with_its_job()
+    {
+        using var repo = new Repo();
+        var marker = Path.Combine(repo.Path, "owned-child.pid");
+        var start = new ProcessStartInfo("pwsh") { WorkingDirectory = repo.Path };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-Command");
+        start.ArgumentList.Add("$p = Start-Process pwsh -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 7' -NoNewWindow -PassThru; " +
+            "[IO.File]::WriteAllText('" + marker.Replace("'", "''") + "', [string]$p.Id)");
+        var sentinelStart = new ProcessStartInfo("pwsh") { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var arg in new[] { "-NoProfile", "-Command", "Start-Sleep -Seconds 7" }) sentinelStart.ArgumentList.Add(arg);
+        using var sentinel = Process.Start(sentinelStart)!;
+        try
+        {
+        using var owned = OwnedGitProcess.Start(start);
+        await owned.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(4));
+        Assert.True(File.Exists(marker), "The root did not report an owned descendant.");
+        var childPid = int.Parse(await File.ReadAllTextAsync(marker));
+        Assert.True(IsProcessRunning(childPid), "Descendant exited before cleanup could be verified.");
+        var reader = owned.StandardOutput.ReadToEndAsync();
+        Assert.False(reader.IsCompleted, "Descendant did not hold the output pipe after root exit.");
+        owned.Stop();
+        await owned.WaitForEmptyAsync();
+        await reader.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(IsProcessRunning(childPid), "Owned descendant survived root exit and job cleanup.");
+        Assert.False(sentinel.HasExited, "Cleanup stopped a process outside the owned job.");
+        }
+        finally
+        {
+            if (!sentinel.HasExited) sentinel.Kill();
+            await sentinel.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Adapter_deadline_stops_descendant_after_root_exit_and_releases_capacity(bool discovery)
+    {
+        using var repo = new Repo(); await repo.Initialize();
+        // Both children are bounded sleepers. Never run gabCode or a user repository.
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "spawn.ps1"),
+            "$p = Start-Process pwsh -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 10' -NoNewWindow -PassThru; " +
+            "[IO.File]::WriteAllText('child.pid', [string]$p.Id)");
+        var fake = Path.Combine(repo.Path, "root-exits.cmd");
+        await File.WriteAllTextAsync(fake, "@echo off\r\npwsh -NoProfile -File spawn.ps1\r\n");
+        var clock = Stopwatch.StartNew();
+        if (discovery)
+            await Assert.ThrowsAsync<TimeoutException>(() => new GitWorktreeDiscovery(fake, TimeSpan.FromSeconds(2)).DiscoverEntriesAsync(repo.Path));
+        else
+        {
+            var result = await new WorktreeChangeReviewService(fake, TimeSpan.FromSeconds(2)).GetSnapshotAsync(repo.Path, "trunk");
+            Assert.Equal(ReviewStopReason.Limit, result.StopReason);
+        }
+        Assert.InRange(clock.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(6));
+        var pid = int.Parse(await File.ReadAllTextAsync(Path.Combine(repo.Path, "child.pid")));
+        Assert.False(IsProcessRunning(pid), "Adapter returned without stopping its descendant.");
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        using var capacity = await WorktreeChangeReviewService.AcquireMachineSlotAsync(deadline.Token);
+    }
+
+    private static bool IsProcessRunning(int pid)
+    {
+        try { using var process = Process.GetProcessById(pid); return !process.HasExited; }
+        catch (ArgumentException) { return false; }
+    }
+
+    [Fact]
     public async Task Aggregate_snapshot_budget_reports_retryable_budget_only_after_child_cleanup()
     {
         var repo = new Repo(); await repo.Initialize();

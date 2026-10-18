@@ -52,6 +52,8 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private string? mainHead;
     private string? activeFileIdentity;
     private bool moreAvailable = true;
+    private bool loadingHistoryPage;
+    private Button? loadMoreButton;
     private bool refreshRunning;
     private bool refreshPending;
     private long refreshEpoch;
@@ -192,7 +194,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         foreach (var watcher in watchers) watcher.Dispose();
         watchers.Clear(); watcherWarning = null;
         expanded.Clear(); expanded.UnionWith(["working", "staged", "unstaged"]);
-        commitFiles.Clear(); commitFileOffsets.Clear(); loadingCommits.Clear(); history.Clear(); head = null; mainHead = null; moreAvailable = true; workingOffset = 0;
+        commitFiles.Clear(); commitFileOffsets.Clear(); loadingCommits.Clear(); history.Clear(); head = null; mainHead = null; moreAvailable = true; loadingHistoryPage = false; loadMoreButton = null; workingOffset = 0;
         var hadSelection = activeFileIdentity is not null;
         activeFileIdentity = null;
         worktree = path; mainBranch = branch;
@@ -436,6 +438,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             loadingCommits.Clear();
             head = newHead; mainHead = snapshot.MainHead;
             history.Clear(); commitFiles.Clear(); commitFileOffsets.Clear(); moreAvailable = true;
+            loadingHistoryPage = false; loadMoreButton = null;
             if (activeFileIdentity is { } selected && selected.StartsWith("Commit:", StringComparison.Ordinal) &&
                 !snapshot.IsStale && newHead is not null && mainHead is not null &&
                 !snapshot.Commits.Any(commit => selected.StartsWith("Commit:" + commit.Sha + ":", StringComparison.Ordinal)))
@@ -462,7 +465,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (snapshot.Working.Count > WorkingPageSize)
             message += $" Showing working changes {workingOffset + 1}–{workingOffset + workingPage.Length} of {snapshot.Working.Count}; not all rows are visible.";
         SetStatus(message.Trim());
-        rows.Children.Clear(); fileButtons.Clear(); sections.Clear();
+        rows.Children.Clear(); fileButtons.Clear(); sections.Clear(); loadMoreButton = null;
         if (snapshot.IsStale && !snapshot.WasSuccessful) { rows.Children.Add(Notice("No current review data. Retry refresh.")); return; }
         AddSection(rows, "Working changes", "working", content =>
         {
@@ -508,7 +511,8 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                 content.Children.Add(Notice("Only the first 400 commits are shown; more history may exist."));
             if (moreAvailable && commits.Length > 0 && commits.Length % 100 == 0 && commits.Length < 100 * MaximumHistoryPages)
             {
-                var more = new Button { Content = "Load more commits", Margin = new Thickness(12, 3, 0, 3) };
+                var more = new Button { Content = "Load more commits", Margin = new Thickness(12, 3, 0, 3), IsEnabled = !loadingHistoryPage };
+                loadMoreButton = more;
                 more.Click += async (_, _) => await LoadMoreAsync();
                 content.Children.Add(more);
             }
@@ -695,12 +699,15 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
 
     private async Task LoadMoreAsync()
     {
+        if (loadingHistoryPage || disposed) return;
         var path = worktree;
         var current = generation;
         var offset = history.Count;
         var requestedHead = head;
         var requestedMainHead = mainHead;
         if (requestedHead is null || requestedMainHead is null) return;
+        loadingHistoryPage = true;
+        if (loadMoreButton is not null) loadMoreButton.IsEnabled = false;
         lazyCancellation ??= new CancellationTokenSource();
         try
         {
@@ -712,6 +719,14 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception error) { if (current == generation) SetStatus("Commit page unavailable: " + error.Message); }
+        finally
+        {
+            if (current == generation)
+            {
+                loadingHistoryPage = false;
+                if (loadMoreButton is not null) loadMoreButton.IsEnabled = true;
+            }
+        }
     }
 
     public void Dispose()
@@ -719,6 +734,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         if (disposed) return;
         disposed = true;
         refreshRunning = refreshPending = false;
+        loadingHistoryPage = false; loadMoreButton = null;
         UpdateRefreshIndicator();
         ++generation;
         ++refreshEpoch; invalidation.Reset();
