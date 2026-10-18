@@ -53,6 +53,8 @@ function Test-ContainsBytes([byte[]] $Bytes, [byte[]] $Pattern) {
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $sourcePath = Join-Path $PSScriptRoot 'GabCode.Preview.wxs'
 $applicationProject = Join-Path $repositoryRoot 'src\GabCode.Windows\GabCode.Windows.csproj'
+$viewerRoot = Join-Path $repositoryRoot 'shared\native-diff-viewer'
+$viewerOutput = Join-Path $viewerRoot 'dist'
 $iconRoot = Join-Path $repositoryRoot 'src\GabCode.Windows'
 $terminalRoot = Join-Path $repositoryRoot 'third_party\microsoft-terminal\v1.24.11911.0'
 $terminalManifestPath = Join-Path $terminalRoot 'manifest.json'
@@ -104,6 +106,25 @@ try {
     New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
     New-Item -ItemType Directory -Path $intermediatePath -Force | Out-Null
 
+    Push-Location $viewerRoot
+    try {
+        & npm ci --no-audit --no-fund
+        Assert-NativeSuccess 'npm ci for pinned Monaco viewer'
+        & npm run build
+        Assert-NativeSuccess 'npm run build for offline viewer'
+    }
+    finally {
+        Pop-Location
+    }
+    $viewerManifestPath = Join-Path $viewerOutput 'manifest.json'
+    if (-not (Test-Path -LiteralPath $viewerManifestPath -PathType Leaf)) {
+        throw 'Bundled native diff viewer manifest is missing after its clean build.'
+    }
+    $viewerManifest = Get-Content -LiteralPath $viewerManifestPath -Raw | ConvertFrom-Json
+    if ($viewerManifest.monaco -cne '0.57.0' -or @($viewerManifest.assets).Count -lt 10) {
+        throw 'Bundled viewer must contain pinned Monaco 0.57.0 and its offline assets.'
+    }
+
     Push-Location $repositoryRoot
     try {
         & dotnet tool restore
@@ -153,6 +174,42 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $publishPath $relativePath) -PathType Leaf)) {
             throw "Self-contained publish is missing required payload file '$relativePath'."
         }
+    }
+    $publishedViewer = Join-Path $publishPath 'NativeDiffViewer'
+    $publishedManifest = Join-Path $publishedViewer 'manifest.json'
+    if (-not (Test-Path -LiteralPath $publishedManifest -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $publishedManifest -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $viewerManifestPath -Algorithm SHA256).Hash) {
+        throw 'Published viewer manifest does not match the pinned clean build.'
+    }
+    $viewerPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    [void] $viewerPaths.Add('manifest.json')
+    foreach ($asset in $viewerManifest.assets) {
+        $relativePath = [string] $asset.path
+        if ($relativePath -notmatch '^[a-zA-Z0-9._/-]+$' -or
+            @($relativePath.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -ne 0 -or
+            -not $viewerPaths.Add($relativePath)) {
+            throw "Invalid viewer asset path: $relativePath"
+        }
+        foreach ($root in @($viewerOutput, $publishedViewer)) {
+            $assetPath = Join-Path $root $relativePath
+            if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf) -or
+                ((Get-Item -LiteralPath $assetPath -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                (Get-Item -LiteralPath $assetPath).Length -ne [long] $asset.bytes -or
+                (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash -cne ([string] $asset.sha256).ToUpperInvariant()) {
+                throw "Viewer asset '$relativePath' is missing, linked, or differs from the pinned manifest in '$root'."
+            }
+        }
+    }
+    $actualViewerPaths = @(Get-ChildItem -LiteralPath $publishedViewer -Recurse -File | ForEach-Object {
+        [System.IO.Path]::GetRelativePath($publishedViewer, $_.FullName).Replace('\', '/')
+    })
+    if ($actualViewerPaths.Count -ne $viewerPaths.Count -or @($actualViewerPaths | Where-Object { -not $viewerPaths.Contains($_) }).Count -ne 0) {
+        throw 'Published viewer includes unlisted files or omits pinned resources.'
+    }
+    $loader = Join-Path $publishPath 'runtimes\win-x64\native\WebView2Loader.dll'
+    if (-not (Test-Path -LiteralPath $loader -PathType Leaf)) {
+        throw 'Self-contained Windows publish is missing the x64 WebView2 loader (the system WebView2 Runtime remains a prerequisite).'
     }
 
     $forbiddenFiles = @(Get-ChildItem -LiteralPath $publishPath -Recurse -File | Where-Object {

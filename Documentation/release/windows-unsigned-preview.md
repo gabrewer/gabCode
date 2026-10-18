@@ -8,6 +8,7 @@ This document covers `gabCode-x.y.z-preview-windows-x64.msi`, the intentionally 
 - Per-user installation under `%LOCALAPPDATA%\Programs\gabCode`
 - No administrator elevation, machine-wide service, updater, or custom action
 - Self-contained .NET 10 desktop payload; the target does not need a preinstalled .NET 10 Desktop Runtime
+- Microsoft Edge **WebView2 Runtime** is a separate system prerequisite for the read-only Monaco diff viewer. The MSI includes the x64 WebView2 loader, not the browser runtime; if it is missing, the app displays native **Diff unavailable** with Retry rather than fetching resources or opening a browser.
 
 Windows ARM64, Windows on ARM emulation qualification, Windows 10, and machine-wide installation are not supported by this workflow.
 
@@ -75,7 +76,8 @@ The installed payload contains:
 
 - `licenses\gabCode\LICENSE.txt` — gabCode MIT license;
 - `licenses\microsoft-terminal\LICENSE.txt` — Microsoft Terminal MIT license;
-- `licenses\microsoft-terminal\NOTICE.md` — Microsoft Terminal third-party notices.
+- `licenses\microsoft-terminal\NOTICE.md` — Microsoft Terminal third-party notices;
+- `NativeDiffViewer\MONACO-LICENSE.txt` and `NativeDiffViewer\MONACO-THIRD-PARTY-NOTICES.txt` — the bundled pinned Monaco 0.57.0 viewer's license and upstream notices, alongside its HTML, stylesheet, JavaScript, workers and `manifest.json` asset hashes.
 
 The approved Terminal DLLs come from tag `v1.24.11911.0`; installed hashes must match `third_party/microsoft-terminal/v1.24.11911.0/manifest.json`.
 
@@ -96,7 +98,7 @@ pwsh -NoProfile -File eng/release/windows/Prepare-Preview.ps1 `
   -Version x.y.z-preview
 ```
 
-Preparation requires a clean working tree with no non-ignored changes and `HEAD == origin/main`. It runs repository restore/build/tests, builds the MSI through `Build-Preview.ps1`, and runs the bounded package/install/repair/later-patch upgrade/uninstall verification through `Test-Preview.ps1`.
+Preparation requires a clean working tree with no non-ignored changes and `HEAD == origin/main`. It uses `npm ci --no-audit --no-fund` with the viewer lockfile, builds/tests the offline viewer, runs repository restore/build/tests, rebuilds and verifies the same viewer resources in `Build-Preview.ps1`, and runs the bounded package/install/repair/later-patch upgrade/uninstall verification through `Test-Preview.ps1`. Build/publish and installed asset hashes are checked against the pinned manifest; generated npm packages, a CDN and a local HTTP server never ship.
 
 Successful preparation writes exactly this Windows pair while preserving a matching Mac pair already present:
 
@@ -139,4 +141,5 @@ Record target-machine results rather than inferring them from MSI source:
 - **Dynamic status and errors:** NOT CHECKED — requires an interactive failure/success flow.
 - **Contrast/scaling/reduced motion:** NOT CHECKED — no settings-transition scenario is automated.
 - **Terminal integration:** NOT CHECKED — requires Start-menu launch, both terminals rooted in the accepted installed application directory, close confirmation, and process cleanup.
+- **Viewer qualification:** NOT CHECKED — verify an installed/offline WebView2 document with Monaco workers/languages, missing WebView2 Runtime fallback, keyboard/Find, high contrast and Narrator separately from static package-hash verification.
 - **Human target-machine validation still needed:** yes — downloaded-file warning path, clean Windows 11 x64 launch without a preinstalled desktop runtime, keyboard-only native flow, terminal/exit cleanup, and exercised accessibility settings must be reported separately.

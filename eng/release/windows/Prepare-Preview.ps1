@@ -167,6 +167,20 @@ try {
     New-Item -ItemType Directory -Path $packageOutput -Force | Out-Null
     New-Item -ItemType Directory -Path $verificationOutput -Force | Out-Null
 
+    $viewerRoot = Join-Path $repositoryRoot 'shared\native-diff-viewer'
+    Push-Location $viewerRoot
+    try {
+        & npm ci --no-audit --no-fund
+        Assert-NativeSuccess 'npm ci for native-diff-viewer'
+        & npm run build
+        Assert-NativeSuccess 'npm run build for native-diff-viewer'
+        & npm test
+        Assert-NativeSuccess 'npm test for native-diff-viewer'
+    }
+    finally {
+        Pop-Location
+    }
+
     Push-Location $repositoryRoot
     try {
         & dotnet tool restore

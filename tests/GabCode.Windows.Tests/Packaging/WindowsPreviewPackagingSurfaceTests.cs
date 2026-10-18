@@ -10,6 +10,35 @@ public sealed class WindowsPreviewPackagingSurfaceTests
     private const string MsiNamePattern = "gabCode-x.y.z-preview-windows-x64.msi";
 
     [Fact]
+    public void Diff_viewer_publish_and_MSI_surface_carries_only_verified_pinned_offline_assets_and_notices()
+    {
+        var root = GetRepositoryRoot();
+        var project = XDocument.Load(Path.Combine(root, "src", "GabCode.Windows", "GabCode.Windows.csproj"));
+        var item = Assert.Single(project.Descendants("Content"), node =>
+            (string?)node.Attribute("Link") == @"NativeDiffViewer\%(RecursiveDir)%(Filename)%(Extension)");
+        Assert.Contains(@"shared\native-diff-viewer\dist", (string?)item.Attribute("Include"));
+        Assert.Equal("PreserveNewest", (string?)item.Attribute("CopyToPublishDirectory"));
+        var buildScript = File.ReadAllText(Path.Combine(root, "eng", "release", "windows", "Build-Preview.ps1"));
+        Assert.Contains("npm ci", buildScript, StringComparison.Ordinal);
+        Assert.Contains("NativeDiffViewer", buildScript, StringComparison.Ordinal);
+        Assert.Contains("$viewerManifest.assets", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Get-FileHash", buildScript, StringComparison.Ordinal);
+        var testScript = File.ReadAllText(Path.Combine(root, "eng", "release", "windows", "Test-Preview.ps1"));
+        Assert.Contains("NativeDiffViewer", testScript, StringComparison.Ordinal);
+        Assert.Contains("WebView2Loader.dll", testScript, StringComparison.Ordinal);
+        var assets = Path.Combine(AppContext.BaseDirectory, "NativeDiffViewer");
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(assets, "manifest.json")));
+        Assert.Equal("0.57.0", manifest.RootElement.GetProperty("monaco").GetString());
+        foreach (var entry in manifest.RootElement.GetProperty("assets").EnumerateArray())
+        {
+            var path = Path.Combine(assets, entry.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar));
+            var bytes = File.ReadAllBytes(path);
+            Assert.Equal(entry.GetProperty("bytes").GetInt64(), bytes.LongLength);
+            Assert.Equal(entry.GetProperty("sha256").GetString(), Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant());
+        }
+    }
+
+    [Fact]
     public void Windows_preview_packaging_surface_declares_the_pinned_Wix_tool_and_entry_points()
     {
         var root = GetRepositoryRoot();
