@@ -18,6 +18,70 @@ namespace GabCode.Windows.Tests.Projects;
 public sealed class ReadOnlyDiffWindowTests
 {
     [Fact]
+    public async Task Native_unavailable_keeps_retry_and_close_without_patch_fallback()
+    {
+        await OnSta(() =>
+        {
+            var view = new ReadOnlyDiffView("file.txt — Modified", null);
+            var window = new Window { Content = view, Width = 500, Height = 300, ShowInTaskbar = false };
+            window.Show();
+            try
+            {
+                var retries = 0;
+                view.RetryRequested += (_, _) => retries++;
+                view.ShowUnavailable("unsupported encoding");
+                view.UpdateLayout();
+                Assert.Contains(Descendants<TextBlock>(view), block => block.Text.Contains("Diff unavailable: unsupported encoding", StringComparison.Ordinal));
+                Assert.Empty(Descendants<TextBox>(view));
+                Assert.Single(Descendants<Button>(view), button => Equals(button.Content, "Close Diff"));
+                Assert.Single(Descendants<Button>(view), button => Equals(button.Content, "Retry"))
+                    .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Assert.Equal(1, retries);
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task Retained_native_document_marks_stale_without_silently_claiming_freshness()
+    {
+        await OnSta(() =>
+        {
+            var view = new ReadOnlyDiffView("file.txt — Modified", null);
+            var window = new Window { Content = view, Width = 500, Height = 300, ShowInTaskbar = false };
+            window.Show();
+            try
+            {
+                view.MarkStale("Git read timed out; previous snapshot retained.");
+                view.UpdateLayout();
+                Assert.Contains(Descendants<TextBlock>(view), block => block.Text.Contains("stale", StringComparison.OrdinalIgnoreCase));
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public void Review_mode_preference_round_trips_with_safe_default()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "gabcode mode " + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(folder, "mode.txt");
+        try
+        {
+            Assert.Equal("side-by-side", new DiffModePreference(path).Read());
+            new DiffModePreference(path).Write("inline");
+            Assert.Equal("inline", new DiffModePreference(path).Read());
+            new DiffModePreference(path).Write("file");
+            Assert.Equal("file", new DiffModePreference(path).Read());
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DiffModePreference(path).Write("edit"));
+            File.WriteAllText(path, "invalid");
+            Assert.Equal("side-by-side", new DiffModePreference(path).Read());
+        }
+        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+    }
+
+    [Fact]
     public async Task Staged_file_selection_opens_real_HEAD_to_index_in_embedded_viewer()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabcode staged viewer Ω " + Guid.NewGuid().ToString("N"));
@@ -58,6 +122,11 @@ public sealed class ReadOnlyDiffWindowTests
                     Assert.Equal("staged\n", pair.After);
                     Assert.Contains(Descendants<TextBlock>(view), block => block.Text.Contains("HEAD → index", StringComparison.Ordinal));
                     Assert.Equal("worktree-only\n", await File.ReadAllTextAsync(Path.Combine(root, "selected.txt")));
+                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "Inline"));
+                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "File"));
+                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "Next change"));
+                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "Find"));
+                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "Retry"));
                     Assert.Equal(piPid, first.ProcessId); Assert.Equal(commandPid, second.ProcessId);
                     view.ApplyTemplate(); view.UpdateLayout();
                     Assert.Single(Descendants<Button>(view), b => Equals(b.Content, "Close Diff"))
@@ -204,7 +273,15 @@ public sealed class ReadOnlyDiffWindowTests
                     var reopened = (ReadOnlyDiffView)((ContentControl)window.FindName("MainTerminalRegion")).Content;
                     reopened.ApplyTemplate(); reopened.UpdateLayout();
                     await File.WriteAllTextAsync(Path.Combine(root, "added.txt"), "second\n");
-                    await WaitUntil(() => Descendants<TextBox>(reopened).Any(box => box.Text.Contains("+second", StringComparison.Ordinal)));
+                    await WaitUntil(() => reopened.HasStagedViewer);
+                    var refreshedPair = await reopened.ReadViewerPairForTestAsync();
+                    for (var attempt = 0; attempt < 100 && refreshedPair.After != "second\n"; attempt++)
+                    {
+                        await Task.Delay(50);
+                        refreshedPair = await reopened.ReadViewerPairForTestAsync();
+                    }
+                    Assert.Equal("", refreshedPair.Before);
+                    Assert.Equal("second\n", refreshedPair.After);
                     Assert.Same(reopened, ((ContentControl)window.FindName("MainTerminalRegion")).Content);
                     File.Delete(Path.Combine(root, "added.txt"));
                     await WaitUntil(() => ((ContentControl)window.FindName("MainTerminalRegion")).Content is TerminalSessionView);
@@ -269,7 +346,10 @@ public sealed class ReadOnlyDiffWindowTests
                     var diff = (ReadOnlyDiffView)((ContentControl)window.FindName("MainTerminalRegion")).Content;
                     diff.ApplyTemplate(); diff.UpdateLayout();
                     Assert.Contains(Descendants<TextBlock>(diff), block => block.Text.Contains("first parent", StringComparison.Ordinal));
-                    await WaitUntil(() => Descendants<TextBox>(diff).Any(box => box.Text.Contains("+updated", StringComparison.Ordinal)));
+                    await WaitUntil(() => diff.HasStagedViewer);
+                    var pair = await diff.ReadViewerPairForTestAsync();
+                    Assert.Equal("base\n", pair.Before);
+                    Assert.Equal("updated\n", pair.After);
                 }
                 finally { window.Close(); await WaitUntil(() => !window.IsVisible); }
             });

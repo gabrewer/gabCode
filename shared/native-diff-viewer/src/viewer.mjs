@@ -14,6 +14,10 @@ globalThis.MonacoEnvironment = {
     return new URL(`./workers/${name}.js`, import.meta.url).href;
   },
 };
+const contrast = window.matchMedia('(forced-colors: active)');
+const applyTheme = () => monaco.editor.setTheme(contrast.matches ? 'hc-black' : 'vs-dark');
+contrast.addEventListener('change', applyTheme);
+applyTheme();
 const root = document.getElementById('document');
 const controls = document.createElement('div');
 controls.className = 'viewer-controls';
@@ -97,12 +101,13 @@ function gotoChange(direction) {
   editor?.revealLineInCenter(lastLine);
   updateStatus();
 }
-function setMode(mode) {
+function setMode(mode, preferredLine = null) {
   if (!['side-by-side', 'inline', 'file'].includes(mode) || !diff) return;
   const oldEditor = currentMode === 'file' ? fileEditor : diff.getModifiedEditor();
   const hadTextFocus = oldEditor?.hasTextFocus();
   const position = oldEditor?.getPosition();
-  if (position) lastLine = position.lineNumber;
+  if (preferredLine !== null) lastLine = preferredLine;
+  else if (position) lastLine = position.lineNumber;
   currentMode = mode;
   const isFile = mode === 'file';
   // Keep the underlying diff laid out so Monaco can compute the one change map in File mode.
@@ -125,9 +130,11 @@ function setMode(mode) {
 }
 function show(message) {
   if (message.generation < currentGeneration) return;
+  const previousEditor = currentMode === 'file' ? fileEditor : diff?.getModifiedEditor();
+  const retainLine = previousEditor?.getPosition()?.lineNumber ?? lastLine;
+  const retainFocus = previousEditor?.hasTextFocus() ?? false;
   currentGeneration = message.generation;
   currentIdentity = message.identity;
-  const retainLine = lastLine;
   clearTimeout(computationTimer);
   diffListener?.dispose();
   diff?.dispose(); fileEditor?.dispose(); original?.dispose(); modified?.dispose();
@@ -157,7 +164,7 @@ function show(message) {
     const result = diff.getDiffComputationResult();
     if (!result || result.quitEarly) {
       computing = false; unavailable = 'Diff unavailable: change computation exceeded its safety limit';
-      notify(makeViewerEvent('failure', { message: unavailable }));
+      notify(makeViewerEvent('failure', { message: unavailable, generation: currentGeneration, identity: currentIdentity }));
       updateStatus(); return;
     }
     clearTimeout(computationTimer);
@@ -172,11 +179,12 @@ function show(message) {
   computationTimer = setTimeout(() => {
     if (message.generation !== currentGeneration || message.identity !== currentIdentity || !computing) return;
     computing = false; unavailable = 'Diff unavailable: change computation timed out';
-    notify(makeViewerEvent('failure', { message: unavailable })); updateStatus();
+    notify(makeViewerEvent('failure', { message: unavailable, generation: currentGeneration, identity: currentIdentity })); updateStatus();
   }, 7000);
   lastLine = Math.max(1, Math.min(modified.getLineCount(), retainLine));
   root.setAttribute('aria-label', `Read-only ${message.beforeLabel} to ${message.afterLabel} diff for ${message.path}`);
-  setMode(message.mode);
+  setMode(message.mode, retainLine);
+  if (retainFocus) (currentMode === 'file' ? fileEditor : diff?.getModifiedEditor())?.focus();
 }
 function receive(raw) {
   const message = acceptHostMessage(raw);
@@ -186,8 +194,10 @@ function receive(raw) {
     else if (message.generation === currentGeneration && message.identity === currentIdentity) {
       if (message.kind === 'mode') setMode(message.mode);
       if (message.kind === 'change') gotoChange(message.direction === 'next' ? 1 : -1);
+      if (message.kind === 'find') (currentMode === 'file' ? fileEditor : diff?.getModifiedEditor())?.getAction('actions.find')?.run();
+      if (message.kind === 'focus') (currentMode === 'file' ? fileEditor : diff?.getModifiedEditor())?.focus();
     }
-  } catch (error) { notify(makeViewerEvent('failure', { message: String(error).slice(0, 2048) })); }
+  } catch (error) { notify(makeViewerEvent('failure', { message: String(error).slice(0, 2048), generation: message.generation, identity: message.identity })); }
 }
 previous.addEventListener('click', () => gotoChange(-1));
 next.addEventListener('click', () => gotoChange(1));
@@ -199,5 +209,10 @@ window.addEventListener('message', event => {
 window.gabCodeViewer = {
   show: receive,
   models: () => original && modified ? { before: original.getValue(), after: modified.getValue(), mode: currentMode } : null,
+  line: line => {
+    const editor = currentMode === 'file' ? fileEditor : diff?.getModifiedEditor();
+    if (Number.isSafeInteger(line) && line >= 1) editor?.setPosition({ lineNumber: line, column: 1 });
+    return editor?.getPosition()?.lineNumber ?? 1;
+  },
 };
 notify(makeViewerEvent('ready'));

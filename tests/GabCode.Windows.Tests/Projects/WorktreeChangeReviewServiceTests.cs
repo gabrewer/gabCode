@@ -112,6 +112,8 @@ public sealed class WorktreeChangeReviewServiceTests
             new ReviewFile("untracked.txt", null, ReviewGroup.Unstaged, ReviewStatus.Untracked), "trunk");
         Assert.Equal("", untracked.Before);
         Assert.Equal("", untracked.After);
+        Assert.False(untracked.BeforeExists);
+        Assert.True(untracked.AfterExists);
         var historical = await service.GetReviewDocumentAsync(repo.Path,
             new ReviewFile("file.txt", null, ReviewGroup.Commit, ReviewStatus.Modified, selectedSha), "trunk");
         Assert.Equal("base\n", historical.Before);
@@ -236,6 +238,8 @@ public sealed class WorktreeChangeReviewServiceTests
             new ReviewFile("old.txt", null, ReviewGroup.Commit, ReviewStatus.Added, rootSha), "trunk");
         Assert.Equal("", initial.Before);
         Assert.Equal("first\n", initial.After);
+        Assert.Equal("empty tree → selected commit", initial.Comparison);
+        Assert.False(initial.BeforeExists);
         await repo.Git("mv", "old.txt", "new.txt");
         await repo.Git("commit", "-m", "rename");
         var renameSha = (await repo.Git("rev-parse", "HEAD")).Trim();
@@ -250,6 +254,7 @@ public sealed class WorktreeChangeReviewServiceTests
             new ReviewFile("new.txt", null, ReviewGroup.Commit, ReviewStatus.Deleted, deleteSha), "trunk");
         Assert.Equal("first\n", deleted.Before);
         Assert.Equal("", deleted.After);
+        Assert.False(deleted.AfterExists);
     }
 
     [Fact]

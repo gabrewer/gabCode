@@ -66,7 +66,7 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
         if (!Uri.TryCreate(source, UriKind.Absolute, out var uri) ||
             !Uri.TryCreate(expectedOrigin, UriKind.Absolute, out var expected) ||
             uri.Scheme != expected.Scheme || uri.Host != expected.Host || uri.Port != expected.Port ||
-            json.Length > 2200) return false;
+            json.Length > 2800) return false;
         try
         {
             using var message = JsonDocument.Parse(json);
@@ -74,8 +74,12 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String) return false;
             var name = kind.GetString();
             if (name == "ready") return root.EnumerateObject().Count() == 1;
-            if (name != "failure" || root.EnumerateObject().Count() != 2 || !root.TryGetProperty("message", out var detail)) return false;
-            return detail.ValueKind == JsonValueKind.String && detail.GetString() is { Length: <= 2048 };
+            if (name != "failure" || root.EnumerateObject().Count() != 4 ||
+                !root.TryGetProperty("message", out var detail) || !root.TryGetProperty("generation", out var generation) ||
+                !root.TryGetProperty("identity", out var identity)) return false;
+            return detail.ValueKind == JsonValueKind.String && detail.GetString() is { Length: <= 2048 } &&
+                generation.ValueKind == JsonValueKind.Number && generation.TryGetInt64(out var value) && value is >= 0 and <= 9007199254740991L &&
+                identity.ValueKind == JsonValueKind.String && identity.GetString() is { Length: > 0 and <= 512 };
         }
         catch (JsonException) { return false; }
     }
@@ -137,7 +141,9 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
                 if (!IsAllowedViewerMessage(args.Source, args.WebMessageAsJson, Origin)) return;
                 using var message = JsonDocument.Parse(args.WebMessageAsJson);
                 if (message.RootElement.GetProperty("kind").GetString() == "ready") ready.TrySetResult();
-                else Unavailable?.Invoke(this, message.RootElement.GetProperty("message").GetString() ?? "Viewer failed.");
+                else if (message.RootElement.GetProperty("generation").GetInt64() == selectedGeneration &&
+                         message.RootElement.GetProperty("identity").GetString() == selectedIdentity)
+                    Unavailable?.Invoke(this, message.RootElement.GetProperty("message").GetString() ?? "Viewer failed.");
             };
             core.Navigate(Origin + "index.html");
             await ready.Task.WaitAsync(work.Token);
@@ -181,6 +187,27 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
         }));
     }
 
+    internal async Task SendControlAsync(long generation, string identity, string kind, string value = "", CancellationToken token = default)
+    {
+        if (kind is not ("mode" or "change" or "find" or "focus") ||
+            kind == "mode" && value is not ("side-by-side" or "inline" or "file") ||
+            kind == "change" && value is not ("next" or "previous") ||
+            (kind is "find" or "focus") && value.Length != 0)
+            throw new ArgumentException("Unsupported viewer control.");
+        using var work = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
+        await ready.Task.WaitAsync(work.Token);
+        work.Token.ThrowIfCancellationRequested();
+        if (disposed || generation != selectedGeneration || identity != selectedIdentity)
+            throw new OperationCanceledException("Review selection changed.");
+        if (kind == "focus") webView.Focus();
+        webView.CoreWebView2.PostWebMessageAsJson(kind switch
+        {
+            "mode" => JsonSerializer.Serialize(new { kind, generation, identity, mode = value }),
+            "change" => JsonSerializer.Serialize(new { kind, generation, identity, direction = value }),
+            _ => JsonSerializer.Serialize(new { kind, generation, identity })
+        });
+    }
+
     internal async Task AttemptTypingForTestAsync()
     {
         await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
@@ -201,6 +228,25 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
             await Task.Delay(50);
         }
         throw new TimeoutException("Monaco did not compute the shared change map: " + last);
+    }
+
+    internal async Task SetLineForTestAsync(int line)
+    {
+        if (line is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(line));
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        await webView.ExecuteScriptAsync($"window.gabCodeViewer?.line({line})");
+    }
+
+    internal async Task<int> WaitForLineForTestAsync(int line)
+    {
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        for (var attempt = 0; attempt < 80; attempt++)
+        {
+            var json = await webView.ExecuteScriptAsync("window.gabCodeViewer?.line(null)");
+            if (JsonSerializer.Deserialize<int?>(json) is { } actual && actual == line) return actual;
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("Review position did not survive the snapshot replacement.");
     }
 
     internal async Task<string> WaitForModeForTestAsync(string expectedMode)

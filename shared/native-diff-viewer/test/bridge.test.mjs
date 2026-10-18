@@ -31,10 +31,18 @@ test('mode and change-position controls must match selected immutable generation
     { kind: 'change', generation: 3, identity: snapshot.identity, direction: 'next' });
   assert.equal(acceptHostMessage({ kind: 'change', generation: 3, identity: snapshot.identity, direction: 'save' }), null);
   assert.equal(acceptHostMessage({ kind: 'mode', generation: 3, identity: snapshot.identity, mode: 'edit' }), null);
+  for (const kind of ['find', 'focus']) {
+    assert.deepEqual(acceptHostMessage({ kind, generation: 3, identity: snapshot.identity }),
+      { kind, generation: 3, identity: snapshot.identity });
+    assert.equal(acceptHostMessage({ kind, generation: 3, identity: snapshot.identity, command: 'write' }), null);
+  }
 });
 
 test('viewer emits only bounded ready or failure events (never file operations)', () => {
   assert.deepEqual(makeViewerEvent('ready'), { kind: 'ready' });
   assert.equal(makeViewerEvent('open-file', { path: 'x' }), null);
-  assert.equal(makeViewerEvent('failure', { message: 'x'.repeat(2049) }), null);
+  assert.equal(makeViewerEvent('failure', { message: 'x'.repeat(2049), generation: 3, identity: 'selected' }), null);
+  assert.equal(makeViewerEvent('failure', { message: 'no scope' }), null);
+  assert.deepEqual(makeViewerEvent('failure', { message: 'unavailable', generation: 3, identity: 'selected' }),
+    { kind: 'failure', message: 'unavailable', generation: 3, identity: 'selected' });
 });
