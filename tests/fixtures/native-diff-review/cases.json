@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "staged-result-not-worktree",
+      "given": {"context": "staged", "path": "src/app.cs", "head": "committed\n", "index": "staged\n", "worktree": "unstaged\n"},
+      "expected": {"before": "committed\n", "after": "staged\n", "comparison": "HEAD → index", "fileResult": "staged\n"}
+    },
+    {
+      "id": "unstaged-result-is-worktree",
+      "given": {"context": "unstaged", "path": "src/app.cs", "head": "committed\n", "index": "staged\n", "worktree": "unstaged\n"},
+      "expected": {"before": "staged\n", "after": "unstaged\n", "comparison": "index → worktree", "fileResult": "unstaged\n"}
+    },
+    {
+      "id": "untracked-result-is-not-load-failure",
+      "given": {"context": "untracked", "path": "empty.txt", "worktree": ""},
+      "expected": {"before": "", "after": "", "comparison": "empty → worktree", "state": "text", "fileResult": ""}
+    },
+    {
+      "id": "historical-commit-is-not-current-file",
+      "given": {"context": "commit", "path": "history.txt", "firstParent": "previous\n", "selectedCommit": "historical\n", "worktree": "today\n"},
+      "expected": {"before": "previous\n", "after": "historical\n", "comparison": "first parent → selected commit", "fileResult": "historical\n"}
+    },
+    {
+      "id": "branch-basis-is-local-merge-base",
+      "given": {"context": "branch", "configuredLocalMain": "trunk", "mergeBase": "base", "selectedHead": "tip", "path": "branch.txt", "baseContent": "old\n", "tipContent": "new\n"},
+      "expected": {"before": "old\n", "after": "new\n", "comparison": "base → tip", "fileResult": "new\n"}
+    },
+    {
+      "id": "rename-preserves-both-paths",
+      "given": {"context": "commit", "oldPath": "old name.txt", "path": "new name.txt", "before": "old\n", "after": "new\n"},
+      "expected": {"oldPath": "old name.txt", "path": "new name.txt", "comparison": "first parent → selected commit", "before": "old\n", "after": "new\n"}
+    },
+    {
+      "id": "byte-difference-must-not-disappear",
+      "given": {"context": "unstaged", "beforeBytesHex": "EFBBBF6C696E650D0A", "afterBytesHex": "6C696E65"},
+      "expected": {"before": "line\r\n", "after": "line", "beforeBom": true, "afterBom": false, "beforeFinalNewline": true, "afterFinalNewline": false, "differenceVisibleAsTextOrStatus": true}
+    },
+    {
+      "id": "unsupported-encoding-is-not-replaced",
+      "given": {"context": "unstaged", "afterBytesHex": "FFFE6100"},
+      "expected": {"state": "unavailable", "reason": "unsupported text encoding", "replacementCharacters": false}
+    },
+    {
+      "id": "filter-managed-content-is-raw",
+      "given": {"context": "staged", "path": "filtered.txt", "configuredFilter": "custom", "storedBytes": "pointer\n", "worktreeBytes": "hydrated\n"},
+      "expected": {"after": "pointer\n", "filterExecuted": false, "label": "Raw content — Git filters not applied"}
+    },
+    {
+      "id": "changing-index-retries-coherent-pair",
+      "given": {"context": "staged", "path": "src/app.cs", "head": "committed\n", "indexAtStart": "first\n", "indexAtFinish": "second\n"},
+      "expected": {"mixedPairPublished": false, "action": "retry or unavailable with retained stale label"}
+    },
+    {
+      "id": "missing-file-does-not-reuse-prior-selection",
+      "given": {"context": "unstaged", "selectedPath": "gone.txt", "fileRemovedDuringRead": true},
+      "expected": {"state": "unavailable", "oldDocumentPublishedForMissingFile": false}
+    },
+    {
+      "id": "branch-without-unique-base-is-unavailable",
+      "given": {"context": "branch", "configuredLocalMain": "missing", "path": "src/app.cs"},
+      "expected": {"state": "unavailable", "arbitraryBaseSelected": false}
+    },
+    {
+      "id": "late-result-cannot-replace-selection",
+      "given": {"requestGeneration": 1, "selectedGeneration": 2, "oldWorktree": "wtA", "selectedWorktree": "wtB", "sameRelativePath": "src/app.cs"},
+      "expected": {"oldResultApplied": false, "visibleWorktree": "wtB"}
+    }
+  ]
+}
