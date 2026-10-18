@@ -22,7 +22,7 @@ Do not implement product code.
 
 - Use `github-issues` as the repository-configured state backend without prompting. If an existing planning record declares another backend, stop and ask the user to resolve the conflict rather than using it.
 - Inspect the repository before proposing paths or commands.
-- Identify the owning workstream: Windows client, macOS client, or explicit shared specification/fixture work. `Documentation/design/2026-10-18-native-diff-review-prd.md` records the sole scoped exception for shared bundled read-only Monaco viewer code/assets; plan that as a shared prerequisite with separate native host increments. Do not generalize it into a shared production core, service, sidecar, or client/core protocol without a new human-approved architecture decision.
+- Identify the owning workstream: Windows client, macOS client, or explicit shared specification/fixture work. `Documentation/design/2026-10-18-native-diff-review-prd.md` records the sole scoped exception for shared bundled read-only Monaco viewer code/assets; plan the shared viewer together with the Windows WebView2 host first, then the dependent Mac WKWebView host after the shared/Windows increment is merged and rebased. Do not generalize it into a shared production core, service, sidecar, or client/core protocol without a new human-approved architecture decision.
 - Preserve unrelated working-tree changes and existing agent resources.
 - If the request is ambiguous, discuss it with the user before creating authoritative artifacts.
 

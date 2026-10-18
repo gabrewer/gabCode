@@ -8,7 +8,7 @@
 
 This document defines gabCode's initial product boundary and direction. It should evolve when foundational product decisions change. Substantial new capabilities should receive focused PRDs under `Documentation/design` rather than turning this document into an exhaustive specification.
 
-The approved independent-native-client decision is recorded in `Documentation/design/2026-08-02-independent-native-clients-prd.md`. Windows and macOS normally share product requirements and conformance cases, not production runtime code or companion services. The focused `Documentation/design/2026-10-18-native-diff-review-prd.md` records a later, narrowly scoped decision to share only the bundled, read-only Monaco diff-viewer HTML/CSS/JavaScript/assets inside both native applications; see the architecture exception below.
+The approved independent-native-client decision is recorded in `Documentation/design/2026-08-02-independent-native-clients-prd.md`. Windows and macOS normally share product requirements and conformance cases, not production runtime code or companion services. The focused `Documentation/design/2026-10-18-native-diff-review-prd.md` records a later, narrowly scoped decision to share only the bundled, read-only Monaco diff-viewer HTML/CSS/JavaScript/assets inside both native applications, with the shared viewer and first WebView2 host implemented on Windows before the dependent WKWebView host on Mac; see the architecture exception below.
 
 ## Product Name & One-Liner
 
