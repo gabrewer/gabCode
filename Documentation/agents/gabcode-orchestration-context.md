@@ -20,8 +20,8 @@ If this file appears to redefine a canonical workflow or product decision, defer
 | Product | Native desktop navigator and observer for Git worktrees |
 | Windows client | Complete C#/WPF application; owns Windows UX, terminals, direct Git/`gh`, normalization, watchers/reconciliation, local data, diagnostics, and cleanup |
 | macOS client | Complete Swift/SwiftUI/AppKit application; owns equivalent behavior with native macOS facilities |
-| Shared cross-platform artifacts | Requirements, vocabulary, language-neutral conformance inputs, and expected outcomes; no shared production runtime code |
-| Internal runtime boundary | None; no gabCode companion sidecar or client/core protocol |
+| Shared cross-platform artifacts | Requirements, vocabulary, language-neutral conformance inputs and expected outcomes; one limited shared production artifact is the bundled read-only Monaco diff viewer under `Documentation/design/2026-10-18-native-diff-review-prd.md` |
+| Internal runtime boundary | No companion sidecar, cross-platform core or general client/core protocol; the embedded diff viewer has only a restricted, validated native-host message seam |
 | External authorities | Installed `git`, authenticated read-only `gh`, and the filesystem |
 | Terminal model | Ordinary user-controlled shells; gabCode does not interpret Pi output or manage Pi sessions |
 | Repository state | Real Windows and macOS build/test surfaces exist; native data foundations and conformance fixtures require later approved increments |
@@ -50,11 +50,11 @@ Planning should identify one owning workstream:
 
 - **Windows client** — the complete C#/WPF application, including Windows Terminal control/ConPTY, direct Git/`gh`, normalization, watchers/reconciliation, local data, native process behavior, and UX.
 - **macOS client** — the complete Swift/SwiftUI/AppKit application, including SwiftTerm/Unix PTY, direct Git/`gh`, normalization, watchers/reconciliation, local data, native process behavior, and UX.
-- **Shared specification/fixtures** — durable behavior vocabulary, language-neutral conformance inputs, and expected outcomes only; never a production source project or runtime service.
+- **Shared specification/fixtures and scoped viewer** — durable behavior vocabulary, language-neutral conformance inputs and expected outcomes; for the approved diff-viewer exception only, a shared bundled Monaco HTML/CSS/JavaScript viewer may be built and packaged by each native client. Never create a shared native core or runtime service.
 
-Windows and macOS implementation must be planned as separate platform increments and validated on their respective operating systems. For a PRD that genuinely requires both, create a parent control sprint plus linked Windows and macOS implementation sprints: the parent owns combined scope/acceptance, shared vocabulary/fixtures, dependencies, parity, intentional differences, and child status; each child owns only its complete native implementation and target-OS evidence. Do not create empty triads for platform-only, documentation-only, or insufficiently shaped work. Shared specification or fixture work must be explicit and cannot hide production implementation inside a cross-platform task. A new internal runtime boundary requires a separate human-approved architecture decision. A direct user instruction to execute a named sprint/task is sufficient approval to build; stale GitHub issue status text must not create a second approval gate. After merged shared prerequisites are rebased into the platform branches, Windows and macOS work should proceed with minimal coordination friction while retaining independent target-platform evidence.
+Windows and macOS implementation must be planned as separate platform increments and validated on their respective operating systems. For a PRD that genuinely requires both, create a parent control sprint plus linked Windows and macOS implementation sprints: the parent owns combined scope/acceptance, shared vocabulary/fixtures, dependencies, parity, intentional differences, and child status; each child owns only its complete native implementation and target-OS evidence. Do not create empty triads for platform-only, documentation-only, or insufficiently shaped work. Shared specification, fixtures and the expressly approved Monaco viewer must be explicit rather than hiding platform production implementation inside a cross-platform task. The viewer owns presentation only; native hosts, Git/file adapters, validation, accessibility evidence and packaging stay platform-owned. Any further internal runtime boundary requires a separate human-approved architecture decision. A direct user instruction to execute a named sprint/task is sufficient approval to build; stale GitHub issue status text must not create a second approval gate. After merged shared prerequisites are rebased into the platform branches, Windows and macOS work should proceed with minimal coordination friction while retaining independent target-platform evidence.
 
-Shared artifact delivery follows **Shared-first synchronization for native platform work** in `TEAM-ORCHESTRATION.md`: land the PRD, fixtures, and related shared configuration together through a reviewed mainline PR, then have each platform agent rebase onto updated mainline and validate its own consumers. Agents track availability and synchronization in the parent issue; the user should not need fixture-only branches, manual SHA distribution, or routine cherry-picks.
+Shared artifact delivery follows **Shared-first synchronization for native platform work** in `TEAM-ORCHESTRATION.md`: land the PRD, fixtures, related shared configuration and (only for the approved diff-viewer exception) shared viewer code/assets together through a reviewed mainline PR, then have each platform agent rebase onto updated mainline and validate its own consumers. Agents track availability and synchronization in the parent issue; the user should not need fixture-only branches, manual SHA distribution, or routine cherry-picks.
 
 Because this is a greenfield repository, plans must inspect the repository before naming project paths or commands. If a workstream has no real build surface, its first task should establish and verify one. Do not create downstream verification scripts against hypothetical projects.
 
@@ -83,12 +83,12 @@ Use the canonical worker names from `TEAM-ORCHESTRATION.md` unless a later resou
 | `api-developer` | Explicitly approved typed boundaries or language-neutral artifact schemas; there is no default internal client/core API |
 | `test-writer` | Repository-native tests across target-owned process, filesystem, Git, `gh`, watcher, PTY, accessibility, and shared logical fixture boundaries as applicable |
 | `backend-builder` | Reserved guardrail for a future explicitly approved backend architecture; it owns no current gabCode production work |
-| `frontend-builder` | Complete native-client work for the task's declared Windows or macOS platform; not a web frontend |
+| `frontend-builder` | Complete native-client work for the task's declared Windows or macOS platform, including its embedded diff-viewer host when assigned; not a general web frontend |
 | `destroyer` | Adversarial checks focused on task-owned native lifecycle, Git safety, parity drift, and product-boundary risks |
 | `review-agent` | Triage against the PRD, approved plan, platform evidence, and canonical review rules |
 | `git-committer` | Reviewed commits by default; explicit human-directed commit/push checkpoints without readiness-gate vetoes, following `TEAM-ORCHESTRATION.md`; honest evidence and branch-size reporting |
 
-Preserve the canonical `frontend-builder` identity for both native platforms rather than creating `windows-builder` or `macos-builder` automatically. Do not create a `shared-core-builder`; shared specifications and fixtures are artifacts, not another production workstream.
+Preserve the canonical `frontend-builder` identity for both native platforms rather than creating `windows-builder` or `macos-builder` automatically. Do not create a `shared-core-builder`; the single shared viewer is a scoped presentation artifact, not a general production core. Plan it as an explicit shared prerequisite, then keep native host work in separate target-OS increments.
 
 Existing `brainstorm` and `inspire` skills are product-thinking utilities, not replacements for `/pm-agent` or `/team-lead`. Preserve them unless a separate review approves changes.
 
@@ -168,5 +168,5 @@ When this profile is used to generate Pi resources:
 - use Pi paths and mechanics from `TOOL-PI.md`;
 - reference the initial PRD for product details;
 - do not invent source paths, build commands, issues, scripts, or mappings;
-- route complete production behavior to one declared native platform and keep shared specifications/fixtures free of production runtime code;
+- route Git, terminal, state, hosting, and native production behavior to one declared platform; only the explicitly approved read-only Monaco viewer may share presentation code;
 - keep generated skills focused on role-specific deltas rather than generic personas or repeated project documentation.

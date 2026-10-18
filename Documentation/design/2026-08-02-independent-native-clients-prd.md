@@ -257,9 +257,13 @@ In a separate macOS-only approved increment, implement equivalent behavior in Sw
 | One platform advances faster | Mark parity gaps explicitly; never claim cross-platform completion from one platform's evidence. |
 | Future pressure recreates a hidden shared service | Require a new human-approved architecture PRD before introducing any runtime-sharing boundary. |
 
+## Later scoped exception — read-only diff viewer (2026-10-18)
+
+The independent-native-client decision remains in force for Git/`gh`, filesystem, worktree state, terminals, persistence, window ownership and native hosting. The human subsequently chose one narrow exception for `Documentation/design/2026-10-18-native-diff-review-prd.md`: the same bundled read-only Monaco HTML/CSS/JavaScript and language assets may be shared by both applications, each hosted separately in WebView2 or WKWebView. Platform-owned adapters independently supply bounded comparison snapshots and validate the restricted viewer/host seam. There is still no companion service, shared native core, sidecar or general internal client/core protocol. This records the later decision without rewriting the historical 2026-08-02 approval. The exception and related guidance require review and merge before dependent platform implementation.
+
 ## Open Questions
 
-There are no unresolved questions about the independent-native-client boundary. Fixture schemas, exact paths, and platform implementation increments must be established by later repository-aware planning rather than invented in this PRD.
+There are no unresolved questions about the original independent-native-client boundary. Fixture schemas, exact paths, and platform implementation increments must be established by later repository-aware planning rather than invented in this PRD.
 
 ## Decision Log
 
