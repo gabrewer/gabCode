@@ -21,7 +21,7 @@ Read the approved sprint record and the task-named files before changing code.
 - gabCode is a native Windows and macOS desktop application, not a web application.
 - The Windows client is a complete C#/WPF application and owns Windows UI, terminal hosting, direct Git/`gh` integration, normalized state, watchers/reconciliation, preferences, and associations.
 - The macOS client is a complete Swift/SwiftUI/AppKit application and owns the equivalent macOS behavior with native platform facilities.
-- Windows and macOS share requirements, vocabulary, language-neutral fixtures, and expected outcomes—not production runtime code, a companion sidecar, or an internal client/core protocol.
+- Windows and macOS share requirements, vocabulary, language-neutral fixtures, and expected outcomes. The sole scoped production-code exception is the bundled, read-only Monaco diff-viewer HTML/CSS/JavaScript/assets in `Documentation/design/2026-10-18-native-diff-review-prd.md`, independently hosted by each native app. No shared Git/filesystem core, companion sidecar, service, or general internal client/core protocol.
 - Plan and validate Windows and macOS implementation as separate target-platform increments; one platform's evidence does not prove the other.
 - Git, the filesystem, and read-only `gh` queries remain authoritative. Do not turn local metadata into a competing source of truth.
 - gabCode observes source, PRDs, issues, commits, and diffs. It does not edit them or interpret/manage Pi sessions.
@@ -31,7 +31,7 @@ Read the approved sprint record and the task-named files before changing code.
 - Inspect the repository before naming source paths or build, test, launch, or verification commands.
 - If a workstream has no build surface, establish one before creating downstream scripts that depend on it.
 - Validate platform behavior on its target operating system and report unavailable checks as `NOT CHECKED`.
-- Do not introduce web frameworks, HTTP services, databases, Marten/event sourcing, Vitest, or Playwright from generic examples unless an approved design requires them.
+- Do not introduce web frameworks, HTTP services, databases, Marten/event sourcing, Vitest, or Playwright from generic examples unless an approved design requires them. The narrowly scoped embedded Monaco diff viewer is not approval to turn gabCode into a web application or move native responsibilities into the webview.
 - Use supported package-manager commands rather than manually editing generated dependency state.
 - Preserve unrelated working-tree changes. Never use broad cleanup or reset commands to discard work you do not own.
 
@@ -45,7 +45,7 @@ Read the approved sprint record and the task-named files before changing code.
 - Do not use filesystem-backed orchestration state unless a human explicitly changes this repository policy.
 - Keep `.pi/tmp/` drafts and tool runtime state untracked.
 - Never close GitHub issues or apply final completion labels; prepare evidence for human disposition.
-- Shared requirements, fixtures, and related configuration land together through one reviewed PR to mainline before dependent platform implementation. Reuse the existing shared feature branch; do not require fixture-only branches, manual SHA handoffs, or routine cherry-picks. Agents own synchronization using the shared-first workflow in `TEAM-ORCHESTRATION.md`.
+- Shared requirements, fixtures, related configuration, and the explicitly approved shared viewer code/assets land together through one reviewed PR to mainline before dependent platform implementation. Reuse the existing shared feature branch; do not require fixture-only branches, manual SHA handoffs, or routine cherry-picks. Agents own synchronization using the shared-first workflow in `TEAM-ORCHESTRATION.md`.
 - Before dependent Windows/macOS increments, fetch mainline and rebase the platform feature branch onto it while preserving uncommitted work. Record each platform's synchronization and conformance-test status in the parent issue; do not claim the other machine is updated without evidence. Once shared prerequisites are merged and present on the rebased branch, both platform increments may proceed in parallel or sequence from the user's instruction without another approval gate.
 - Never push directly to `main` or `master`. Use a feature branch and follow repository rebase-only synchronization rules.
 - Passing tests and commits are implementation evidence, not human acceptance.

@@ -22,7 +22,7 @@ Do not implement product code.
 
 - Use `github-issues` as the repository-configured state backend without prompting. If an existing planning record declares another backend, stop and ask the user to resolve the conflict rather than using it.
 - Inspect the repository before proposing paths or commands.
-- Identify the owning workstream: Windows client, macOS client, or explicit shared specification/fixture work. Do not plan a shared production runtime, sidecar, or internal client/core protocol without a new human-approved architecture decision.
+- Identify the owning workstream: Windows client, macOS client, or explicit shared specification/fixture work. `Documentation/design/2026-10-18-native-diff-review-prd.md` records the sole scoped exception for shared bundled read-only Monaco viewer code/assets; plan that as a shared prerequisite with separate native host increments. Do not generalize it into a shared production core, service, sidecar, or client/core protocol without a new human-approved architecture decision.
 - Preserve unrelated working-tree changes and existing agent resources.
 - If the request is ambiguous, discuss it with the user before creating authoritative artifacts.
 
@@ -43,8 +43,8 @@ Only raise review items that materially affect the implementation.
 - Do not invent source projects, test projects, package paths, commands, issue numbers, scripts, or task mappings.
 - For a greenfield workstream, make establishing a real build/test/launch surface the first increment before planning dependent work.
 - Keep Windows and macOS implementation in separate platform increments with target-machine evidence.
-- Make shared specification, vocabulary, fixture, or artifact-schema work explicit rather than hiding it in a platform task; do not turn it into a shared production runtime boundary.
-- Follow `TEAM-ORCHESTRATION.md`'s shared-first synchronization: group the PRD, fixtures, and related shared configuration in one prerequisite PR to mainline, reusing the existing feature branch when suitable. Platform tasks depend on that PR being merged and their branches rebased onto updated mainline—not manual SHA handoffs or routine cherry-picks. Keep synchronization status in the existing parent issue.
+- Make shared specification, vocabulary, fixture, artifact-schema, and the explicitly approved Monaco viewer work visible rather than hiding them in a platform task; do not turn them into a shared Git/filesystem core or runtime service.
+- Follow `TEAM-ORCHESTRATION.md`'s shared-first synchronization: group the PRD, fixtures, related shared configuration, and any explicitly approved shared viewer code/assets in one prerequisite PR to mainline, reusing the existing feature branch when suitable. Platform tasks depend on that PR being merged and their branches rebased onto updated mainline—not manual SHA handoffs or routine cherry-picks. Keep synchronization status in the existing parent issue.
 - Treat terminal dependency feasibility, licensing, packaging, lifecycle, input, and accessibility as evidence-bearing risks when relevant.
 - Apply the state-backend structure, task definition, quality gates, and PR-size checkpoints from `TEAM-ORCHESTRATION.md`. A direct user instruction to execute a named sprint/task is sufficient approval; do not add a redundant approval gate because an issue body or title has stale `planning`, `blocked`, or `unapproved` wording. Preserve human acceptance and merge/push safety boundaries.
 - Create one GitHub sprint/control issue per PRD by default. For a genuinely cross-platform PRD, make it the parent control sprint and create linked Windows and macOS implementation sprints; the parent owns combined acceptance/parity and each child owns only its platform implementation/evidence. Do not create empty triads for platform-only, documentation-only, or insufficiently shaped work. Record every split's reason/link and apply canonical review-size checkpoints.

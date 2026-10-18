@@ -8,7 +8,7 @@
 
 This document defines gabCode's initial product boundary and direction. It should evolve when foundational product decisions change. Substantial new capabilities should receive focused PRDs under `Documentation/design` rather than turning this document into an exhaustive specification.
 
-The approved independent-native-client decision is recorded in `Documentation/design/2026-08-02-independent-native-clients-prd.md`. Windows and macOS share product requirements and conformance cases, but no production runtime code or companion service.
+The approved independent-native-client decision is recorded in `Documentation/design/2026-08-02-independent-native-clients-prd.md`. Windows and macOS normally share product requirements and conformance cases, not production runtime code or companion services. The focused `Documentation/design/2026-10-18-native-diff-review-prd.md` records a later, narrowly scoped decision to share only the bundled, read-only Monaco diff-viewer HTML/CSS/JavaScript/assets inside both native applications; see the architecture exception below.
 
 ## Product Name & One-Liner
 
@@ -195,10 +195,10 @@ gabCode will not:
 
 - **Windows application:** A complete C#/WPF application that owns native UI, terminal hosting, direct tool integration, normalized state, watching/reconciliation, local data, diagnostics, cancellation, and cleanup.
 - **macOS application:** A complete Swift/SwiftUI/AppKit application that owns the equivalent behavior with native macOS APIs and conventions.
-- **Shared repository artifacts:** Product requirements, vocabulary, language-neutral conformance inputs, and expected normalized outcomes—not production runtime code.
+- **Shared repository artifacts:** Product requirements, vocabulary, language-neutral conformance inputs, and expected normalized outcomes. The sole approved production-code exception is the locally bundled, read-only Monaco diff-viewer HTML/CSS/JavaScript/assets described in `Documentation/design/2026-10-18-native-diff-review-prd.md`; all platform hosting and data authority remain native and independent.
 - **Local metadata:** Platform-owned per-user, per-project storage; no repository metadata files are required.
 
-There is no gabCode companion sidecar or internal client/core protocol. Neither native application embeds, launches, packages, or requires the other platform's runtime. Each platform implements and validates its behavior independently.
+There is no gabCode companion sidecar, cross-platform core, or internal client/core protocol. Neither native application embeds, launches, packages, or requires the other platform's native runtime. Each packages its own copy of the same read-only Monaco viewer assets within its native document area; Windows owns WebView2 hosting and macOS owns WKWebView hosting. The viewer cannot read arbitrary files, run Git, save source or manage terminals; both native apps independently obtain Git/filesystem snapshots and validate their host bridge and accessibility on their target OS. This exception does not make gabCode a web application or authorize other shared production code.
 
 ### Workspace Descriptor Contract
 
