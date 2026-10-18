@@ -11,11 +11,14 @@ internal enum ReviewStatus { Added, Modified, Deleted, Renamed, Untracked, Confl
 internal enum ReviewDiffState { Patch, Binary, Oversized, Truncated, Conflict, Timeout, Unavailable }
 internal enum ReviewStopReason { None, Limit, Cancelled, Budget }
 
-internal sealed record ReviewFile(string Path, string? OldPath, ReviewGroup Group, ReviewStatus Status, string? CommitSha = null, string? Comparison = null)
+internal sealed record ReviewFile(string Path, string? OldPath, ReviewGroup Group, ReviewStatus Status, string? CommitSha = null, string? Comparison = null,
+    string? BaseRevision = null, string? TargetRevision = null)
 {
-    internal string Identity => $"{Group}:{CommitSha}:{OldPath}:{Path}";
+    internal string Identity => $"{Group}:{CommitSha}:{OldPath}:{Path}" +
+        (Group == ReviewGroup.Branch ? $":{BaseRevision}:{TargetRevision}" : string.Empty);
 }
 internal sealed record ReviewCommit(string Sha, string Subject, string Author, DateTimeOffset Timestamp, IReadOnlyList<string> Parents, string Summary);
+internal sealed record BranchFileComparison(string BaseRevision, string TargetRevision, IReadOnlyList<ReviewFile> Files);
 internal sealed record ReviewSnapshot(string Worktree, string? Head, string? MainHead, IReadOnlyList<ReviewFile> Working, IReadOnlyList<ReviewCommit> Commits, bool IsStale, string? Error, ReviewStopReason StopReason = ReviewStopReason.None, bool WasSuccessful = false);
 internal sealed record ReviewDiff(ReviewDiffState State, string? Patch, string? Error = null);
 internal sealed record ReviewDocument(string Before, string After, string Comparison,
@@ -146,6 +149,57 @@ internal sealed class WorktreeChangeReviewService
                 parents.Length > 1 ? $"Compared with first parent ({before[..Math.Min(8, before.Length)]} → {sha[..Math.Min(8, sha.Length)]})" : "Compared with empty tree (root commit)"));
         }
         return entries.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
+    }
+
+    internal async Task<BranchFileComparison> GetBranchFilesAsync(string worktree, string mainBranch,
+        string expectedHead, string expectedMainHead, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(mainBranch) || mainBranch.StartsWith('-') || mainBranch.Contains('\0') ||
+            !IsOid(expectedHead) || !IsOid(expectedMainHead))
+            throw new InvalidDataException("Branch changes need a valid configured local main and selected HEAD.");
+        var root = Path.GetFullPath(worktree);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(12));
+        var readToken = deadline.Token;
+        try
+        {
+            var local = $"refs/heads/{mainBranch}^{{commit}}";
+            var head = (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken)).Trim();
+            string main;
+            try { main = (await RunAsync(root, ["rev-parse", "--verify", local], readToken)).Trim(); }
+            catch (InvalidOperationException) { throw new InvalidDataException("Configured local main is unavailable."); }
+            if (head != expectedHead || main != expectedMainHead)
+                throw new InvalidDataException("Branch refs changed; refresh changes before selecting a file.");
+            string rawBases;
+            try { rawBases = await RunAsync(root, ["merge-base", "--all", head, main], readToken); }
+            catch (InvalidOperationException) { throw new InvalidDataException("Branch changes have no unique local-main merge base."); }
+            var bases = rawBases.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (bases.Length != 1 || !IsOid(bases[0]))
+                throw new InvalidDataException("Branch changes have no unique local-main merge base.");
+            var basis = bases[0];
+            var raw = await RunAsync(root, ["diff", "--no-ext-diff", "--no-textconv", "--name-status", "-z", "-M", basis, head, "--"], readToken);
+            var tokens = raw.Split('\0');
+            var files = new List<ReviewFile>();
+            for (var i = 0; i < tokens.Length && tokens[i].Length > 0;)
+            {
+                if (files.Count == 1000) throw new InvalidDataException("Branch changes exceed the 1000-file review limit.");
+                var code = tokens[i++];
+                var renamed = code.StartsWith('R') || code.StartsWith('C');
+                if (code.Length == 0 || i + (renamed ? 1 : 0) >= tokens.Length)
+                    throw new InvalidDataException("Malformed branch changes from Git.");
+                var old = renamed ? tokens[i++] : null;
+                var path = tokens[i++];
+                if (path.Length == 0 || old is "") throw new InvalidDataException("Malformed branch file path from Git.");
+                files.Add(new ReviewFile(path, old, ReviewGroup.Branch, ParseStatusCode(code[0]),
+                    Comparison: $"base {basis[..12]} → tip {head[..12]}", BaseRevision: basis, TargetRevision: head));
+            }
+            if (head != (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken)).Trim() ||
+                main != (await RunAsync(root, ["rev-parse", "--verify", local], readToken)).Trim())
+                throw new InvalidDataException("Branch refs changed during file discovery.");
+            return new BranchFileComparison(basis, head, files.OrderBy(file => file.Path, StringComparer.Ordinal).ToArray());
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+        { throw new TimeoutException("Branch file discovery exceeded its twelve-second budget."); }
     }
 
     internal async Task<ReviewDiff> GetDiffAsync(string worktree, ReviewFile file, CancellationToken token = default)
@@ -330,6 +384,9 @@ internal sealed class WorktreeChangeReviewService
                 var bases = rawBases.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 if (bases.Length != 1 || !IsOid(bases[0])) throw new InvalidDataException("Branch comparison has no unique local-main base.");
                 branchBase = bases[0];
+                if (file.BaseRevision is not null && file.BaseRevision != branchBase ||
+                    file.TargetRevision is not null && file.TargetRevision != validateHead)
+                    throw new InvalidDataException("Selected branch file belongs to an obsolete comparison; refresh review.");
                 beforeOid = await TryReadTreeEntryAsync(root, branchBase, file.OldPath ?? file.Path, readToken);
                 afterOid = await TryReadTreeEntryAsync(root, validateHead, file.Path, readToken);
                 basis = "base → tip";

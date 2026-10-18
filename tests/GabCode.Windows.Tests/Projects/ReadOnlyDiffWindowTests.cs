@@ -294,6 +294,56 @@ public sealed class ReadOnlyDiffWindowTests
     }
 
     [Fact]
+    public async Task Branch_changes_disclosure_opens_actual_base_to_tip_without_current_worktree_bytes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode branch diff " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await RunGit(root, "init", "-b", "trunk");
+            await RunGit(root, "config", "user.email", "test@example.invalid");
+            await RunGit(root, "config", "user.name", "Test");
+            await File.WriteAllTextAsync(Path.Combine(root, "file.txt"), "base\n");
+            await RunGit(root, "add", "file.txt");
+            await RunGit(root, "commit", "-m", "base");
+            await RunGit(root, "switch", "-c", "feature/review");
+            await File.WriteAllTextAsync(Path.Combine(root, "file.txt"), "tip\n");
+            await RunGit(root, "commit", "-am", "tip");
+            await File.WriteAllTextAsync(Path.Combine(root, "file.txt"), "working-only\n");
+            await OnSta(async () =>
+            {
+                var resolver = new TerminalProfileResolver([], [new TerminalShellCandidate(Environment.GetEnvironmentVariable("ComSpec")!, "cmd", "/d /q")]);
+                var window = new MainWindow(new ProjectContext("Review", root, "trunk"), resolver, new AcceptClose());
+                window.Show();
+                try
+                {
+                    var sidebar = Assert.IsType<WorktreeReviewSidebar>(((ContentControl)window.FindName("ReviewSidebarRegion")).Content);
+                    await WaitUntil(() => Descendants<Expander>(sidebar).Any(b => b.Header?.ToString()?.StartsWith("Branch changes", StringComparison.Ordinal) == true));
+                    var section = Assert.Single(Descendants<Expander>(sidebar), b => b.Header?.ToString()?.StartsWith("Branch changes", StringComparison.Ordinal) == true);
+                    section.IsExpanded = true;
+                    await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Modified: file.txt") &&
+                        (b.Tag as string)?.StartsWith("Branch:", StringComparison.Ordinal) == true));
+                    var button = Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Modified: file.txt") &&
+                        (b.Tag as string)?.StartsWith("Branch:", StringComparison.Ordinal) == true);
+                    button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    await WaitUntil(() => ((ContentControl)window.FindName("MainTerminalRegion")).Content is ReadOnlyDiffView);
+                    var view = (ReadOnlyDiffView)((ContentControl)window.FindName("MainTerminalRegion")).Content;
+                    await WaitUntil(() => view.HasStagedViewer);
+                    var pair = await view.ReadViewerPairForTestAsync();
+                    Assert.Equal("base\n", pair.Before);
+                    Assert.Equal("tip\n", pair.After);
+                    Assert.Contains(Descendants<TextBlock>(view), block => block.Text.Contains("base", StringComparison.OrdinalIgnoreCase) && block.Text.Contains("tip", StringComparison.OrdinalIgnoreCase));
+                    await RunGit(root, "branch", "-f", "trunk", "HEAD");
+                    sidebar.RequestRefresh();
+                    await WaitUntil(() => ((ContentControl)window.FindName("MainTerminalRegion")).Content is TerminalSessionView);
+                }
+                finally { window.Close(); await WaitUntil(() => !window.IsVisible); }
+            });
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
     public async Task Sidebar_expands_commit_files_on_demand_and_opens_the_first_parent_diff()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabcode commit sidebar " + Guid.NewGuid().ToString("N"));

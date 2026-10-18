@@ -131,6 +131,38 @@ public sealed class WorktreeChangeReviewServiceTests
     }
 
     [Fact]
+    public async Task Branch_file_rows_share_verified_actual_base_and_tip_with_selected_document()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "main\n");
+        await repo.Git("add", "file.txt");
+        await repo.Git("commit", "-m", "base");
+        var mainSha = (await repo.Git("rev-parse", "trunk")).Trim();
+        await repo.Git("switch", "-c", "feature/review");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "tip\n");
+        await repo.Git("commit", "-am", "change");
+        var tipSha = (await repo.Git("rev-parse", "HEAD")).Trim();
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "today\n");
+        var service = new WorktreeChangeReviewService();
+        var comparison = await service.GetBranchFilesAsync(repo.Path, "trunk", tipSha, mainSha);
+        Assert.Equal(mainSha, comparison.BaseRevision);
+        Assert.Equal(tipSha, comparison.TargetRevision);
+        var file = Assert.Single(comparison.Files);
+        Assert.Equal(ReviewGroup.Branch, file.Group);
+        Assert.Equal("file.txt", file.Path);
+        Assert.Contains(mainSha[..12], file.Comparison);
+        Assert.Contains(tipSha[..12], file.Comparison);
+        var document = await service.GetReviewDocumentAsync(repo.Path, file, "trunk");
+        Assert.Equal("main\n", document.Before);
+        Assert.Equal("tip\n", document.After);
+        await repo.Git("branch", "-f", "trunk", tipSha);
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.GetReviewDocumentAsync(repo.Path, file, "trunk"));
+    }
+
+    [Fact]
     public async Task Worktree_document_does_not_read_outside_selected_root()
     {
         using var repo = new ReviewRepository();
