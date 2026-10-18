@@ -19,3 +19,5 @@ xcuserdata/
 
 # Generated release artifacts
 /artifacts/
+/shared/native-diff-viewer/node_modules/
+/shared/native-diff-viewer/dist/
