@@ -14,6 +14,8 @@ public sealed class WindowsPreviewPreparationSurfaceTests
         var preparation = File.ReadAllText(preparationPath);
         Assert.Contains("[string] $Version", preparation, StringComparison.Ordinal);
         Assert.Contains("Build-Preview.ps1", preparation, StringComparison.Ordinal);
+        Assert.Contains("native-diff-viewer", preparation, StringComparison.Ordinal);
+        Assert.Contains("npm ci", preparation, StringComparison.Ordinal);
         Assert.Contains("Test-Preview.ps1", preparation, StringComparison.Ordinal);
         Assert.Contains("preview-evidence.schema.json", preparation, StringComparison.Ordinal);
         Assert.Contains("gabCode-$Version-windows-x64.msi", preparation, StringComparison.Ordinal);

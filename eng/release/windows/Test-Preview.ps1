@@ -157,6 +157,48 @@ function Get-Inventory([string] $Root) {
     })
 }
 
+function Assert-InstalledViewer([string] $InstallRoot) {
+    $viewerRoot = Join-Path $InstallRoot 'NativeDiffViewer'
+    $manifestPath = Join-Path $viewerRoot 'manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'Installed offline diff viewer manifest is missing.'
+    }
+    $viewerManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($viewerManifest.monaco -cne '0.57.0' -or @($viewerManifest.assets).Count -lt 10) {
+        throw 'Installed offline diff viewer is missing pinned Monaco 0.57.0 assets.'
+    }
+    $expected = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    [void] $expected.Add('manifest.json')
+    $inventory = @()
+    foreach ($asset in $viewerManifest.assets) {
+        $relativePath = [string] $asset.path
+        if ($relativePath -notmatch '^[a-zA-Z0-9._/-]+$' -or
+            @($relativePath.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -ne 0 -or
+            -not $expected.Add($relativePath)) {
+            throw "Invalid installed viewer asset path: $relativePath"
+        }
+        $path = Join-Path $viewerRoot $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+            ((Get-Item -LiteralPath $path -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            (Get-Item -LiteralPath $path).Length -ne [long] $asset.bytes -or
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -cne ([string] $asset.sha256).ToUpperInvariant()) {
+            throw "Installed viewer asset '$relativePath' does not match its pinned manifest."
+        }
+        $inventory += [pscustomobject]@{ File = $relativePath; Bytes = [long] $asset.bytes; SHA256 = $asset.sha256 }
+    }
+    $actual = @(Get-ChildItem -LiteralPath $viewerRoot -Recurse -File | ForEach-Object {
+        [System.IO.Path]::GetRelativePath($viewerRoot, $_.FullName).Replace('\', '/')
+    })
+    if ($actual.Count -ne $expected.Count -or @($actual | Where-Object { -not $expected.Contains($_) }).Count -ne 0) {
+        throw 'Installed viewer has unlisted files or missing pinned assets.'
+    }
+    $loader = Join-Path $InstallRoot 'runtimes\win-x64\native\WebView2Loader.dll'
+    if (-not (Test-Path -LiteralPath $loader -PathType Leaf)) {
+        throw 'Installed x64 WebView2Loader.dll is missing; the system WebView2 Runtime is a separate prerequisite.'
+    }
+    return $inventory
+}
+
 function Assert-Sentinels([string] $RepositorySentinel, [string] $RepositoryHash, [string] $UserSentinel, [string] $UserHash) {
     if (-not (Test-Path -LiteralPath $RepositorySentinel) -or
         (Get-FileHash -LiteralPath $RepositorySentinel -Algorithm SHA256).Hash -ne $RepositoryHash) {
@@ -278,7 +320,8 @@ try {
     })
     $forbiddenMsiFiles = @($msiFiles | Where-Object { $_.Name -match '(?i)\.pdb$|\.cs$|\.csproj$|\.slnx?$|\.nupkg$|\.snupkg$|\.wixpdb$|testhost|\.Tests\.' })
     if ($forbiddenMsiFiles.Count -ne 0) { throw "MSI contains forbidden build/test files: $($forbiddenMsiFiles.Name -join ', ')" }
-    foreach ($requiredFile in @('GabCode.Windows.exe', 'coreclr.dll', 'hostfxr.dll', 'Microsoft.Terminal.Wpf.dll', 'Microsoft.Terminal.Control.dll', 'LICENSE.txt', 'NOTICE.md')) {
+    foreach ($requiredFile in @('GabCode.Windows.exe', 'coreclr.dll', 'hostfxr.dll', 'Microsoft.Terminal.Wpf.dll', 'Microsoft.Terminal.Control.dll', 'LICENSE.txt', 'NOTICE.md',
+        'manifest.json', 'viewer.js', 'viewer.css', 'MONACO-LICENSE.txt', 'MONACO-THIRD-PARTY-NOTICES.txt', 'WebView2Loader.dll')) {
         if ($msiFiles.Name -notcontains $requiredFile) { throw "MSI is missing required file '$requiredFile'." }
     }
 
@@ -341,6 +384,7 @@ try {
         }
         $terminalEvidence += [pscustomobject]@{ File = $asset.file; Bytes = $actualBytes; SHA256 = $actualHash }
     }
+    $viewerEvidence = @(Assert-InstalledViewer $installDirectory)
     foreach ($relativeLicense in @('licenses\gabCode\LICENSE.txt', 'licenses\microsoft-terminal\LICENSE.txt', 'licenses\microsoft-terminal\NOTICE.md')) {
         if (-not (Test-Path -LiteralPath (Join-Path $installDirectory $relativeLicense))) { throw "Installed payload is missing '$relativeLicense'." }
     }
@@ -357,6 +401,7 @@ try {
 
     Invoke-MsiExec 'repair' @('/fa', $resolvedPackagePath) (Join-Path $evidencePath 'repair.log')
     Assert-Sentinels $repositorySentinel $repositoryHash $userSentinel $userHash
+    [void] @(Assert-InstalledViewer $installDirectory)
 
     $probeOutput = Join-Path $evidencePath 'later-numeric-upgrade-package'
     & (Join-Path $PSScriptRoot 'Build-Preview.ps1') -Version $upgradeProbeVersion -OutputDirectory $probeOutput
@@ -364,6 +409,7 @@ try {
     $probePackage = Join-Path $probeOutput "gabCode-$upgradeProbeVersion-windows-x64.msi"
     Invoke-MsiExec 'later-numeric-upgrade' @('/i', $probePackage) (Join-Path $evidencePath 'later-numeric-upgrade.log')
     Assert-Sentinels $repositorySentinel $repositoryHash $userSentinel $userHash
+    [void] @(Assert-InstalledViewer $installDirectory)
 
     $upgradedProducts = @(Get-RelatedProducts $upgradeCode)
     if ($upgradedProducts.Count -ne 1 -or
@@ -400,6 +446,8 @@ try {
         InstalledFileCount = $installedInventory.Count
         InstalledFiles = $installedInventory
         TerminalAssets = $terminalEvidence
+        ViewerAssets = $viewerEvidence
+        WebView2Runtime = 'NOT CHECKED — system prerequisite; installed/offline UI qualification pending human validation'
         InstallDirectory = $installDirectory
         StartMenuEntry = $startMenuShortcut
         AppsUninstallEntry = $arpEvidence
