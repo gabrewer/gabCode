@@ -22,7 +22,7 @@ test('offline bundle contains pinned licensed Monaco, CSP, worker inventory and 
   }
   const html = await readFile(join(dist, 'index.html'), 'utf8');
   assert.match(html, /connect-src 'none'/);
-  assert.match(html, /worker-src 'self'/);
+  assert.match(html, /worker-src 'self' blob:/);
   assert.match(html, /style-src 'self' 'unsafe-inline'/);
   assert.match(html, /script-src 'self'/);
   assert.doesNotMatch(html, /https?:\/\//);
