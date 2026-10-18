@@ -2,10 +2,11 @@ using System.Diagnostics;
 using System.ComponentModel;
 using System.IO;
 using System.Text;
+using System.Runtime.InteropServices;
 
 namespace GabCode.Windows.Projects;
 
-internal enum ReviewGroup { Staged, Unstaged, Commit }
+internal enum ReviewGroup { Staged, Unstaged, Commit, Branch }
 internal enum ReviewStatus { Added, Modified, Deleted, Renamed, Untracked, Conflicted, Binary }
 internal enum ReviewDiffState { Patch, Binary, Oversized, Truncated, Conflict, Timeout, Unavailable }
 internal enum ReviewStopReason { None, Limit, Cancelled, Budget }
@@ -19,7 +20,8 @@ internal sealed record ReviewSnapshot(string Worktree, string? Head, string? Mai
 internal sealed record ReviewDiff(ReviewDiffState State, string? Patch, string? Error = null);
 internal sealed record ReviewDocument(string Before, string After, string Comparison,
     bool BeforeBom, bool AfterBom, string BeforeEol, string AfterEol,
-    bool BeforeFinalNewline, bool AfterFinalNewline, bool RawFilter);
+    bool BeforeFinalNewline, bool AfterFinalNewline, bool RawFilter,
+    string? BaseRevision = null, string? TargetRevision = null);
 
 /// <summary>Windows-owned, bounded Git observation; never calls worktree prune or changes the index.</summary>
 internal sealed class WorktreeChangeReviewService
@@ -44,6 +46,30 @@ internal sealed class WorktreeChangeReviewService
         if (this.snapshotBudget <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(snapshotBudget));
     }
 
+    private async Task<string> RunStatusWithoutFiltersAsync(string root, CancellationToken token)
+    {
+        // Git status may invoke clean/process filters while comparing changed worktree bytes.
+        // Enumerate configured filter commands, then override only their executable hooks
+        // for this single read. No user config or index is modified.
+        var config = await RunAsync(root, ["config", "--null", "--list"], token);
+        var keys = config.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Select(entry => entry.Split('\n', 2)[0])
+            .Where(key => key.StartsWith("filter.", StringComparison.OrdinalIgnoreCase) &&
+                (key.EndsWith(".clean", StringComparison.OrdinalIgnoreCase) ||
+                 key.EndsWith(".process", StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var args = new List<string>();
+        foreach (var key in keys)
+        {
+            args.Add("-c"); args.Add(key + "=");
+            var suffix = key.EndsWith(".clean", StringComparison.OrdinalIgnoreCase) ? ".clean" : ".process";
+            var driver = key["filter.".Length..^suffix.Length];
+            args.Add("-c"); args.Add("filter." + driver + ".required=false");
+        }
+        args.AddRange(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no"]);
+        return await RunAsync(root, args, token);
+    }
+
     internal async Task<ReviewSnapshot> GetSnapshotAsync(string worktree, string? mainBranch, CancellationToken token = default)
     {
         var root = Path.GetFullPath(worktree);
@@ -55,9 +81,10 @@ internal sealed class WorktreeChangeReviewService
         IReadOnlyList<ReviewFile> working = [];
         try
         {
-            head = (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken).ConfigureAwait(false)).Trim();
-            var status = await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no"], readToken).ConfigureAwait(false);
+            head = await TryReadHeadAsync(root, readToken).ConfigureAwait(false);
+            var status = await RunStatusWithoutFiltersAsync(root, readToken).ConfigureAwait(false);
             working = ParseStatus(status);
+            if (head is null) return new(root, null, null, working, [], false, "HEAD has no commit yet; staged files can still be reviewed.");
             if (string.IsNullOrWhiteSpace(mainBranch)) return new(root, head, null, working, [], true, "Configured local main branch is unavailable.");
             mainHead = (await RunAsync(root, ["rev-parse", "--verify", $"refs/heads/{mainBranch}^{{commit}}"], readToken).ConfigureAwait(false)).Trim();
             var commits = await GetCommitsAsync(root, head, mainHead, 0, readToken).ConfigureAwait(false);
@@ -204,7 +231,7 @@ internal sealed class WorktreeChangeReviewService
 
     internal async Task<ReviewDocument> GetStagedDocumentAsync(string worktree, ReviewFile file, CancellationToken token = default)
     {
-        if (file.Group != ReviewGroup.Staged || file.Status != ReviewStatus.Modified ||
+        if (file.Group != ReviewGroup.Staged || file.Status is not (ReviewStatus.Modified or ReviewStatus.Added or ReviewStatus.Deleted or ReviewStatus.Renamed) ||
             Path.IsPathFullyQualified(file.Path) || file.Path.Contains('\\') ||
             file.Path.Split('/').Any(segment => segment is "" or "." or "..") || file.Path.Contains('\0'))
             throw new InvalidDataException("Selected staged file is not a regular tracked text path.");
@@ -214,17 +241,25 @@ internal sealed class WorktreeChangeReviewService
         var readToken = deadline.Token;
         try
         {
-            var head = (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken)).Trim();
-            var beforeEntry = await ReadTreeEntryAsync(root, head, file.Path, readToken);
-            var afterEntry = await ReadIndexEntryAsync(root, file.Path, readToken);
-            var before = DecodeReviewBytes(await RunBytesAsync(root, ["cat-file", "blob", beforeEntry], readToken));
-            var after = DecodeReviewBytes(await RunBytesAsync(root, ["cat-file", "blob", afterEntry], readToken));
+            var head = await TryReadHeadAsync(root, readToken);
+            if (head is null && file.Status != ReviewStatus.Added)
+                throw new InvalidDataException("Selected staged file needs a committed HEAD.");
+            var oldPath = file.OldPath ?? file.Path;
+            var beforeEntry = head is null ? null : await TryReadTreeEntryAsync(root, head, oldPath, readToken);
+            var afterEntry = await TryReadIndexEntryAsync(root, file.Path, readToken);
+            if ((beforeEntry is null && file.Status != ReviewStatus.Added) ||
+                (beforeEntry is not null && file.Status == ReviewStatus.Added) ||
+                (afterEntry is null && file.Status != ReviewStatus.Deleted) ||
+                (afterEntry is not null && file.Status == ReviewStatus.Deleted))
+                throw new InvalidDataException("Staged file changed or has an unsupported entry; refresh review.");
+            var before = DecodeReviewBytes(beforeEntry is null ? [] : await RunBytesAsync(root, ["cat-file", "blob", beforeEntry], readToken));
+            var after = DecodeReviewBytes(afterEntry is null ? [] : await RunBytesAsync(root, ["cat-file", "blob", afterEntry], readToken));
             var attribute = await RunAsync(root, ["check-attr", "-z", "filter", "--", file.Path], readToken);
             var parts = attribute.Split('\0');
             var rawFilter = parts.Length >= 3 && parts[1] == "filter" && parts[2] is not ("unspecified" or "unset" or "");
-            if (head != (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken)).Trim() ||
-                beforeEntry != await ReadTreeEntryAsync(root, head, file.Path, readToken) ||
-                afterEntry != await ReadIndexEntryAsync(root, file.Path, readToken))
+            if (head != await TryReadHeadAsync(root, readToken) ||
+                beforeEntry != (head is null ? null : await TryReadTreeEntryAsync(root, head, oldPath, readToken)) ||
+                afterEntry != await TryReadIndexEntryAsync(root, file.Path, readToken))
                 throw new InvalidDataException("Staged file changed while loading; refresh review.");
             return new ReviewDocument(before.Text, after.Text, "HEAD → index",
                 before.Bom, after.Bom, before.Eol, after.Eol, before.FinalNewline, after.FinalNewline, rawFilter);
@@ -232,6 +267,189 @@ internal sealed class WorktreeChangeReviewService
         catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
         { throw new TimeoutException("Diff unavailable: staged snapshot exceeded its twelve-second budget."); }
     }
+
+    internal async Task<ReviewDocument> GetReviewDocumentAsync(string worktree, ReviewFile file, string? mainBranch, CancellationToken token = default)
+    {
+        if (file.Group == ReviewGroup.Staged) return await GetStagedDocumentAsync(worktree, file, token);
+        if (file.Status == ReviewStatus.Conflicted || file.Path.Contains('\0') || Path.IsPathFullyQualified(file.Path) ||
+            file.Path.Contains('\\') || file.Path.Split('/').Any(segment => segment is "" or "." or ".."))
+            throw new InvalidDataException("Diff unavailable: unsafe or conflicted file.");
+        var root = Path.GetFullPath(worktree);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(12));
+        var readToken = deadline.Token;
+        try
+        {
+            string? beforeOid = null, afterOid = null;
+            string? afterText = null;
+            var basis = string.Empty;
+            var validateHead = string.Empty;
+            var validateIndex = string.Empty;
+            var validateMain = string.Empty;
+            string? branchBase = null;
+            var validateWorktree = false;
+            if (file.Group == ReviewGroup.Unstaged)
+            {
+                if (file.Status != ReviewStatus.Untracked)
+                {
+                    beforeOid = await ReadIndexEntryAsync(root, file.OldPath ?? file.Path, readToken);
+                    validateIndex = beforeOid;
+                }
+                if (file.Status == ReviewStatus.Untracked && await TryReadIndexEntryAsync(root, file.Path, readToken) is not null)
+                    throw new InvalidDataException("Untracked selection is now in the index; refresh review.");
+                if (file.Status == ReviewStatus.Deleted && WorktreeEntryExists(root, file.Path))
+                    throw new InvalidDataException("Deleted worktree file reappeared; refresh review.");
+                afterText = file.Status == ReviewStatus.Deleted ? null : file.Path;
+                validateWorktree = afterText is not null;
+                basis = file.Status == ReviewStatus.Untracked ? "empty → worktree" : "index → worktree";
+            }
+            else if (file.Group == ReviewGroup.Commit)
+            {
+                if (file.CommitSha is null || !IsOid(file.CommitSha)) throw new InvalidDataException("Selected commit is unavailable.");
+                var parents = (await RunAsync(root, ["rev-list", "--parents", "-n", "1", file.CommitSha], readToken))
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parents.Length == 0 || !string.Equals(parents[0], file.CommitSha, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Selected commit changed or is unavailable.");
+                beforeOid = parents.Length > 1 ? await TryReadTreeEntryAsync(root, parents[1], file.OldPath ?? file.Path, readToken) : null;
+                afterOid = await TryReadTreeEntryAsync(root, file.CommitSha, file.Path, readToken);
+                basis = "first parent → selected commit";
+            }
+            else if (file.Group == ReviewGroup.Branch)
+            {
+                if (string.IsNullOrWhiteSpace(mainBranch) || mainBranch.StartsWith('-') || mainBranch.Contains('\0'))
+                    throw new InvalidDataException("Configured local main is unavailable.");
+                var local = $"refs/heads/{mainBranch}";
+                validateHead = (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken)).Trim();
+                try { validateMain = (await RunAsync(root, ["rev-parse", "--verify", local + "^{commit}"], readToken)).Trim(); }
+                catch (InvalidOperationException) { throw new InvalidDataException("Configured local main is unavailable."); }
+                string rawBases;
+                try { rawBases = await RunAsync(root, ["merge-base", "--all", validateHead, validateMain], readToken); }
+                catch (InvalidOperationException) { throw new InvalidDataException("Branch comparison has no unique local-main base."); }
+                var bases = rawBases.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (bases.Length != 1 || !IsOid(bases[0])) throw new InvalidDataException("Branch comparison has no unique local-main base.");
+                branchBase = bases[0];
+                beforeOid = await TryReadTreeEntryAsync(root, branchBase, file.OldPath ?? file.Path, readToken);
+                afterOid = await TryReadTreeEntryAsync(root, validateHead, file.Path, readToken);
+                basis = "base → tip";
+            }
+            else throw new InvalidDataException("Unsupported review comparison.");
+            if (file.Group is ReviewGroup.Commit or ReviewGroup.Branch && beforeOid is null && afterOid is null)
+                throw new InvalidDataException("Selected file is absent from both comparison revisions.");
+            var before = DecodeReviewBytes(beforeOid is null ? [] : await RunBytesAsync(root, ["cat-file", "blob", beforeOid], readToken));
+            var after = DecodeReviewBytes(validateWorktree ? await ReadWorktreeBytesAsync(root, afterText!, readToken) :
+                afterOid is null ? [] : await RunBytesAsync(root, ["cat-file", "blob", afterOid], readToken));
+            if (validateIndex.Length != 0 && validateIndex != await ReadIndexEntryAsync(root, file.OldPath ?? file.Path, readToken))
+                throw new InvalidDataException("Index changed during diff review.");
+            if (file.Group == ReviewGroup.Unstaged && file.Status == ReviewStatus.Untracked &&
+                await TryReadIndexEntryAsync(root, file.Path, readToken) is not null)
+                throw new InvalidDataException("Untracked selection is now in the index; refresh review.");
+            if (file.Group == ReviewGroup.Unstaged && file.Status == ReviewStatus.Deleted && WorktreeEntryExists(root, file.Path))
+                throw new InvalidDataException("Deleted worktree file reappeared; refresh review.");
+            if (validateHead.Length != 0 && (validateHead != (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], readToken)).Trim() ||
+                validateMain != (await RunAsync(root, ["rev-parse", "--verify", $"refs/heads/{mainBranch}^{{commit}}"], readToken)).Trim()))
+                throw new InvalidDataException("Branch refs changed during diff review.");
+            var attribute = await RunAsync(root, ["check-attr", "-z", "filter", "--", file.Path], readToken);
+            var parts = attribute.Split('\0');
+            var rawFilter = parts.Length >= 3 && parts[1] == "filter" && parts[2] is not ("unspecified" or "unset" or "");
+            return new ReviewDocument(before.Text, after.Text, basis, before.Bom, after.Bom,
+                before.Eol, after.Eol, before.FinalNewline, after.FinalNewline, rawFilter,
+                branchBase, file.Group == ReviewGroup.Branch ? validateHead : null);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+        { throw new TimeoutException("Diff unavailable: snapshot exceeded its twelve-second budget."); }
+    }
+
+    private async Task<string?> TryReadHeadAsync(string root, CancellationToken token)
+    {
+        try { return (await RunAsync(root, ["rev-parse", "--verify", "HEAD^{commit}"], token)).Trim(); }
+        catch (InvalidOperationException)
+        {
+            // An unborn local branch has no HEAD object; require a real Git worktree.
+            _ = await RunAsync(root, ["symbolic-ref", "-q", "HEAD"], token);
+            return null;
+        }
+    }
+
+    private async Task<string?> TryReadIndexEntryAsync(string root, string path, CancellationToken token)
+    {
+        var record = await RunAsync(root, ["ls-files", "--stage", "-z", "--", path], token);
+        return record.Length == 0 ? null : await ReadIndexEntryAsync(root, path, token);
+    }
+
+    private async Task<string?> TryReadTreeEntryAsync(string root, string tree, string path, CancellationToken token)
+    {
+        var record = await RunAsync(root, ["ls-tree", "-z", tree, "--", path], token);
+        if (record.Length == 0) return null;
+        return await ReadTreeEntryAsync(root, tree, path, token);
+    }
+
+    private static bool WorktreeEntryExists(string root, string relativePath)
+    {
+        var prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var path = Path.GetFullPath(Path.Combine(prefix, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Unsafe worktree path.");
+        try { _ = File.GetAttributes(path); return true; }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+    }
+
+    private static async Task<byte[]> ReadWorktreeBytesAsync(string root, string relativePath, CancellationToken token)
+    {
+        var prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var path = Path.GetFullPath(Path.Combine(prefix, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Unsafe worktree file path.");
+        for (var current = path; current.StartsWith(prefix, StringComparison.OrdinalIgnoreCase); current = Path.GetDirectoryName(current)!)
+        {
+            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidDataException("Diff unavailable: symbolic link or junction is not a regular file.");
+            if (current == prefix.TrimEnd(Path.DirectorySeparatorChar)) break;
+        }
+        var before = new FileInfo(path);
+        if (!before.Exists || before.Length > 1024 * 1024) throw new InvalidDataException("Diff unavailable: file is absent or oversized.");
+        byte[] bytes;
+        await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 8192, options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            EnsureHandleWithinRoot(stream, prefix);
+            bytes = new byte[checked((int)before.Length)];
+            await stream.ReadExactlyAsync(bytes, token);
+            if (await stream.ReadAsync(new byte[1], token) != 0) throw new InvalidDataException("File changed during review.");
+        }
+        var after = new FileInfo(path);
+        if (after.Length != before.Length || after.LastWriteTimeUtc != before.LastWriteTimeUtc ||
+            (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidDataException("File changed during review.");
+        // A same-size rewrite can preserve timestamps; compare a second bounded read.
+        var verify = new byte[bytes.Length];
+        await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 8192, options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            EnsureHandleWithinRoot(stream, prefix);
+            await stream.ReadExactlyAsync(verify, token);
+            if (await stream.ReadAsync(new byte[1], token) != 0 || !bytes.AsSpan().SequenceEqual(verify))
+                throw new InvalidDataException("File changed during review.");
+        }
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidDataException("File changed during review.");
+        return bytes;
+    }
+
+    private static void EnsureHandleWithinRoot(FileStream stream, string rootPrefix)
+    {
+        var path = new StringBuilder(32768);
+        var written = GetFinalPathNameByHandleW(stream.SafeFileHandle, path, (uint)path.Capacity, 0);
+        if (written == 0 || written >= path.Capacity)
+            throw new InvalidDataException("Diff unavailable: could not verify opened file path.");
+        var resolved = path.ToString();
+        if (resolved.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) resolved = @"\\" + resolved[8..];
+        else if (resolved.StartsWith(@"\\?\", StringComparison.Ordinal)) resolved = resolved[4..];
+        if (!resolved.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Diff unavailable: opened file escaped the selected worktree.");
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleW(Microsoft.Win32.SafeHandles.SafeFileHandle handle,
+        StringBuilder path, uint length, uint flags);
 
     private async Task<string> ReadTreeEntryAsync(string root, string head, string path, CancellationToken token)
     {
