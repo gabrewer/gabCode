@@ -139,12 +139,20 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         if (disposed) throw new ObjectDisposedException(nameof(WindowsDiffViewerHost));
-        if (!VerifyBundle(assets, out var error)) { Unavailable?.Invoke(this, error); throw new InvalidOperationException(error); }
         using var work = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
         work.CancelAfter(TimeSpan.FromSeconds(15));
         work.Token.ThrowIfCancellationRequested();
         try
         {
+            // Verify all bytes on a worker, never block WPF input while hashing the
+            // packaged bundle. WebView2 cannot navigate before verification succeeds.
+            var verification = await Task.Run(() =>
+            {
+                var valid = VerifyBundle(assets, out var reason);
+                return (valid, reason);
+            }, work.Token);
+            work.Token.ThrowIfCancellationRequested();
+            if (!verification.valid) throw new InvalidOperationException(verification.reason);
             var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: profile).WaitAsync(work.Token);
             work.Token.ThrowIfCancellationRequested();
             await webView.EnsureCoreWebView2Async(environment).WaitAsync(work.Token);

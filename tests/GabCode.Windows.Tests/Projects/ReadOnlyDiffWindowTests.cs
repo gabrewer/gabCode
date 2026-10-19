@@ -118,6 +118,36 @@ public sealed class ReadOnlyDiffWindowTests
     }
 
     [Fact]
+    public async Task Viewer_can_initialize_before_snapshot_and_dispose_when_git_fails()
+    {
+        await OnSta(async () =>
+        {
+            var view = new ReadOnlyDiffView("selected.txt — HEAD → index", null);
+            var window = new Window { Content = view, Width = 720, Height = 440, ShowInTaskbar = false };
+            window.Show();
+            try
+            {
+                view.BeginViewerInitialization();
+                Assert.True(view.HasStagedViewer);
+                var document = new ReviewDocument("before\n", "after\n", "HEAD → index",
+                    false, false, "LF", "LF", true, true, false);
+                await view.ShowDocumentAsync(document, 1, "test:prewarmed", "selected.txt", CancellationToken.None);
+                var pair = await view.ReadViewerPairForTestAsync();
+                Assert.Equal("before\n", pair.Before);
+                Assert.Equal("after\n", pair.After);
+                view.DisposeViewer();
+                Assert.False(view.HasStagedViewer);
+                view.BeginViewerInitialization();
+                Assert.True(view.HasStagedViewer);
+                view.ShowUnavailable("Git read failed");
+                Assert.False(view.HasStagedViewer);
+                Assert.Contains(Descendants<TextBlock>(view), text => text.Text.Contains("Git read failed", StringComparison.Ordinal));
+            }
+            finally { view.DisposeViewer(); window.Close(); }
+        });
+    }
+
+    [Fact]
     public async Task Staged_file_selection_opens_real_HEAD_to_index_in_embedded_viewer()
     {
         var root = Path.Combine(Path.GetTempPath(), "gabcode staged viewer Ω " + Guid.NewGuid().ToString("N"));
