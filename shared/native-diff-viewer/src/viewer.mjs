@@ -19,26 +19,19 @@ const applyTheme = () => monaco.editor.setTheme(contrast.matches ? 'hc-black' : 
 contrast.addEventListener('change', applyTheme);
 applyTheme();
 const root = document.getElementById('document');
-const controls = document.createElement('div');
-controls.className = 'viewer-controls';
+// The native host owns visible controls. Retain an accessible live description
+// inside Monaco for keyboard and screen-reader users without a second toolbar.
 const status = document.createElement('span');
+status.className = 'viewer-status';
 status.setAttribute('role', 'status');
 status.setAttribute('aria-live', 'polite');
-const previous = document.createElement('button');
-previous.textContent = 'Previous change';
-const next = document.createElement('button');
-next.textContent = 'Next change';
-const deletion = document.createElement('button');
-deletion.textContent = 'View deletion in Inline';
-deletion.hidden = true;
-controls.append(previous, next, deletion, status);
 const canvas = document.createElement('div');
 canvas.className = 'viewer-canvas';
 const diffRoot = document.createElement('div');
 const fileRoot = document.createElement('div');
 diffRoot.className = fileRoot.className = 'viewer-surface';
 canvas.append(diffRoot, fileRoot);
-root.append(controls, canvas);
+root.append(status, canvas);
 
 let diff;
 let fileEditor;
@@ -77,8 +70,11 @@ const immutableOptions = {
 function updateStatus() {
   const position = unavailable || (computing ? 'Computing changes…' : changeIndex < 0 ? currentFacts ? 'No Monaco text spans' : 'No text changes' : `Change ${changeIndex + 1} of ${locations.length}: ${locations[changeIndex].description}`);
   status.textContent = `${position}${currentFacts ? `; ${currentFacts}` : ''}`;
-  deletion.hidden = currentMode === 'inline' || locations[changeIndex]?.kind !== 'deleted';
-  previous.disabled = next.disabled = locations.length === 0;
+  if (currentGeneration >= 0 && currentIdentity) notify(makeViewerEvent('progress', {
+    generation: currentGeneration, identity: currentIdentity,
+    index: changeIndex + 1, total: locations.length, description: position.slice(0, 256),
+    deletion: currentMode === 'file' && locations[changeIndex]?.kind === 'deleted', mode: currentMode,
+  }));
 }
 function markChanges() {
   if (!fileEditor || !modified) return;
@@ -196,12 +192,12 @@ function receive(raw) {
       if (message.kind === 'change') gotoChange(message.direction === 'next' ? 1 : -1);
       if (message.kind === 'find') (currentMode === 'file' ? fileEditor : diff?.getModifiedEditor())?.getAction('actions.find')?.run();
       if (message.kind === 'focus') (currentMode === 'file' ? fileEditor : diff?.getModifiedEditor())?.focus();
+      if (message.kind === 'deletion' && currentMode === 'file' && locations[changeIndex]?.kind === 'deleted') {
+        setMode('inline'); gotoChange(0);
+      }
     }
   } catch (error) { notify(makeViewerEvent('failure', { message: String(error).slice(0, 2048), generation: message.generation, identity: message.identity })); }
 }
-previous.addEventListener('click', () => gotoChange(-1));
-next.addEventListener('click', () => gotoChange(1));
-deletion.addEventListener('click', () => { setMode('inline'); gotoChange(0); });
 window.chrome?.webview?.addEventListener('message', event => receive(event.data));
 window.addEventListener('message', event => {
   if (event.source === window && event.origin === window.location.origin) receive(event.data);

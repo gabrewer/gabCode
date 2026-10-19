@@ -9,7 +9,7 @@ const facts = value => value && typeof value === 'object' &&
 export function acceptHostMessage(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const keys = ['kind', 'generation', 'identity', 'path', 'before', 'after', 'beforeLabel', 'afterLabel', 'mode', 'beforeFacts', 'afterFacts'];
-  if (['mode', 'change', 'find', 'focus'].includes(value.kind)) {
+  if (['mode', 'change', 'find', 'focus', 'deletion'].includes(value.kind)) {
     const controlKeys = value.kind === 'mode' ? ['kind', 'generation', 'identity', 'mode'] :
       value.kind === 'change' ? ['kind', 'generation', 'identity', 'direction'] : ['kind', 'generation', 'identity'];
     if (Object.keys(value).length !== controlKeys.length || !Object.keys(value).every(key => controlKeys.includes(key)) ||
@@ -32,6 +32,15 @@ export function acceptHostMessage(value) {
 
 export function makeViewerEvent(kind, fields = {}) {
   if (kind === 'ready' && Object.keys(fields).length === 0) return { kind };
+  if (kind === 'progress' && Object.keys(fields).length === 7 &&
+      Object.keys(fields).every(key => ['generation', 'identity', 'index', 'total', 'description', 'deletion', 'mode'].includes(key)) &&
+      Number.isSafeInteger(fields.generation) && fields.generation >= 0 &&
+      typeof fields.identity === 'string' && fields.identity.length > 0 && fields.identity.length <= 512 &&
+      Number.isSafeInteger(fields.total) && fields.total >= 0 && fields.total <= 1000000 &&
+      Number.isSafeInteger(fields.index) && fields.index >= 0 && fields.index <= fields.total &&
+      typeof fields.description === 'string' && fields.description.length <= 256 &&
+      typeof fields.deletion === 'boolean' && ['side-by-side', 'inline', 'file'].includes(fields.mode))
+    return { kind, ...fields };
   if (kind === 'failure' && typeof fields.message === 'string' && fields.message.length <= 2048 &&
       Number.isSafeInteger(fields.generation) && fields.generation >= 0 &&
       typeof fields.identity === 'string' && fields.identity.length > 0 && fields.identity.length <= 512 &&

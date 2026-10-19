@@ -38,6 +38,16 @@ test('mode and change-position controls must match selected immutable generation
   }
 });
 
+test('viewer emits selection-scoped bounded progress without file authority', () => {
+  const progress = { generation: 3, identity: 'selected', index: 1, total: 3,
+    description: 'Modified change near resulting line 163', deletion: false, mode: 'file' };
+  assert.deepEqual(makeViewerEvent('progress', progress), { kind: 'progress', ...progress });
+  assert.equal(makeViewerEvent('progress', { ...progress, description: 'x'.repeat(257) }), null);
+  assert.equal(makeViewerEvent('progress', { ...progress, mode: 'edit' }), null);
+  assert.equal(makeViewerEvent('progress', { ...progress, path: 'secret' }), null);
+  assert.equal(makeViewerEvent('progress', { ...progress, total: -1 }), null);
+});
+
 test('viewer emits only bounded ready or failure events (never file operations)', () => {
   assert.deepEqual(makeViewerEvent('ready'), { kind: 'ready' });
   assert.equal(makeViewerEvent('open-file', { path: 'x' }), null);
