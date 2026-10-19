@@ -61,7 +61,9 @@ internal sealed class WorktreeChangeReviewService
             .Where(key => key.StartsWith("filter.", StringComparison.OrdinalIgnoreCase) &&
                 (key.EndsWith(".clean", StringComparison.OrdinalIgnoreCase) ||
                  key.EndsWith(".process", StringComparison.OrdinalIgnoreCase)))
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            // Git driver subsection names are case-sensitive (Alpha != alpha).
+            // Collapsing them leaves a configured clean/process command executable.
+            .Distinct(StringComparer.Ordinal).ToArray();
         var args = new List<string>();
         foreach (var key in keys)
         {

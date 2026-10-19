@@ -20,8 +20,12 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
     private long selectedGeneration = -1;
     private string selectedIdentity = string.Empty;
     private bool disposed;
-    internal event EventHandler<string>? Unavailable;
+    internal event EventHandler<ViewerFailure>? Unavailable;
     internal event EventHandler<ViewerProgress>? ProgressChanged;
+
+    // Snapshot failures carry their accepted selection through deferred native UI work.
+    // Initialization failures have no selected snapshot and are scoped to this host.
+    internal sealed record ViewerFailure(string Message, long? Generation = null, string? Identity = null);
 
     internal sealed record ViewerProgress(long Generation, string Identity, int Index, int Total,
         string Description, bool Deletion, string Mode);
@@ -182,7 +186,8 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
                         message.RootElement.GetProperty("description").GetString() ?? string.Empty,
                         message.RootElement.GetProperty("deletion").GetBoolean(), message.RootElement.GetProperty("mode").GetString()!));
                 }
-                else Unavailable?.Invoke(this, message.RootElement.GetProperty("message").GetString() ?? "Viewer failed.");
+                else Unavailable?.Invoke(this, new ViewerFailure(message.RootElement.GetProperty("message").GetString() ?? "Viewer failed.",
+                    message.RootElement.GetProperty("generation").GetInt64(), message.RootElement.GetProperty("identity").GetString()));
             };
             core.Navigate(Origin + "index.html");
             await ready.Task.WaitAsync(work.Token);
@@ -191,7 +196,7 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
         catch (WebView2RuntimeNotFoundException runtimeError)
         {
             ready.TrySetException(runtimeError);
-            Unavailable?.Invoke(this, "Diff unavailable: Microsoft Edge WebView2 Runtime is required.");
+            Unavailable?.Invoke(this, new ViewerFailure("Diff unavailable: Microsoft Edge WebView2 Runtime is required."));
             throw;
         }
         catch (OperationCanceledException)
@@ -202,7 +207,7 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
         catch (Exception initializationError)
         {
             ready.TrySetException(initializationError);
-            Unavailable?.Invoke(this, "Diff unavailable: " + initializationError.Message);
+            Unavailable?.Invoke(this, new ViewerFailure("Diff unavailable: " + initializationError.Message));
             throw;
         }
     }
