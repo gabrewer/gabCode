@@ -31,6 +31,7 @@ internal sealed class ReadOnlyDiffView : UserControl
     private readonly DiffModePreference preference;
     private WindowsDiffViewerHost? viewer;
     private Task? initialization;
+    private string? viewerFailure;
     private long generation;
     private string identity = string.Empty;
     private string documentStatus = string.Empty;
@@ -219,10 +220,11 @@ internal sealed class ReadOnlyDiffView : UserControl
         findButton.IsEnabled = available;
     }
 
-    internal async Task ShowDocumentAsync(ReviewDocument document, long selectedGeneration, string selectedIdentity, string path, CancellationToken token)
+    // WebView2 startup and offline bundle verification do not depend on Git content.
+    // Begin while Git is loading; close/failure still disposes this view-owned host.
+    internal void BeginViewerInitialization()
     {
-        generation = selectedGeneration;
-        identity = selectedIdentity;
+        if (viewerFailure is not null) throw new InvalidOperationException(viewerFailure);
         if (viewer is null)
         {
             var assets = Path.Combine(AppContext.BaseDirectory, "NativeDiffViewer");
@@ -231,7 +233,11 @@ internal sealed class ReadOnlyDiffView : UserControl
             var activeHost = viewer;
             viewer.Unavailable += (_, reason) => Dispatcher.BeginInvoke(() =>
             {
-                if (ReferenceEquals(viewer, activeHost)) ShowUnavailable(reason);
+                if (ReferenceEquals(viewer, activeHost))
+                {
+                    viewerFailure = reason;
+                    ShowUnavailable(reason);
+                }
             });
             viewer.ProgressChanged += (_, progress) =>
             {
@@ -241,8 +247,17 @@ internal sealed class ReadOnlyDiffView : UserControl
             Grid.SetRow(viewer, 3);
             root.Children.Add(viewer);
             initialization = viewer.InitializeAsync();
+            _ = initialization.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
-        viewer.Select(selectedGeneration, selectedIdentity);
+    }
+
+    internal async Task ShowDocumentAsync(ReviewDocument document, long selectedGeneration, string selectedIdentity, string path, CancellationToken token)
+    {
+        generation = selectedGeneration;
+        identity = selectedIdentity;
+        BeginViewerInitialization();
+        viewer!.Select(selectedGeneration, selectedIdentity);
         await initialization!.WaitAsync(token);
         token.ThrowIfCancellationRequested();
         if (generation != selectedGeneration || identity != selectedIdentity) throw new OperationCanceledException("Review selection changed.");
@@ -318,6 +333,8 @@ internal sealed class ReadOnlyDiffView : UserControl
         status.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
         AutomationProperties.SetName(status, message);
     }
+
+    internal void AllowViewerRetry() => viewerFailure = null;
 
     internal void DisposeViewer()
     {

@@ -409,7 +409,12 @@ public partial class MainWindow : Window
         var currentFile = ReadOnlyDiffView.CurrentFile(worktree, file);
         var view = new ReadOnlyDiffView(label, currentFile);
         view.CloseRequested += (_, _) => { if (ReferenceEquals(diffView, view)) CloseReviewDiff(); };
-        view.RetryRequested += (_, _) => { if (ReferenceEquals(diffView, view)) _ = RefreshReviewDiffAsync(file); };
+        view.RetryRequested += (_, _) =>
+        {
+            if (!ReferenceEquals(diffView, view)) return;
+            view.AllowViewerRetry();
+            _ = RefreshReviewDiffAsync(file);
+        };
         view.OpenCurrentFileRequested += (_, _) =>
         {
             if (!ReferenceEquals(diffView, view) || currentFile is null || project is null ||
@@ -437,6 +442,7 @@ public partial class MainWindow : Window
                 view.ShowUnavailable("Unresolved conflict — normal two-way diff unavailable.");
                 return;
             }
+            view.BeginViewerInitialization();
             var document = await reviewService.GetReviewDocumentAsync(worktree, file, project.MainBranch, token);
             if (generation == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, worktree))
                 await view.ShowDocumentAsync(document, generation, worktree + ":" + file.Identity, file.Path, token);
@@ -461,6 +467,7 @@ public partial class MainWindow : Window
                 view.ShowUnavailable("Unresolved conflict — normal two-way diff unavailable.");
                 return;
             }
+            view.BeginViewerInitialization();
             var document = await reviewService.GetReviewDocumentAsync(path, file, project.MainBranch, token);
             if (current == diffGeneration && ReferenceEquals(diffView, view) && WorktreePath.Comparer.Equals(project?.ProjectFolder, path))
                 await view.ShowDocumentAsync(document, current, path + ":" + file.Identity, file.Path, token);
