@@ -4,6 +4,8 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Automation;
 using System.Windows.Input;
 using System.Windows.Threading;
 using GabCode.Windows;
@@ -33,9 +35,9 @@ public sealed class ReadOnlyDiffWindowTests
                 view.UpdateLayout();
                 Assert.Contains(Descendants<TextBlock>(view), block => block.Text.Contains("Diff unavailable: unsupported encoding", StringComparison.Ordinal));
                 Assert.Empty(Descendants<TextBox>(view));
-                Assert.Single(Descendants<Button>(view), button => Equals(button.Content, "Close Diff"));
-                Assert.Single(Descendants<Button>(view), button => Equals(button.Content, "Retry"))
-                    .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Assert.Single(Descendants<Button>(view), button => AutomationProperties.GetName(button).StartsWith("Close diff", StringComparison.Ordinal));
+                Assert.Single(Descendants<Button>(view), button => AutomationProperties.GetName(button) == "Retry selected review document")
+                    .RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 Assert.Equal(1, retries);
             }
             finally { window.Close(); }
@@ -56,6 +58,7 @@ public sealed class ReadOnlyDiffWindowTests
                 view.MarkStale("Git read timed out; previous snapshot retained.");
                 view.UpdateLayout();
                 Assert.Contains(Descendants<TextBlock>(view), block => block.Text.Contains("stale", StringComparison.OrdinalIgnoreCase));
+                Assert.Contains(Descendants<Button>(view), button => AutomationProperties.GetName(button) == "Retry selected review document" && button.IsVisible);
             }
             finally { window.Close(); }
             return Task.CompletedTask;
@@ -121,15 +124,21 @@ public sealed class ReadOnlyDiffWindowTests
                     Assert.Equal("committed\n", pair.Before);
                     Assert.Equal("staged\n", pair.After);
                     Assert.Contains(Descendants<TextBlock>(view), block => block.Text.Contains("HEAD → index", StringComparison.Ordinal));
+                    await WaitUntil(() => Descendants<TextBlock>(view).Any(block => block.Text == "1 of 1"));
                     Assert.Equal("worktree-only\n", await File.ReadAllTextAsync(Path.Combine(root, "selected.txt")));
-                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "Inline"));
-                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "File"));
-                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "Next change"));
-                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "Find"));
-                    Assert.Contains(Descendants<Button>(view), button => Equals(button.Content, "Retry"));
+                    var modes = Descendants<ToggleButton>(view).Where(button =>
+                        AutomationProperties.GetName(button).StartsWith("Read-only diff mode:", StringComparison.Ordinal)).ToArray();
+                    Assert.Equal(3, modes.Length);
+                    Assert.Single(modes, button => button.IsChecked is true);
+                    Assert.All(modes, button => { Assert.NotNull(button.ToolTip); Assert.IsNotType<string>(button.Content); });
+                    Assert.Contains(Descendants<Button>(view), button => AutomationProperties.GetName(button) == "Next review change");
+                    Assert.Contains(Descendants<Button>(view), button => AutomationProperties.GetName(button) == "Find in read-only review document");
+                    Assert.All(Descendants<Button>(view).Where(button => button.IsVisible), button => Assert.NotNull(button.ToolTip));
+                    Assert.DoesNotContain(Descendants<Button>(view), button => AutomationProperties.GetName(button) == "Retry selected review document" && button.IsVisible);
+                    Assert.DoesNotContain(Descendants<Button>(view), button => AutomationProperties.GetName(button) == "Focus read-only code comparison");
                     Assert.Equal(piPid, first.ProcessId); Assert.Equal(commandPid, second.ProcessId);
                     view.ApplyTemplate(); view.UpdateLayout();
-                    Assert.Single(Descendants<Button>(view), b => Equals(b.Content, "Close Diff"))
+                    Assert.Single(Descendants<Button>(view), b => AutomationProperties.GetName(b).StartsWith("Close diff", StringComparison.Ordinal))
                         .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                     Assert.Equal(piPid, first.ProcessId); Assert.Equal(commandPid, second.ProcessId);
                 }
@@ -179,7 +188,7 @@ public sealed class ReadOnlyDiffWindowTests
                     var view = Assert.IsType<ReadOnlyDiffView>(main.Content);
                     view.ApplyTemplate();
                     view.UpdateLayout();
-                    var close = Assert.Single(Descendants<Button>(view), b => Equals(b.Content, "Close Diff"));
+                    var close = Assert.Single(Descendants<Button>(view), b => AutomationProperties.GetName(b).StartsWith("Close diff", StringComparison.Ordinal));
                     await WaitUntil(() => close.IsKeyboardFocused);
                     close.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                     Assert.Same(second, main.Content);
@@ -264,7 +273,7 @@ public sealed class ReadOnlyDiffWindowTests
                     sidebar.RequestRefresh();
                     await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Untracked: added.txt") && !ReferenceEquals(b, file)));
                     diff.ApplyTemplate(); diff.UpdateLayout();
-                    Assert.Single(Descendants<Button>(diff), b => Equals(b.Content, "Close Diff"))
+                    Assert.Single(Descendants<Button>(diff), b => AutomationProperties.GetName(b).StartsWith("Close diff", StringComparison.Ordinal))
                         .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                     var restored = Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Untracked: added.txt"));
                     Assert.True(restored.IsKeyboardFocused);

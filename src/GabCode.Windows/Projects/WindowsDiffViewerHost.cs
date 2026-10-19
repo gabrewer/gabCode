@@ -21,6 +21,10 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
     private string selectedIdentity = string.Empty;
     private bool disposed;
     internal event EventHandler<string>? Unavailable;
+    internal event EventHandler<ViewerProgress>? ProgressChanged;
+
+    internal sealed record ViewerProgress(long Generation, string Identity, int Index, int Total,
+        string Description, bool Deletion, string Mode);
 
     internal sealed record Snapshot(long Generation, string Identity, string Path, string Before, string After,
         string BeforeLabel, string AfterLabel, string Mode,
@@ -74,6 +78,25 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String) return false;
             var name = kind.GetString();
             if (name == "ready") return root.EnumerateObject().Count() == 1;
+            if (name == "progress")
+            {
+                if (root.EnumerateObject().Count() != 8 ||
+                    !root.TryGetProperty("generation", out var progressGeneration) ||
+                    !root.TryGetProperty("identity", out var progressIdentity) ||
+                    !root.TryGetProperty("index", out var index) ||
+                    !root.TryGetProperty("total", out var total) ||
+                    !root.TryGetProperty("description", out var description) ||
+                    !root.TryGetProperty("deletion", out var deletion) ||
+                    !root.TryGetProperty("mode", out var mode)) return false;
+                return progressGeneration.ValueKind == JsonValueKind.Number && progressGeneration.TryGetInt64(out var pg) &&
+                    pg is >= 0 and <= 9007199254740991L &&
+                    progressIdentity.ValueKind == JsonValueKind.String && progressIdentity.GetString() is { Length: > 0 and <= 512 } &&
+                    total.ValueKind == JsonValueKind.Number && total.TryGetInt32(out var count) && count is >= 0 and <= 1000000 &&
+                    index.ValueKind == JsonValueKind.Number && index.TryGetInt32(out var position) && position >= 0 && position <= count &&
+                    description.ValueKind == JsonValueKind.String && description.GetString() is { Length: <= 256 } &&
+                    deletion.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+                    mode.ValueKind == JsonValueKind.String && mode.GetString() is "side-by-side" or "inline" or "file";
+            }
             if (name != "failure" || root.EnumerateObject().Count() != 4 ||
                 !root.TryGetProperty("message", out var detail) || !root.TryGetProperty("generation", out var generation) ||
                 !root.TryGetProperty("identity", out var identity)) return false;
@@ -140,10 +163,18 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
             {
                 if (!IsAllowedViewerMessage(args.Source, args.WebMessageAsJson, Origin)) return;
                 using var message = JsonDocument.Parse(args.WebMessageAsJson);
-                if (message.RootElement.GetProperty("kind").GetString() == "ready") ready.TrySetResult();
-                else if (message.RootElement.GetProperty("generation").GetInt64() == selectedGeneration &&
-                         message.RootElement.GetProperty("identity").GetString() == selectedIdentity)
-                    Unavailable?.Invoke(this, message.RootElement.GetProperty("message").GetString() ?? "Viewer failed.");
+                var kind = message.RootElement.GetProperty("kind").GetString();
+                if (kind == "ready") { ready.TrySetResult(); return; }
+                if (message.RootElement.GetProperty("generation").GetInt64() != selectedGeneration ||
+                    message.RootElement.GetProperty("identity").GetString() != selectedIdentity) return;
+                if (kind == "progress")
+                {
+                    ProgressChanged?.Invoke(this, new ViewerProgress(selectedGeneration, selectedIdentity,
+                        message.RootElement.GetProperty("index").GetInt32(), message.RootElement.GetProperty("total").GetInt32(),
+                        message.RootElement.GetProperty("description").GetString() ?? string.Empty,
+                        message.RootElement.GetProperty("deletion").GetBoolean(), message.RootElement.GetProperty("mode").GetString()!));
+                }
+                else Unavailable?.Invoke(this, message.RootElement.GetProperty("message").GetString() ?? "Viewer failed.");
             };
             core.Navigate(Origin + "index.html");
             await ready.Task.WaitAsync(work.Token);
@@ -189,10 +220,10 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
 
     internal async Task SendControlAsync(long generation, string identity, string kind, string value = "", CancellationToken token = default)
     {
-        if (kind is not ("mode" or "change" or "find" or "focus") ||
+        if (kind is not ("mode" or "change" or "find" or "focus" or "deletion") ||
             kind == "mode" && value is not ("side-by-side" or "inline" or "file") ||
             kind == "change" && value is not ("next" or "previous") ||
-            (kind is "find" or "focus") && value.Length != 0)
+            (kind is "find" or "focus" or "deletion") && value.Length != 0)
             throw new ArgumentException("Unsupported viewer control.");
         using var work = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         await ready.Task.WaitAsync(work.Token);
@@ -206,6 +237,13 @@ internal sealed class WindowsDiffViewerHost : UserControl, IDisposable
             "change" => JsonSerializer.Serialize(new { kind, generation, identity, direction = value }),
             _ => JsonSerializer.Serialize(new { kind, generation, identity })
         });
+    }
+
+    internal async Task<int> EmbeddedNavigationButtonCountForTestAsync()
+    {
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        var json = await webView.ExecuteScriptAsync("document.querySelectorAll('button').length");
+        return JsonSerializer.Deserialize<int>(json);
     }
 
     internal async Task AttemptTypingForTestAsync()

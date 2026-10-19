@@ -3,8 +3,8 @@ export function changeLocations(changes, lineCount) {
   if (!Array.isArray(changes)) return [];
   return changes.map(change => {
     // Monaco's getLineChanges uses end=0 for empty sides, including at the first line.
-    const deleted = change.modifiedEndLineNumber === 0;
-    const added = change.originalEndLineNumber === 0;
+    const deleted = change.modifiedEndLineNumber === 0 || change.modifiedStartLineNumber > change.modifiedEndLineNumber;
+    const added = change.originalEndLineNumber === 0 || change.originalStartLineNumber > change.originalEndLineNumber;
     const line = Math.max(1, Math.min(Math.max(1, lineCount), change.modifiedStartLineNumber));
     const kind = deleted ? 'deleted' : added ? 'added' : 'modified';
     return { line, kind, description: `${kind[0].toUpperCase()}${kind.slice(1)} change near resulting line ${line}`, charChanges: change.charChanges ?? [] };

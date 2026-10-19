@@ -27,6 +27,11 @@ public sealed class WindowsDiffViewerHostTests
                 try
                 {
                     host = new WindowsDiffViewerHost(assets, profile);
+                    var deletionProgress = new TaskCompletionSource<WindowsDiffViewerHost.ViewerProgress>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    host.ProgressChanged += (_, progress) =>
+                    {
+                        if (progress.Identity == "fixture:deleted" && progress.Deletion) deletionProgress.TrySetResult(progress);
+                    };
                     window = new Window { Content = host, Width = 720, Height = 440, ShowInTaskbar = false };
                     window.Show();
                     await host.InitializeAsync();
@@ -36,6 +41,7 @@ public sealed class WindowsDiffViewerHostTests
                     Assert.Equal("committed\n", value.Before);
                     Assert.Equal("staged\n", value.After);
                     Assert.Contains("Change 1 of 1", await host.WaitForChangeStatusForTestAsync());
+                    Assert.Equal(0, await host.EmbeddedNavigationButtonCountForTestAsync());
                     await host.SetLineForTestAsync(2);
                     host.Select(2, "fixture:inline");
                     await host.ShowAsync(new WindowsDiffViewerHost.Snapshot(2, "fixture:inline", "src/app.cs", "committed\n", "staged\n", "HEAD", "index", "inline"));
@@ -58,6 +64,15 @@ public sealed class WindowsDiffViewerHostTests
                     Assert.Equal("file", await host.WaitForModeForTestAsync("file"));
                     await host.AttemptTypingForTestAsync();
                     Assert.Equal("staged\n", (await host.ReadDocumentForTestAsync()).After);
+                    host.Select(4, "fixture:deleted");
+                    await host.ShowAsync(new WindowsDiffViewerHost.Snapshot(4, "fixture:deleted", "src/app.cs", "first\ngone\nlast\n", "first\nlast\n", "HEAD", "index", "file"));
+                    var progress = await deletionProgress.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                    Assert.Equal("file", progress.Mode);
+                    Assert.Equal(1, progress.Index);
+                    Assert.Equal(1, progress.Total);
+                    await host.SendControlAsync(4, "fixture:deleted", "deletion");
+                    Assert.Equal("inline", await host.WaitForModeForTestAsync("inline"));
+                    await Assert.ThrowsAsync<OperationCanceledException>(() => host.SendControlAsync(3, "fixture:file", "deletion"));
                     finished.TrySetResult();
                 }
                 catch (Exception error) { finished.TrySetException(error); }
@@ -134,6 +149,10 @@ public sealed class WindowsDiffViewerHostTests
         Assert.True(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"ready\"}", origin));
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage("https://evil.invalid/", "{\"kind\":\"ready\"}", origin));
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"save\"}", origin));
+        Assert.True(WindowsDiffViewerHost.IsAllowedViewerMessage(origin,
+            "{\"kind\":\"progress\",\"generation\":1,\"identity\":\"selected\",\"index\":1,\"total\":3,\"description\":\"Modified change near line 3\",\"deletion\":false,\"mode\":\"file\"}", origin));
+        Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin,
+            "{\"kind\":\"progress\",\"generation\":1,\"identity\":\"selected\",\"index\":1,\"total\":3,\"description\":\"OK\",\"deletion\":false,\"mode\":\"edit\"}", origin));
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"ready\",\"path\":\"secret\"}", origin));
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"failure\",\"message\":\"" + new string('z', 2049) + "\"}", origin));
         Assert.False(WindowsDiffViewerHost.IsAllowedViewerMessage(origin, "{\"kind\":\"failure\",\"message\":\"old selection\"}", origin));
