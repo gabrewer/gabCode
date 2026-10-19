@@ -193,6 +193,35 @@ public sealed class WorktreeChangeReviewServiceTests
         Assert.Contains(result.Working, file => file.Path == "tracked.txt");
     }
 
+    [Theory]
+    [InlineData("clean")]
+    [InlineData("process")]
+    public async Task Snapshot_status_never_executes_case_distinct_filter_drivers(string hook)
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await repo.Git("config", "user.name", "Test");
+        foreach (var name in new[] { "upper", "lower" })
+            await File.WriteAllTextAsync(Path.Combine(repo.Path, name + ".txt"), "base\n");
+        await repo.Git("add", "upper.txt", "lower.txt");
+        await repo.Git("commit", "-m", "base");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, ".gitattributes"),
+            "upper.txt filter=Alpha\nlower.txt filter=alpha\n");
+        await repo.Git("config", "filter.Alpha." + hook, "cmd /d /c echo upper>marker-upper.txt");
+        await repo.Git("config", "filter.alpha." + hook, "cmd /d /c echo lower>marker-lower.txt");
+        // Same byte length as the committed content: Git must inspect the worktree
+        // rather than declaring it changed just from stat size.
+        foreach (var name in new[] { "upper", "lower" })
+            await File.WriteAllTextAsync(Path.Combine(repo.Path, name + ".txt"), "edit\n");
+        var snapshot = await new WorktreeChangeReviewService().GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(snapshot.IsStale, snapshot.Error);
+        Assert.Contains(snapshot.Working, file => file.Path == "upper.txt");
+        Assert.Contains(snapshot.Working, file => file.Path == "lower.txt");
+        Assert.False(File.Exists(Path.Combine(repo.Path, "marker-upper.txt")));
+        Assert.False(File.Exists(Path.Combine(repo.Path, "marker-lower.txt")));
+    }
+
     [Fact]
     public async Task Unborn_snapshot_retains_staged_file_but_no_history_base()
     {

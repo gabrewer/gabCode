@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows;
@@ -142,6 +143,45 @@ public sealed class ReadOnlyDiffWindowTests
                 view.ShowUnavailable("Git read failed");
                 Assert.False(view.HasStagedViewer);
                 Assert.Contains(Descendants<TextBlock>(view), text => text.Text.Contains("Git read failed", StringComparison.Ordinal));
+            }
+            finally { view.DisposeViewer(); window.Close(); }
+        });
+    }
+
+    [Fact]
+    public async Task Queued_old_viewer_failure_cannot_dispose_replacement_on_the_same_host()
+    {
+        await OnSta(async () =>
+        {
+            var view = new ReadOnlyDiffView("review.txt — HEAD → index", null);
+            var window = new Window { Content = view, Width = 720, Height = 440, ShowInTaskbar = false };
+            window.Show();
+            try
+            {
+                var document = new ReviewDocument("base\n", "first\n", "HEAD → index",
+                    false, false, "LF", "LF", true, true, false);
+                await view.ShowDocumentAsync(document, 1, "first", "review.txt", CancellationToken.None);
+                Assert.Equal("first\n", (await view.ReadViewerPairForTestAsync()).After);
+                var host = Assert.IsType<WindowsDiffViewerHost>(typeof(ReadOnlyDiffView)
+                    .GetField("viewer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(view));
+                var failure = Assert.IsType<EventHandler<WindowsDiffViewerHost.ViewerFailure>>(typeof(WindowsDiffViewerHost)
+                    .GetField("Unavailable", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host));
+                // This event has already passed native origin/generation validation.
+                // Delay only its WPF callback until after a replacement is selected.
+                failure(host, new WindowsDiffViewerHost.ViewerFailure("old failure", 1, "first"));
+                await view.ShowDocumentAsync(document with { After = "second\n" }, 2, "second", "review.txt", CancellationToken.None);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                Assert.True(view.HasStagedViewer);
+                for (var attempt = 0; attempt < 80; attempt++)
+                {
+                    if ((await view.ReadViewerPairForTestAsync()).After == "second\n") break;
+                    await Task.Delay(50);
+                }
+                Assert.Equal("second\n", (await view.ReadViewerPairForTestAsync()).After);
+                failure(host, new WindowsDiffViewerHost.ViewerFailure("current failure", 2, "second"));
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                Assert.False(view.HasStagedViewer);
+                Assert.Contains(Descendants<TextBlock>(view), text => text.Text.Contains("current failure", StringComparison.Ordinal));
             }
             finally { view.DisposeViewer(); window.Close(); }
         });

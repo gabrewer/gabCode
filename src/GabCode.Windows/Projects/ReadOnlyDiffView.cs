@@ -231,13 +231,13 @@ internal sealed class ReadOnlyDiffView : UserControl
             var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "gabCode", "DiffViewerProfile");
             viewer = new WindowsDiffViewerHost(assets, profile);
             var activeHost = viewer;
-            viewer.Unavailable += (_, reason) => Dispatcher.BeginInvoke(() =>
+            viewer.Unavailable += (_, failure) => Dispatcher.BeginInvoke(() =>
             {
-                if (ReferenceEquals(viewer, activeHost))
-                {
-                    viewerFailure = reason;
-                    ShowUnavailable(reason);
-                }
+                if (!ReferenceEquals(viewer, activeHost) ||
+                    failure.Generation is { } failedGeneration &&
+                    (failedGeneration != generation || failure.Identity != identity)) return;
+                viewerFailure = failure.Message;
+                ShowUnavailable(failure.Message);
             });
             viewer.ProgressChanged += (_, progress) =>
             {
