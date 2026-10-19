@@ -55,8 +55,15 @@ internal sealed class ReadOnlyDiffView : UserControl
         AutomationProperties.SetName(heading, label);
         root.Children.Add(heading);
 
-        var controls = new WrapPanel { Margin = new Thickness(10, 0, 10, 5), Orientation = Orientation.Horizontal };
-        AutomationProperties.SetName(controls, "Read-only review controls. F6 focuses code; Escape returns to controls.");
+        var toolbar = new Grid { Margin = new Thickness(10, 0, 10, 5) };
+        toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        AutomationProperties.SetName(toolbar, "Read-only review controls. F6 focuses code; Escape returns to controls.");
+        var controls = new WrapPanel { Orientation = Orientation.Horizontal };
+        toolbar.Children.Add(controls);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
+        Grid.SetColumn(actions, 1);
+        toolbar.Children.Add(actions);
         AddMode(controls, "Side by side", "side-by-side", "M3,3 H17 V17 H3 Z M10,3 V17");
         AddMode(controls, "Inline", "inline", "M3,3 H17 V17 H3 Z M5,8 H15 M5,12 H15");
         AddMode(controls, "File", "file", "M5,2 H13 L17,6 V18 H5 Z M13,2 V6 H17");
@@ -72,13 +79,13 @@ internal sealed class ReadOnlyDiffView : UserControl
         controls.Children.Add(changePosition);
         deletionButton = AddButton(controls, "View deletion in Inline", "View deletion in Inline", "M4,4 H16 M4,9 H12 M4,14 H16 M12,9 L16,13 M16,13 L18,10", () => _ = ControlAsync("deletion"));
         deletionButton.Visibility = Visibility.Collapsed;
-        findButton = AddButton(controls, "Find in read-only review document", "Find (F6 focuses code)", "M13.5,8 A5.5,5.5 0 1 1 2.5,8 A5.5,5.5 0 1 1 13.5,8 M12,12 L18,18", () => _ = ControlAsync("find"));
-        openButton = AddButton(controls, "Open current worktree file in VS Code (not historical snapshot)", "Open in VS Code", "M9,4 H17 V12 M17,4 L8,13 M14,11 V17 H3 V6 H9", () => OpenCurrentFileRequested?.Invoke(this, EventArgs.Empty));
-        openButton.Visibility = currentFile is null ? Visibility.Collapsed : Visibility.Visible;
         retryButton = AddButton(controls, "Retry selected review document", "Retry review", "M16,7 A7,7 0 1 0 17,11 M16,3 V7 H12", () => RetryRequested?.Invoke(this, EventArgs.Empty));
         retryButton.Visibility = Visibility.Collapsed;
-        closeButton = AddButton(controls, "Close diff and restore invoking control", "Close diff", "M4,4 L16,16 M16,4 L4,16", () => CloseRequested?.Invoke(this, EventArgs.Empty));
-        Grid.SetRow(controls, 1); root.Children.Add(controls);
+        findButton = AddButton(actions, "Find in read-only review document", "Find (F6 focuses code)", "M13.5,8 A5.5,5.5 0 1 1 2.5,8 A5.5,5.5 0 1 1 13.5,8 M12,12 L18,18", () => _ = ControlAsync("find"));
+        openButton = AddButton(actions, "Open current worktree file in VS Code (not historical snapshot)", "Open in VS Code", "M9,4 H17 V12 M17,4 L8,13 M14,11 V17 H3 V6 H9", () => OpenCurrentFileRequested?.Invoke(this, EventArgs.Empty));
+        openButton.Visibility = currentFile is null ? Visibility.Collapsed : Visibility.Visible;
+        closeButton = AddButton(actions, "Close diff and restore invoking control", "Close diff", "M4,4 L16,16 M16,4 L4,16", () => CloseRequested?.Invoke(this, EventArgs.Empty));
+        Grid.SetRow(toolbar, 1); root.Children.Add(toolbar);
 
         status = new TextBlock { Text = "Loading diff…", Margin = new Thickness(12, 0, 12, 4), Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap };
         AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
@@ -127,7 +134,7 @@ internal sealed class ReadOnlyDiffView : UserControl
     {
         var icon = new ShapePath
         {
-            Data = Geometry.Parse(geometry), Width = 18, Height = 18, Stretch = Stretch.Uniform,
+            Data = Geometry.Parse(geometry), Width = 16, Height = 16, Stretch = Stretch.Uniform,
             StrokeThickness = 1.8, StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round
         };
@@ -172,9 +179,9 @@ internal sealed class ReadOnlyDiffView : UserControl
         style.Setters.Add(new Setter(BackgroundProperty, background));
         style.Setters.Add(new Setter(BorderBrushProperty, borderBrush));
         style.Setters.Add(new Setter(ForegroundProperty, foreground));
-        style.Setters.Add(new Setter(PaddingProperty, new Thickness(7, 4, 7, 4)));
-        style.Setters.Add(new Setter(MinWidthProperty, 34.0));
-        style.Setters.Add(new Setter(MinHeightProperty, 30.0));
+        style.Setters.Add(new Setter(PaddingProperty, new Thickness(5, 3, 5, 3)));
+        style.Setters.Add(new Setter(MinWidthProperty, 28.0));
+        style.Setters.Add(new Setter(MinHeightProperty, 26.0));
         return style;
     }
 

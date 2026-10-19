@@ -46,6 +46,39 @@ public sealed class ReadOnlyDiffWindowTests
     }
 
     [Fact]
+    public async Task Compact_toolbar_keeps_search_code_and_close_right_aligned_with_or_without_current_file()
+    {
+        await OnSta(() =>
+        {
+            foreach (var currentFile in new string?[] { "C:\\review\\file.txt", null })
+            {
+                var view = new ReadOnlyDiffView("review/file.txt — HEAD → index", currentFile);
+                var window = new Window { Content = view, Width = 340, Height = 320, ShowInTaskbar = false };
+                window.Show();
+                try
+                {
+                    view.UpdateLayout();
+                    var buttons = Descendants<Button>(view).ToArray();
+                    var search = Assert.Single(buttons, b => AutomationProperties.GetName(b) == "Find in read-only review document");
+                    var code = Assert.Single(buttons, b => AutomationProperties.GetName(b).StartsWith("Open current worktree file in VS Code", StringComparison.Ordinal));
+                    var close = Assert.Single(buttons, b => AutomationProperties.GetName(b).StartsWith("Close diff", StringComparison.Ordinal));
+                    var next = Assert.Single(buttons, b => AutomationProperties.GetName(b) == "Next review change");
+                    Assert.Equal(currentFile is not null, code.IsVisible);
+                    Assert.True(search.TranslatePoint(new Point(), view).X > next.TranslatePoint(new Point(), view).X);
+                    Assert.True(close.TranslatePoint(new Point(), view).X > search.TranslatePoint(new Point(), view).X);
+                    Assert.InRange(view.ActualWidth - close.TranslatePoint(new Point(), view).X - close.ActualWidth, 9, 20);
+                    if (code.IsVisible) Assert.True(close.TranslatePoint(new Point(), view).X > code.TranslatePoint(new Point(), view).X);
+                    Assert.InRange(search.ActualWidth, 26, 29);
+                    Assert.InRange(search.ActualHeight, 24, 27);
+                    Assert.All(Descendants<System.Windows.Shapes.Path>(view), icon => Assert.Equal(16, icon.Width));
+                }
+                finally { window.Close(); }
+            }
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
     public async Task Retained_native_document_marks_stale_without_silently_claiming_freshness()
     {
         await OnSta(() =>
