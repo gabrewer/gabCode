@@ -111,6 +111,33 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testClosingAnotherWindowPreservesAccessibleWorkspaceRefreshControls() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+
+        // The parent workspace surface currently supplies a shared AX identifier
+        // to this button; its accessible label is the stable native selector.
+        let worktrees = app.buttons["Refresh Worktrees"]
+        let review = app.buttons["refresh-change-review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 12))
+        XCTAssertTrue(worktrees.waitForExistence(timeout: 5))
+        XCTAssertEqual(worktrees.label, "Refresh Worktrees")
+        XCTAssertEqual(review.label, "Refresh Changes and History")
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(app.buttons["open-workspace"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.windows.count, 2)
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(worktrees.waitForExistence(timeout: 5))
+        XCTAssertTrue(review.exists)
+        XCTAssertEqual(app.windows.count, 1)
+        review.click()
+        XCTAssertTrue(review.exists, "Second-window closure must not discard first-window review")
+        XCTAssertTrue(worktrees.exists, "Review refresh must not replace worktree refresh")
+    }
+
+    @MainActor
     func testCommandCommaOpensAccessibleTerminalFontSettings() throws {
         app.launch()
         XCTAssertTrue(app.buttons["open-workspace"].waitForExistence(timeout: 5))

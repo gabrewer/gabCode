@@ -73,6 +73,97 @@ final class WorktreeChangeReviewCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.errorMessage)
     }
 
+    func testScopeSwitchDuringCoalescingCooldownReleasesCancelledSlot() async throws {
+        let first = URL(fileURLWithPath: "/tmp/review cooldown old \(UUID())", isDirectory: true)
+        let second = URL(fileURLWithPath: "/tmp/review cooldown new \(UUID())", isDirectory: true)
+        let gate = SwitchSnapshotGate()
+        let coordinator = WorktreeChangeReviewCoordinator(snapshotLoader: { path, _ in
+            await gate.load(self.snapshot(path, working: [], commits: []))
+        })
+        coordinator.activate(worktree: first, mainBranch: "trunk")
+        coordinator.requestRefresh()
+        await gate.waitForStart()
+        coordinator.requestRefresh() // first completion enters its one-second cooldown
+        await gate.release()
+        let firstDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while coordinator.snapshot?.worktree != first && ContinuousClock.now < firstDeadline { await Task.yield() }
+        XCTAssertEqual(coordinator.snapshot?.worktree, first)
+        coordinator.activate(worktree: second, mainBranch: "trunk")
+        coordinator.requestRefresh()
+        let secondDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while coordinator.snapshot?.worktree != second && ContinuousClock.now < secondDeadline { await Task.yield() }
+        XCTAssertEqual(coordinator.snapshot?.worktree, second, "Cancelling pacing sleep must not strand old refresh slot")
+        coordinator.deactivate()
+    }
+
+    func testScopeSwitchWaitsForCancelledSnapshotCleanupBeforeLaunchingReplacement() async throws {
+        let first = URL(fileURLWithPath: "/tmp/review old scope \(UUID())", isDirectory: true)
+        let second = URL(fileURLWithPath: "/tmp/review new scope \(UUID())", isDirectory: true)
+        let gate = SwitchSnapshotGate()
+        let coordinator = WorktreeChangeReviewCoordinator(snapshotLoader: { path, _ in
+            await gate.load(self.snapshot(path, working: [], commits: []))
+        })
+        coordinator.activate(worktree: first, mainBranch: "trunk")
+        coordinator.requestRefresh()
+        await gate.waitForStart()
+        coordinator.activate(worktree: second, mainBranch: "trunk")
+        coordinator.requestRefresh()
+        for _ in 0..<200 { await Task.yield() }
+        let before = await gate.calls
+        XCTAssertEqual(before, 1, "Switch cannot overlap old Git cleanup")
+        await gate.release()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while coordinator.snapshot?.worktree != second && ContinuousClock.now < deadline { await Task.yield() }
+        let peak = await gate.peak
+        XCTAssertEqual(peak, 1)
+        XCTAssertEqual(coordinator.snapshot?.worktree, second)
+        coordinator.deactivate()
+    }
+
+    func testFailedAutomaticRefreshBacksOffWhileExplicitRetryRuns() async throws {
+        let root = URL(fileURLWithPath: "/tmp/review retry \(UUID())", isDirectory: true)
+        let expected = snapshot(root, working: [], commits: [])
+        let loader = RetrySnapshotLoader(expected: expected)
+        let coordinator = WorktreeChangeReviewCoordinator(snapshotLoader: { _, _ in try await loader.load() })
+        coordinator.activate(worktree: root, mainBranch: "trunk")
+        defer { coordinator.deactivate() }
+        coordinator.requestRefresh()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !coordinator.isStale && ContinuousClock.now < deadline { await Task.yield() }
+        XCTAssertTrue(coordinator.isStale)
+        for _ in 0..<100 { coordinator.requestRefresh() }
+        let before = await loader.calls
+        XCTAssertEqual(before, 1, "Watcher storm after failure must observe retry cooldown")
+        coordinator.requestRefresh(explicit: true)
+        let retryDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while coordinator.snapshot == nil && ContinuousClock.now < retryDeadline { await Task.yield() }
+        let after = await loader.count()
+        XCTAssertEqual(after, 2)
+        XCTAssertFalse(coordinator.isStale)
+        XCTAssertNotNil(coordinator.snapshot)
+    }
+
+    func testRefreshHintsDuringAnActiveRequestCoalesceIntoOneFollowUp() async throws {
+        let root = URL(fileURLWithPath: "/tmp/review burst \(UUID())", isDirectory: true)
+        let expected = snapshot(root, working: [], commits: [])
+        let gate = BurstSnapshotGate()
+        let coordinator = WorktreeChangeReviewCoordinator(snapshotLoader: { _, _ in await gate.next(expected) })
+        coordinator.activate(worktree: root, mainBranch: "trunk")
+        defer { coordinator.deactivate() }
+        coordinator.requestRefresh()
+        await gate.waitForStart()
+        for _ in 0..<100 { coordinator.requestRefresh() }
+        let before = await gate.calls
+        XCTAssertEqual(before, 1, "Only one in-flight snapshot may own the selected scope")
+        await gate.release()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await gate.calls < 2 && ContinuousClock.now < deadline { await Task.yield() }
+        let count = await gate.calls
+        let peak = await gate.peak
+        XCTAssertEqual(count, 2, "Burst hints schedule exactly one fresh snapshot")
+        XCTAssertEqual(peak, 1, "A replacement cannot overlap still-running cleanup")
+    }
+
     func testRecursiveMacOSFSEventsInvalidatesOnNestedFileChange() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("review observer \(UUID())", isDirectory: true)
         let nested = root.appendingPathComponent("nested/deeper", isDirectory: true)
@@ -118,6 +209,62 @@ final class WorktreeChangeReviewCoordinatorTests: XCTestCase {
             guard let next = results.removeFirst() else { throw ReviewGitError.failed("Injected Git failure") }
             return next
         }
+    }
+
+    private actor SwitchSnapshotGate {
+        var calls = 0
+        var active = 0
+        var peak = 0
+        private var waiting: CheckedContinuation<Void, Never>?
+        private var starters: [CheckedContinuation<Void, Never>] = []
+        func load(_ snapshot: ReviewSnapshot) async -> ReviewSnapshot {
+            calls += 1; active += 1; peak = max(peak, active)
+            if calls == 1 {
+                starters.forEach { $0.resume() }; starters.removeAll()
+                await withCheckedContinuation { waiting = $0 }
+            }
+            active -= 1
+            return snapshot
+        }
+        func waitForStart() async {
+            if waiting != nil { return }
+            await withCheckedContinuation { starters.append($0) }
+        }
+        func release() { waiting?.resume(); waiting = nil }
+    }
+
+    private actor RetrySnapshotLoader {
+        let expected: ReviewSnapshot
+        var calls = 0
+        init(expected: ReviewSnapshot) { self.expected = expected }
+        func load() throws -> ReviewSnapshot {
+            calls += 1
+            if calls == 1 { throw ReviewGitError.timeout }
+            return expected
+        }
+        func count() -> Int { calls }
+    }
+
+    private actor BurstSnapshotGate {
+        var calls = 0
+        var active = 0
+        var peak = 0
+        private var held: CheckedContinuation<Void, Never>?
+        private var starters: [CheckedContinuation<Void, Never>] = []
+        func next(_ snapshot: ReviewSnapshot) async -> ReviewSnapshot {
+            calls += 1; active += 1; peak = max(peak, active)
+            if calls == 1 {
+                starters.forEach { $0.resume() }; starters.removeAll()
+                await withCheckedContinuation { held = $0 }
+            }
+            active -= 1
+            return snapshot
+        }
+        func waitForStart() async {
+            if held != nil { return }
+            await withCheckedContinuation { starters.append($0) }
+        }
+        func release() { held?.resume(); held = nil }
     }
 
     private actor SnapshotGate {

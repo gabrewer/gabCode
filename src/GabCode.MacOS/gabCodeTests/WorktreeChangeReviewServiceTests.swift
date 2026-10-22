@@ -502,6 +502,42 @@ final class WorktreeChangeReviewServiceTests: XCTestCase {
         XCTAssertFalse(all.first?.summary.isEmpty ?? true, "Commit rows must have a short file summary")
     }
 
+    func testStatusParserRejectsExcessRowsBeforeSortingOrPublishing() throws {
+        let root = URL(fileURLWithPath: "/tmp/review status limit \(UUID())", isDirectory: true)
+        var data = Data()
+        for index in 0..<20_000 { data.append(Data("?? file-\(index)\u{0}".utf8)) }
+        XCTAssertThrowsError(try WorktreeChangeReviewService.parseStatus(data, worktree: root)) { error in
+            guard case .unavailable = error as? ReviewGitError else { return XCTFail("Expected explicit size limit, got \(error)") }
+        }
+    }
+
+    func testSnapshotHasOneBudgetAcrossSequentialGitProbes() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review total budget \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["-c", "init.defaultBranch=trunk", "init", "--quiet"], in: root)
+        for i in 0..<12 {
+            try "base\n".write(to: root.appendingPathComponent("file\(i).txt"), atomically: true, encoding: .utf8)
+        }
+        try git(["add", "."], in: root)
+        try commit("base", in: root)
+        for i in 0..<12 {
+            try "changed\n".write(to: root.appendingPathComponent("file\(i).txt"), atomically: true, encoding: .utf8)
+        }
+        let count = root.appendingPathComponent("commands.log")
+        let fakeGit = root.appendingPathComponent("slow git")
+        try "#!/bin/sh\necho query >> '\(count.path)'\n/bin/sleep 0.06\nexec /usr/bin/git \"$@\"\n".write(to: fakeGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+        let start = ContinuousClock.now
+        do {
+            _ = try await WorktreeChangeReviewService(executable: fakeGit, timeout: .seconds(1), requestTimeout: .seconds(1)).snapshot(worktree: root, mainBranch: "trunk")
+            XCTFail("A complete request must not reset its one-second budget at every Git command")
+        } catch ReviewGitError.timeout { /* expected */ }
+        let elapsed = start.duration(to: .now)
+        XCTAssertLessThan(elapsed, .seconds(2), "Cleanup has a separate bounded allowance")
+        XCTAssertLessThan((try String(contentsOf: count, encoding: .utf8)).split(separator: "\n").count, 32)
+    }
+
     func testCancellationTerminatesAnOwnedGitProcess() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("review cancel \(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

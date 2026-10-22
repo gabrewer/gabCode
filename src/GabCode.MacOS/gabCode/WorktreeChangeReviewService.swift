@@ -63,17 +63,27 @@ enum ReviewGitError: Error, LocalizedError {
 final class WorktreeChangeReviewService: @unchecked Sendable {
     let executable: URL
     let timeout: Duration
+    let requestTimeout: Duration
+    @TaskLocal static var requestDeadline: ContinuousClock.Instant?
     let outputLimit: Int
     let pageSize: Int
 
-    nonisolated init(executable: URL = URL(fileURLWithPath: "/usr/bin/git"), timeout: Duration = .seconds(5), outputLimit: Int = 2 * 1024 * 1024, pageSize: Int = 100) {
+    nonisolated init(executable: URL = URL(fileURLWithPath: "/usr/bin/git"), timeout: Duration = .seconds(5), requestTimeout: Duration = .seconds(8), outputLimit: Int = 2 * 1024 * 1024, pageSize: Int = 100) {
         self.executable = executable
         self.timeout = timeout
+        self.requestTimeout = requestTimeout
         self.outputLimit = outputLimit
         self.pageSize = max(1, min(pageSize, 500))
     }
 
     func snapshot(worktree: URL, mainBranch: String) async throws -> ReviewSnapshot {
+        if Self.requestDeadline != nil { return try await snapshotWithinBudget(worktree: worktree, mainBranch: mainBranch) }
+        return try await Self.$requestDeadline.withValue(ContinuousClock.now.advanced(by: requestTimeout)) {
+            try await snapshotWithinBudget(worktree: worktree, mainBranch: mainBranch)
+        }
+    }
+
+    private func snapshotWithinBudget(worktree: URL, mainBranch: String) async throws -> ReviewSnapshot {
         let root = worktree.standardizedFileURL
         guard !mainBranch.isEmpty, !mainBranch.contains("\0"), !mainBranch.hasPrefix("-") else {
             throw ReviewGitError.unavailable("Invalid configured main branch.")
@@ -123,6 +133,13 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
     /// Never infer membership from an old SHA or splice stale pages:
     /// main may have advanced, HEAD may have been rebased, and pagination uses an offset.
     func reconciledHistory(_ next: ReviewSnapshot, retaining previous: ReviewSnapshot, mainBranch: String) async throws -> ReviewSnapshot {
+        if Self.requestDeadline != nil { return try await reconcileWithinBudget(next, retaining: previous, mainBranch: mainBranch) }
+        return try await Self.$requestDeadline.withValue(ContinuousClock.now.advanced(by: requestTimeout)) {
+            try await reconcileWithinBudget(next, retaining: previous, mainBranch: mainBranch)
+        }
+    }
+
+    private func reconcileWithinBudget(_ next: ReviewSnapshot, retaining previous: ReviewSnapshot, mainBranch: String) async throws -> ReviewSnapshot {
         var rows = next.commits
         var hasMore = next.hasMoreCommits
         var remaining = Set(previous.commits.map(\.sha))
@@ -301,6 +318,9 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
                 if x != " " { rows.append(ReviewFile(worktree: worktree, group: .staged, status: status(x), path: path, oldPath: x == "R" || x == "C" ? old : nil, commitSHA: nil, comparison: "HEAD → index")) }
                 if y != " " { rows.append(ReviewFile(worktree: worktree, group: .unstaged, status: status(y), path: path, oldPath: y == "R" || y == "C" ? old : nil, commitSHA: nil, comparison: "index → worktree")) }
             }
+            guard rows.count <= 512 else {
+                throw ReviewGitError.unavailable("Too many changed files for bounded safe review.")
+            }
         }
         rows.sort { a, b in a.group == b.group ? a.path < b.path : a.group == .staged }
         return rows
@@ -326,12 +346,17 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
     }
 
     private func execute(_ operation: ReviewGitOperation, accepted: Set<Int32>) async throws -> GitOutput {
+        let budget: Duration
+        if let deadline = Self.requestDeadline {
+            budget = ContinuousClock.now.duration(to: deadline)
+            guard budget > .zero else { throw ReviewGitError.timeout }
+        } else { budget = timeout }
         return try await withTaskCancellationHandler {
             let operationTask = Task.detached(priority: .utility) { try operation.execute(accepted: accepted) }
             return try await withThrowingTaskGroup(of: GitOutput.self) { group in
                 group.addTask { try await operationTask.value }
                 group.addTask {
-                    try await Task.sleep(for: self.timeout)
+                    try await Task.sleep(for: min(self.timeout, budget))
                     operation.cancel()
                     throw ReviewGitError.timeout
                 }

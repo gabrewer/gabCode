@@ -196,6 +196,11 @@ struct WorkspaceProjectView: View {
             guard handles(notification) else { return }
             chooseProjectFolderAndCreateWorkspace()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+            guard let window = notification.object as? NSWindow, window.windowNumber == windowNumber else { return }
+            controller.cancelOwnedWorkForWindowClose()
+            review.deactivate()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
             guard let window = notification.object as? NSWindow, window.windowNumber == windowNumber else { return }
             review.requestRefresh()
@@ -277,8 +282,10 @@ struct WorkspaceProjectView: View {
                     ProgressView()
                         .controlSize(.small)
                         .accessibilityLabel("Refreshing worktrees")
-                    Button("Cancel") { controller.cancelRefresh() }
+                    Button(controller.refreshCleanupFailed ? "Cleanup failed" : controller.isCancellingRefresh ? "Cancelling…" : "Cancel") { controller.cancelRefresh() }
                         .controlSize(.small)
+                        .disabled(controller.isCancellingRefresh || controller.refreshCleanupFailed)
+                        .accessibilityLabel(controller.refreshCleanupFailed ? "Worktree refresh cleanup failed" : controller.isCancellingRefresh ? "Cancelling worktree refresh" : "Cancel worktree refresh")
                         .accessibilityIdentifier("cancel-refresh-worktrees")
                 } else {
                     Button { Task { await refreshWorktreesAndCleanupReferences() } } label: { Image(systemName: "arrow.clockwise") }
@@ -740,7 +747,7 @@ struct WorkspaceProjectView: View {
 
     private func refreshWorktreesAndCleanupReferences() async {
         let before = Set(controller.worktrees.map { $0.path.standardizedFileURL })
-        await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths)
+        guard await controller.refreshWorktrees(retainedPaths: terminalRegistry.retainedPaths) else { return }
         let after = Set(controller.worktrees.map { $0.path.standardizedFileURL })
         let confirmedRemoved = before.subtracting(after)
         for path in confirmedRemoved { removeReferences(for: path) }
