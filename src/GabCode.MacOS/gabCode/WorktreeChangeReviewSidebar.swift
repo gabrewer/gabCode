@@ -18,7 +18,7 @@ struct WorktreeChangeReviewSidebar: View {
                 Text("Changes & History").font(.headline)
                 Spacer()
                 if coordinator.isLoading { ProgressView().controlSize(.small).accessibilityLabel("Refreshing change review") }
-                Button { coordinator.requestRefresh() } label: { Image(systemName: "arrow.clockwise") }
+                Button { coordinator.requestRefresh(explicit: true) } label: { Image(systemName: "arrow.clockwise") }
                     .accessibilityLabel("Refresh Changes and History")
                     .accessibilityIdentifier("refresh-change-review")
                     .disabled(coordinator.selectedWorktree == nil)

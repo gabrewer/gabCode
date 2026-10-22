@@ -50,6 +50,137 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         XCTAssertEqual(entries.map(\.isPrimary), [true, false])
     }
 
+    func testSlowDiscoveryDoesNotBlockMainActorHeartbeat() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try runGit(in: root, arguments: ["init", "--quiet"])
+        let fakeGit = root.appendingPathComponent("slow git")
+        let marker = root.appendingPathComponent("started.marker")
+        try "#!/bin/sh\necho started > '\(marker.path)'\n/bin/sleep 0.4\nprintf 'worktree %s\\nbranch refs/heads/main\\n\\n' '\(root.path)'\n".write(to: fakeGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+        let clock = ContinuousClock()
+        let worker = Task { try await GitWorktreeDiscovery(gitExecutable: fakeGit, timeout: .seconds(1)).worktrees(in: root) }
+        let observedStart = try await Task.detached(priority: .utility) { () throws -> ContinuousClock.Instant in
+            let deadline = clock.now.advanced(by: .seconds(1))
+            while !FileManager.default.fileExists(atPath: marker.path) && clock.now < deadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            guard FileManager.default.fileExists(atPath: marker.path) else { throw CancellationError() }
+            return clock.now
+        }.value
+        let gap = observedStart.duration(to: clock.now)
+        XCTAssertLessThan(gap, .milliseconds(150), "Even a slow owned Git process must not hold the main actor")
+        let discovered = try await worker.value
+        XCTAssertEqual(discovered.count, 1)
+    }
+
+    func testTenCancelRetryCyclesReapOwnedChildrenAndReleaseDescriptors() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = root.appendingPathComponent("started.pid")
+        let executable = root.appendingPathComponent("repeated git")
+        try "#!/bin/sh\necho $$ > '\(marker.path)'\nexec /bin/sleep 5\n".write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        let baseline = try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count
+        for iteration in 0..<10 {
+            try? FileManager.default.removeItem(at: marker)
+            let task = Task {
+                try await GitDiscoveryProcess(executable: executable, arguments: [], root: root)
+                    .run(budget: .seconds(2), accepted: [0])
+            }
+            let pid = try await Task.detached(priority: .utility) { () throws -> Int32 in
+                let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+                while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < deadline {
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                return try XCTUnwrap(Int32(String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+            }.value
+            task.cancel()
+            _ = try? await task.value
+            if kill(pid, 0) == 0 { _ = kill(pid, SIGKILL) }
+            XCTAssertEqual(kill(pid, 0), -1, "Cycle \(iteration) left an owned leader")
+        }
+        let after = try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count
+        XCTAssertLessThanOrEqual(after, baseline + 4, "Cancellation cannot accumulate pipe descriptors")
+    }
+
+    func testSuccessfulLeaderCannotLeaveAnOwnedRedirectedChildRunning() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = root.appendingPathComponent("child.pid")
+        let executable = root.appendingPathComponent("spawn child")
+        try "#!/bin/sh\n/bin/sleep 5 >/dev/null 2>&1 &\necho $! > '\(marker.path)'\nexit 0\n".write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        do {
+            _ = try await GitDiscoveryProcess(executable: executable, arguments: [], root: root).run(budget: .seconds(1), accepted: [0])
+            XCTFail("A leader leaving an owned child cannot publish a complete Git read")
+        } catch { /* killed owned child; incomplete response is not authoritative */ }
+        let child = try XCTUnwrap(Int32(String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { if kill(child, 0) == 0 { _ = kill(child, SIGKILL) } }
+        let deadline = ContinuousClock.now.advanced(by: .milliseconds(500))
+        while kill(child, 0) == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(kill(child, 0), -1, "A successful leader must not abandon a descendant with redirected pipes")
+    }
+
+    func testContinuousOutputCannotStarveDiscoveryDeadline() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try runGit(in: root, arguments: ["init", "--quiet"])
+        let fakeGit = root.appendingPathComponent("noisy git")
+        try "#!/bin/sh\nhead -c 40000000 /dev/zero\n".write(to: fakeGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+        let start = ContinuousClock.now
+        do { _ = try await GitWorktreeDiscovery(gitExecutable: fakeGit, timeout: .milliseconds(200)).worktrees(in: root)
+            XCTFail("Oversized output must not become valid discovery")
+        } catch { /* output cap or timeout must be explicit */ }
+        XCTAssertLessThan(start.duration(to: .now), .seconds(1), "Continuous output cannot starve cancellation checks")
+    }
+
+    func testCancellationStopsAStartedGitProcessBeforeItsTimeout() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try runGit(in: root, arguments: ["init", "--quiet"])
+        let marker = root.appendingPathComponent("started.pid")
+        let fakeGit = root.appendingPathComponent("cancellable git")
+        try "#!/bin/sh\necho $$ > '\(marker.path)'\nexec /bin/sleep 30\n".write(to: fakeGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+        let task = Task { try await GitWorktreeDiscovery(gitExecutable: fakeGit, timeout: .seconds(5)).worktrees(in: root) }
+        let pid = try await Task.detached(priority: .utility) { () throws -> Int32 in
+            let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+            while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            return try XCTUnwrap(Int32(String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        }.value
+        defer { if kill(pid, 0) == 0 { _ = kill(pid, SIGKILL) } }
+        let start = ContinuousClock.now
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Cancellation cannot publish a worktree list") }
+        catch { /* cancelled work is rejected */ }
+        XCTAssertLessThan(start.duration(to: .now), .seconds(2))
+        XCTAssertEqual(kill(pid, 0), -1, "Owned Git must be reaped before cancellation completes")
+    }
+
+    func testDiscoveryTimeoutStopsOnlyOwnedProcessGroupAndPipeHoldingChild() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try runGit(in: root, arguments: ["init", "--quiet"])
+        let marker = root.appendingPathComponent("child.pid")
+        let fakeGit = root.appendingPathComponent("hanging git")
+        try "#!/bin/sh\n/bin/sleep 30 &\necho $! > '\(marker.path)'\nwait\n".write(to: fakeGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+        let started = ContinuousClock.now
+        do {
+            _ = try await GitWorktreeDiscovery(gitExecutable: fakeGit, timeout: .milliseconds(250)).worktrees(in: root)
+            XCTFail("A hanging Git helper must not succeed")
+        } catch { /* timeout or cleanup failure must be explicit */ }
+        let elapsed = started.duration(to: .now)
+        let pid = try XCTUnwrap(Int32(String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { if kill(pid, 0) == 0 { _ = kill(pid, SIGKILL) } }
+        XCTAssertLessThan(elapsed, .seconds(2), "Cleanup must not wait on an inherited pipe")
+        XCTAssertEqual(kill(pid, 0), -1, "An owned pipe-holding child must not survive discovery timeout")
+    }
+
     func testDrainsLargeGitOutputWithoutDeadlockingOnPipeCapacity() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -62,12 +193,18 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         try Data(output.utf8).write(to: fakeGit)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
 
-        let branches = try await GitWorktreeDiscovery(
-            gitExecutable: fakeGit,
-            timeout: .seconds(1)
-        ).branches(in: repository)
-
-        XCTAssertEqual(branches, ["main"])
+        let start = ContinuousClock.now
+        do {
+            _ = try await GitWorktreeDiscovery(
+                gitExecutable: fakeGit,
+                timeout: .seconds(1)
+            ).branches(in: repository)
+            XCTFail("A truncated Git worktree list cannot become authoritative")
+        } catch let error as GitWorktreeDiscoveryError {
+            guard case let .gitFailed(_, reason) = error else { return XCTFail("Unexpected error: \(error)") }
+            XCTAssertTrue(reason.contains("output exceeded"), reason)
+        }
+        XCTAssertLessThan(start.duration(to: .now), .seconds(2), "Oversized output must be drained without deadlock")
     }
 
     func testCreationFormKeepsEditableBranchAndLocationPreviews() {

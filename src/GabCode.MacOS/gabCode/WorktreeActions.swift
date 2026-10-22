@@ -236,6 +236,7 @@ final class GitWorktreeActionService: @unchecked Sendable {
     private func map(_ error: GitWorktreeDiscoveryError) -> WorktreeActionError {
         switch error {
         case let .gitUnavailable(url): return .gitUnavailable(url)
+        case let .cleanupFailed(url): return .gitFailed(url, reason: "Owned Git discovery cleanup could not be confirmed.")
         case let .gitFailed(url, reason): return .gitFailed(url, reason: reason)
         case let .projectRootUnavailable(url), let .repositoryNotFound(url), let .multipleRepositories(url): return .invalidLocation(url)
         case let .branchNotFound(branch, _), let .ambiguousBranch(branch, _): return .invalidBranch(branch)

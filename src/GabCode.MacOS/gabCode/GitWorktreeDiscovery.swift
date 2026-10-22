@@ -14,6 +14,7 @@ enum GitWorktreeDiscoveryError: Error, Equatable {
     case ambiguousBranch(String, URL)
     case detachedWorktree(URL)
     case gitUnavailable(URL)
+    case cleanupFailed(URL)
     case gitFailed(URL, reason: String)
 }
 
@@ -51,11 +52,12 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
         guard !branch.isEmpty, !branch.contains("\0") else {
             throw GitWorktreeDiscoveryError.branchNotFound(branch, root)
         }
-        guard isDirectory(root) else { throw GitWorktreeDiscoveryError.projectRootUnavailable(root) }
+        guard try await Self.checkDirectory(root) else { throw GitWorktreeDiscoveryError.projectRootUnavailable(root) }
         guard FileManager.default.isExecutableFile(atPath: gitExecutable.path) else {
             throw GitWorktreeDiscoveryError.gitUnavailable(gitExecutable)
         }
-        let repositories = repositoryCandidates(under: root)
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        let repositories = try await repositoryCandidates(under: root)
         guard repositories.count == 1, let repository = repositories.first else {
             if repositories.isEmpty { throw GitWorktreeDiscoveryError.repositoryNotFound(root) }
             throw GitWorktreeDiscoveryError.multipleRepositories(root)
@@ -64,7 +66,8 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
             let result = try await runGitResult(
                 arguments: ["-C", repository.path, "show-ref", "--verify", "--quiet", "--", "refs/heads/\(branch)"],
                 currentDirectory: repository,
-                acceptedExitStatuses: [0, 1]
+                acceptedExitStatuses: [0, 1],
+                budget: try remaining(until: deadline, root: root)
             )
             guard result.status == 0 else {
                 throw GitWorktreeDiscoveryError.branchNotFound(branch, root)
@@ -80,14 +83,15 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
 
     func worktrees(in projectRoot: URL) async throws -> [GitWorktreeEntry] {
         let root = projectRoot.standardizedFileURL
-        guard isDirectory(root) else {
+        guard try await Self.checkDirectory(root) else {
             throw GitWorktreeDiscoveryError.projectRootUnavailable(root)
         }
         guard FileManager.default.isExecutableFile(atPath: gitExecutable.path) else {
             throw GitWorktreeDiscoveryError.gitUnavailable(gitExecutable)
         }
 
-        let repositories = repositoryCandidates(under: root)
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        let repositories = try await repositoryCandidates(under: root)
         guard !repositories.isEmpty else {
             throw GitWorktreeDiscoveryError.repositoryNotFound(root)
         }
@@ -97,7 +101,8 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
 
         let output = try await runGit(
             arguments: ["-C", repository.path, "worktree", "list", "--porcelain"],
-            currentDirectory: repository
+            currentDirectory: repository,
+            budget: try remaining(until: deadline, root: root)
         )
         let entries = parse(output: output)
             .filter { isDescendant($0.path, of: root) }
@@ -107,7 +112,21 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
         return entries
     }
 
-    private func repositoryCandidates(under root: URL) -> [URL] {
+    private nonisolated static func checkDirectory(_ root: URL) async throws -> Bool {
+        let work = Task.detached(priority: .utility) { try Task.checkCancellation(); return isDirectory(root) }
+        return try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: { work.cancel() }
+    }
+
+    private func repositoryCandidates(under root: URL) async throws -> [URL] {
+        let work = Task.detached(priority: .utility) { [root] in try Self.scanCandidates(under: root) }
+        return try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: { work.cancel() }
+    }
+
+    private nonisolated static func scanCandidates(under root: URL) throws -> [URL] {
         var candidates: [URL] = []
         let manager = FileManager.default
         if isDirectory(root.appendingPathComponent(".git")) {
@@ -120,14 +139,20 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
         ) else {
             return candidates
         }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        var visited = 0
         for case let url as URL in enumerator {
-            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-                  values.isDirectory == true,
-                  values.isSymbolicLink != true,
-                  url.pathComponents.count - root.pathComponents.count <= 3
-            else {
-                continue
+            try Task.checkCancellation()
+            visited += 1
+            guard visited <= 5_000, ContinuousClock.now < deadline else {
+                throw GitWorktreeDiscoveryError.gitFailed(root, reason: "Repository discovery exceeded its bounded directory scan. Choose a narrower project folder.")
             }
+            let depth = url.pathComponents.count - root.pathComponents.count
+            if depth >= 3 { enumerator.skipDescendants() }
+            guard depth <= 3,
+                  let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                  values.isDirectory == true,
+                  values.isSymbolicLink != true else { continue }
             if isDirectory(url.appendingPathComponent(".git")) {
                 candidates.append(url.standardizedFileURL)
                 enumerator.skipDescendants()
@@ -152,7 +177,7 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
         }
     }
 
-    private func isDirectory(_ url: URL) -> Bool {
+    private nonisolated static func isDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
@@ -163,71 +188,29 @@ final class GitWorktreeDiscovery: @unchecked Sendable {
         return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
     }
 
-    private func runGit(arguments: [String], currentDirectory: URL) async throws -> String {
-        try await runGitResult(arguments: arguments, currentDirectory: currentDirectory).output
+    private nonisolated func remaining(until deadline: ContinuousClock.Instant, root: URL) throws -> Duration {
+        let budget = ContinuousClock.now.duration(to: deadline)
+        guard budget > .zero else { throw GitWorktreeDiscoveryError.gitFailed(root, reason: "Repository discovery exceeded its total time budget.") }
+        return budget
+    }
+
+    private func runGit(arguments: [String], currentDirectory: URL, budget: Duration) async throws -> String {
+        try await runGitResult(arguments: arguments, currentDirectory: currentDirectory, budget: budget).output
     }
 
     private func runGitResult(
         arguments: [String],
         currentDirectory: URL,
-        acceptedExitStatuses: Set<Int32> = [0]
+        acceptedExitStatuses: Set<Int32> = [0],
+        budget: Duration
     ) async throws -> (output: String, status: Int32) {
-        let process = Process()
-        process.executableURL = gitExecutable
-        process.arguments = arguments
-        process.currentDirectoryURL = currentDirectory
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        try process.run()
-        let stdoutReader = Task.detached(priority: .utility) {
-            Self.readBounded(from: stdout.fileHandleForReading)
-        }
-        let stderrReader = Task.detached(priority: .utility) {
-            Self.readBounded(from: stderr.fileHandleForReading)
-        }
-
-        let completed = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                process.waitUntilExit()
-                return true
-            }
-            group.addTask {
-                do {
-                    try await Task.sleep(for: self.timeout)
-                    if process.isRunning { process.terminate() }
-                    return false
-                } catch {
-                    return true
-                }
-            }
-            let result = await group.next() ?? false
-            group.cancelAll()
-            return result
-        }
-        guard completed else {
-            if process.isRunning { process.terminate() }
+        let operation = GitDiscoveryProcess(executable: gitExecutable, arguments: arguments, root: currentDirectory)
+        do {
+            let (output, status) = try await operation.run(budget: min(timeout, budget), accepted: acceptedExitStatuses)
+            return (output, status)
+        } catch GitDiscoveryProcessError.timedOut {
             throw GitWorktreeDiscoveryError.gitFailed(currentDirectory, reason: "Git worktree discovery timed out.")
         }
-
-        let output = String(data: await stdoutReader.value, encoding: .utf8) ?? ""
-        let errorOutput = String(data: await stderrReader.value, encoding: .utf8) ?? ""
-        guard acceptedExitStatuses.contains(process.terminationStatus) else {
-            throw GitWorktreeDiscoveryError.gitFailed(currentDirectory, reason: String(errorOutput.prefix(64 * 1024)))
-        }
-        return (output, process.terminationStatus)
     }
 
-    private static func readBounded(from handle: FileHandle) -> Data {
-        let limit = 64 * 1024
-        var retained = Data()
-        while true {
-            let chunk = handle.readData(ofLength: 4096)
-            guard !chunk.isEmpty else { return retained }
-            if retained.count < limit {
-                retained.append(chunk.prefix(limit - retained.count))
-            }
-        }
-    }
 }

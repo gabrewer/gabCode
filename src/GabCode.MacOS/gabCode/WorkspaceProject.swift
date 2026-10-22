@@ -54,6 +54,8 @@ final class WorkspaceProjectController: ObservableObject {
     @Published private(set) var worktrees: [WorktreeNavigationEntry] = []
     @Published private(set) var orphanedWorktreePaths: [URL] = []
     @Published private(set) var isRefreshing = false
+    @Published private(set) var isCancellingRefresh = false
+    @Published private(set) var refreshCleanupFailed = false
     @Published private(set) var refreshError: WorkspaceOpenError?
     @Published private(set) var fallbackNotice: String?
     @Published private(set) var worktreeActionError: WorktreeActionError?
@@ -63,6 +65,10 @@ final class WorkspaceProjectController: ObservableObject {
 
     let preference: WorkspacePreference
     private var refreshGeneration = 0
+    private var pendingRefresh: [URL]?
+    private var activeRefresh: Task<[GitWorktreeEntry], Error>?
+    private var openingDiscovery: Task<[GitWorktreeEntry], Error>?
+    private var openingValidation: Task<GitRepositoryValidationResult, Never>?
     private var operationGeneration = 0
     private let gitValidator: GitRepositoryValidator
     private let worktreeDiscovery: GitWorktreeDiscovery
@@ -85,6 +91,12 @@ final class WorkspaceProjectController: ObservableObject {
         self.localBranchValidator = localBranchValidator ?? { branch, root in
             try await worktreeDiscovery.validateLocalBranch(branch, in: root)
         }
+    }
+
+    deinit {
+        activeRefresh?.cancel()
+        openingDiscovery?.cancel()
+        openingValidation?.cancel()
     }
 
     var descriptorBranch: String? { mainBranch }
@@ -119,14 +131,36 @@ final class WorkspaceProjectController: ObservableObject {
     func openWorkspace(at url: URL) async -> Bool {
         operationGeneration += 1
         let generation = operationGeneration
+        let drainingOpening = openingDiscovery
+        drainingOpening?.cancel()
+        let drainingValidation = openingValidation
+        drainingValidation?.cancel()
+        let drainingRefresh = activeRefresh
+        cancelRefresh()
+        if let drainingOpening { _ = await drainingOpening.result }
+        if let drainingValidation { _ = await drainingValidation.value }
+        if let drainingRefresh { _ = await drainingRefresh.result }
+        guard generation == operationGeneration, !Task.isCancelled else { return false }
+        guard !refreshCleanupFailed else {
+            state = .recovery(.gitFailed(url, reason: "Owned Git cleanup could not be confirmed. This repository is blocked for this app session; inspect owned Git before quitting and reopening gabCode."))
+            return false
+        }
         state = .loading
         fallbackNotice = nil
         recoveryDescriptorURL = url.standardizedFileURL
         do {
             let descriptor = try loadDescriptor(at: url)
             try validateFolder(descriptor.projectRoot)
-            let discovered = try await worktreeLoader(descriptor.projectRoot)
-            guard !Task.isCancelled, generation == operationGeneration else { return false }
+            let discovery = Task { try await worktreeLoader(descriptor.projectRoot) }
+            openingDiscovery = discovery
+            let discovered: [GitWorktreeEntry]
+            do { discovered = try await discovery.value }
+            catch {
+                if generation == operationGeneration { openingDiscovery = nil }
+                throw error
+            }
+            if generation == operationGeneration { openingDiscovery = nil }
+            guard !discovery.isCancelled, !Task.isCancelled, generation == operationGeneration else { return false }
             do {
                 try await localBranchValidator(descriptor.mainBranch, descriptor.projectRoot)
             } catch let error as GitWorktreeDiscoveryError {
@@ -165,8 +199,11 @@ final class WorkspaceProjectController: ObservableObject {
                     stagedFallbackNotice = "The previously selected worktree is no longer available. Opened \(primary.path.lastPathComponent) instead."
                 }
             }
-            let validation = await gitValidator.validate(folder: activeSelection.path)
-            guard !Task.isCancelled, generation == operationGeneration else { return false }
+            let validationTask = Task { await gitValidator.validate(folder: activeSelection.path) }
+            openingValidation = validationTask
+            let validation = await validationTask.value
+            if generation == operationGeneration { openingValidation = nil }
+            guard !validationTask.isCancelled, !Task.isCancelled, generation == operationGeneration else { return false }
             try validateGitResult(validation, folder: activeSelection.path)
             activeDescriptor = descriptor.resolved(to: activeSelection.path)
             projectRoot = descriptor.projectRoot.standardizedFileURL
@@ -203,24 +240,48 @@ final class WorkspaceProjectController: ObservableObject {
         orphanedWorktreePaths.removeAll { $0.standardizedFileURL == normalized }
     }
 
-    func cancelRefresh() {
-        refreshGeneration += 1
-        isRefreshing = false
+    func cancelOwnedWorkForWindowClose() {
+        operationGeneration += 1
+        openingDiscovery?.cancel()
+        openingValidation?.cancel()
+        cancelRefresh()
     }
 
-    func refreshWorktrees(retainedPaths: [URL] = []) async {
-        guard let projectRoot, !isRefreshing else { return }
+    func cancelRefresh() {
+        pendingRefresh = nil
+        guard isRefreshing, !refreshCleanupFailed else { return }
+        refreshGeneration += 1
+        isCancellingRefresh = true
+        activeRefresh?.cancel()
+    }
+
+    @discardableResult
+    func refreshWorktrees(retainedPaths: [URL] = []) async -> Bool {
+        guard let projectRoot, !refreshCleanupFailed else { return false }
+        guard !isRefreshing else {
+            pendingRefresh = retainedPaths
+            return false
+        }
         isRefreshing = true
+        isCancellingRefresh = false
         refreshError = nil
         refreshGeneration += 1
         operationGeneration += 1
         let generation = refreshGeneration
+        let task = Task { try await worktreeLoader(projectRoot) }
+        activeRefresh = task
         defer {
-            if generation == refreshGeneration { isRefreshing = false }
+            activeRefresh = nil
+            if !refreshCleanupFailed { isRefreshing = false; isCancellingRefresh = false }
+            if !refreshCleanupFailed, let pending = pendingRefresh {
+                pendingRefresh = nil
+                Task { [weak self] in _ = await self?.refreshWorktrees(retainedPaths: pending) }
+            }
         }
         do {
-            let discovered = try await worktreeLoader(projectRoot)
-            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            let discovered = try await task.value
+            guard !task.isCancelled, !Task.isCancelled, generation == refreshGeneration,
+                  self.projectRoot == projectRoot else { return false }
             let reconciliation = WorktreeReconciliation.reconcile(
                 previous: worktrees,
                 discovered: discovered,
@@ -229,9 +290,17 @@ final class WorkspaceProjectController: ObservableObject {
             )
             worktrees = reconciliation.worktrees
             orphanedWorktreePaths = reconciliation.orphanedPaths
+            return true
         } catch {
-            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            if case .cleanupFailed = error as? GitWorktreeDiscoveryError {
+                refreshCleanupFailed = true
+                pendingRefresh = nil
+                refreshError = .gitFailed(projectRoot, reason: "Owned Git cleanup could not be confirmed. This repository is blocked for this app session; inspect owned Git before quitting and reopening gabCode.")
+                return false
+            }
+            guard !task.isCancelled, !Task.isCancelled, generation == refreshGeneration else { return false }
             refreshError = map(error, projectRoot: projectRoot)
+            return false
         }
     }
 
@@ -438,6 +507,7 @@ final class WorkspaceProjectController: ObservableObject {
             case let .ambiguousBranch(branch, url): return .gitFailed(url, reason: "Branch \"\(branch)\" resolves to more than one registered worktree.")
             case let .detachedWorktree(url): return .gitFailed(url, reason: "The selected worktree is detached and has no branch name.")
             case let .gitUnavailable(url): return .gitUnavailable(url)
+            case let .cleanupFailed(url): return .gitFailed(url, reason: "Owned Git cleanup could not be confirmed. This repository is blocked for this app session; inspect owned Git before quitting and reopening gabCode.")
             case let .gitFailed(url, reason): return .gitFailed(url, reason: reason)
             }
         case let error as WorkspaceOpenError: return error

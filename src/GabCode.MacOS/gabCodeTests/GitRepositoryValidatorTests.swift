@@ -55,6 +55,22 @@ final class GitRepositoryValidatorTests: XCTestCase {
         XCTAssertEqual(result, .valid(repository: folder.standardizedFileURL))
     }
 
+    func testStubbornGitTimeoutReapsOwnedProcessAndPipeHoldingChild() async throws {
+        let folder = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let marker = folder.appendingPathComponent("descendant.pid")
+        let fakeGit = folder.appendingPathComponent("stubborn validator")
+        try "#!/bin/sh\ntrap '' TERM\n/bin/sleep 5 &\necho $! > '\(marker.path)'\nwait\n".write(to: fakeGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
+        let start = ContinuousClock.now
+        let result = await GitRepositoryValidator(gitExecutable: fakeGit, timeout: .seconds(1)).validate(folder: folder)
+        XCTAssertEqual(result, .timedOut(folder.standardizedFileURL))
+        XCTAssertLessThan(start.duration(to: .now), .seconds(3))
+        let pid = try XCTUnwrap(Int32(String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { if kill(pid, 0) == 0 { _ = kill(pid, SIGKILL) } }
+        XCTAssertEqual(kill(pid, 0), -1, "Validation timeout must not leave an owned child alive")
+    }
+
     func testCancellationStopsTheOwnedGitProcess() async throws {
         let folder = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: folder) }

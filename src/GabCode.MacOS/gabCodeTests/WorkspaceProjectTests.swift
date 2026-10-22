@@ -207,6 +207,93 @@ final class WorkspaceProjectTests: XCTestCase {
         XCTAssertFalse(controller.isRefreshing)
     }
 
+    func testCancelledRefreshCannotOverlapAReplacementBeforeCleanup() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        try runGit(in: repository, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try runGit(in: repository, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "--quiet", "-m", "base"])
+        let descriptor = root.appendingPathComponent("project.gabcode-workspace")
+        try WorkspaceDescriptor.write(name: "Project", projectRoot: repository, mainBranch: "trunk", to: descriptor)
+        let entry = GitWorktreeEntry(path: repository, branch: "trunk", isPrimary: true)
+        let gate = RefreshOverlapGate(entry: entry)
+        let suite = "gabCode.refresh.cancel.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = WorkspaceProjectController(defaults: defaults, worktreeLoader: { _ in try await gate.load() })
+        let opened = await controller.openWorkspace(at: descriptor)
+        XCTAssertTrue(opened)
+        let first = Task { await controller.refreshWorktrees() }
+        await gate.waitForStart()
+        controller.cancelRefresh()
+        let replacement = Task { await controller.refreshWorktrees() }
+        // Give the replacement a deterministic opportunity to enter the loader, without a wall-clock sleep.
+        for _ in 0..<100 { await Task.yield() }
+        let peak = await gate.peak
+        await gate.release()
+        await first.value
+        await replacement.value
+        XCTAssertLessThanOrEqual(peak, 1, "A cancelled operation still owns its execution slot until it drains")
+    }
+
+    func testSupersedingWorkspaceOpenDrainsOldDiscoveryBeforeLaunchingAnother() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        try runGit(in: repository, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try runGit(in: repository, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "--quiet", "-m", "base"])
+        let descriptor = root.appendingPathComponent("project.gabcode-workspace")
+        try WorkspaceDescriptor.write(name: "Project", projectRoot: repository, mainBranch: "trunk", to: descriptor)
+        let gate = OpeningDiscoveryGate(entry: GitWorktreeEntry(path: repository, branch: "trunk", isPrimary: true))
+        let suite = "gabCode.open.overlap.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = WorkspaceProjectController(defaults: defaults, worktreeLoader: { _ in try await gate.load() })
+        let first = Task { await controller.openWorkspace(at: descriptor) }
+        await gate.waitForStart()
+        let replacement = Task { await controller.openWorkspace(at: descriptor) }
+        for _ in 0..<100 { await Task.yield() }
+        let before = await gate.calls
+        XCTAssertEqual(before, 1, "New workspace open cannot overlap previous owned discovery")
+        await gate.release()
+        let staleApplied = await first.value
+        let replacementApplied = await replacement.value
+        XCTAssertFalse(staleApplied)
+        XCTAssertTrue(replacementApplied)
+        let peak = await gate.peak
+        XCTAssertEqual(peak, 1)
+    }
+
+    func testCancelDiscardsQueuedRefreshForClosingWindow() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        try runGit(in: repository, arguments: ["-c", "init.defaultBranch=trunk", "init", "--quiet"])
+        try runGit(in: repository, arguments: ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "--quiet", "-m", "base"])
+        let descriptor = root.appendingPathComponent("project.gabcode-workspace")
+        try WorkspaceDescriptor.write(name: "Project", projectRoot: repository, mainBranch: "trunk", to: descriptor)
+        let gate = RefreshOverlapGate(entry: GitWorktreeEntry(path: repository, branch: "trunk", isPrimary: true))
+        let suite = "gabCode.refresh.close.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = WorkspaceProjectController(defaults: defaults, worktreeLoader: { _ in try await gate.load() })
+        let opened = await controller.openWorkspace(at: descriptor)
+        XCTAssertTrue(opened)
+        let first = Task { await controller.refreshWorktrees() }
+        await gate.waitForStart()
+        let pending = await controller.refreshWorktrees()
+        XCTAssertFalse(pending)
+        controller.cancelRefresh()
+        await gate.release()
+        await first.value
+        for _ in 0..<100 { await Task.yield() }
+        let calls = await gate.calls
+        XCTAssertEqual(calls, 2, "Closing/cancelling drops all pending refresh hints")
+    }
+
     func testRefreshUsesInjectedDiscoverySeam() async throws {
         let suite = "gabCode.project.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -222,6 +309,56 @@ final class WorkspaceProjectTests: XCTestCase {
         )
 
         XCTAssertEqual(controller.worktrees, [])
+    }
+
+    private actor OpeningDiscoveryGate {
+        let entry: GitWorktreeEntry
+        var calls = 0
+        var active = 0
+        var peak = 0
+        private var waiting: CheckedContinuation<Void, Never>?
+        private var starters: [CheckedContinuation<Void, Never>] = []
+        init(entry: GitWorktreeEntry) { self.entry = entry }
+        func load() async throws -> [GitWorktreeEntry] {
+            calls += 1; active += 1; peak = max(peak, active)
+            if calls == 1 {
+                starters.forEach { $0.resume() }; starters.removeAll()
+                await withCheckedContinuation { waiting = $0 }
+            }
+            active -= 1
+            return [entry]
+        }
+        func waitForStart() async {
+            if waiting != nil { return }
+            await withCheckedContinuation { starters.append($0) }
+        }
+        func release() { waiting?.resume(); waiting = nil }
+    }
+
+    private actor RefreshOverlapGate {
+        let entry: GitWorktreeEntry
+        var calls = 0
+        var active = 0
+        var peak = 0
+        private var waiting: CheckedContinuation<[GitWorktreeEntry], Never>?
+        private var starters: [CheckedContinuation<Void, Never>] = []
+        init(entry: GitWorktreeEntry) { self.entry = entry }
+        func load() async throws -> [GitWorktreeEntry] {
+            calls += 1
+            guard calls > 1 else { return [entry] }
+            active += 1
+            peak = max(peak, active)
+            if calls > 2 { active -= 1; return [entry] }
+            starters.forEach { $0.resume() }; starters.removeAll()
+            let result = await withCheckedContinuation { waiting = $0 }
+            active -= 1
+            return result
+        }
+        func waitForStart() async {
+            if waiting != nil { return }
+            await withCheckedContinuation { starters.append($0) }
+        }
+        func release() { waiting?.resume(returning: [entry]); waiting = nil }
     }
 
     private actor BranchValidationGate {

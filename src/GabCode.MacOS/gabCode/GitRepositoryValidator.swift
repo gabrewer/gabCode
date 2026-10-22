@@ -9,16 +9,15 @@ enum GitRepositoryValidationResult: Equatable, Sendable {
     case cancelled
 }
 
+/// Opening validation shares discovery's owned-process group and bounded cleanup.
+/// No workspace can publish a validation result after its owner cancels.
 final class GitRepositoryValidator: @unchecked Sendable {
     private let gitExecutable: URL
     private let commandArguments: [String]?
     private let timeout: Duration
 
-    init(
-        gitExecutable: URL = URL(fileURLWithPath: "/usr/bin/git"),
-        arguments: [String]? = nil,
-        timeout: Duration = .seconds(5)
-    ) {
+    init(gitExecutable: URL = URL(fileURLWithPath: "/usr/bin/git"),
+         arguments: [String]? = nil, timeout: Duration = .seconds(5)) {
         self.gitExecutable = gitExecutable
         self.commandArguments = arguments
         self.timeout = timeout
@@ -31,160 +30,31 @@ final class GitRepositoryValidator: @unchecked Sendable {
         }
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
-              isDirectory.boolValue,
-              FileManager.default.isReadableFile(atPath: folder.path)
-        else {
+              isDirectory.boolValue, FileManager.default.isReadableFile(atPath: folder.path) else {
             return .notRepository(folder, stderr: "The selected folder is inaccessible.")
         }
-
-        let arguments = commandArguments ?? ["-C", folder.path, "rev-parse", "--show-toplevel"]
-        let operation = GitProcessOperation(
-            executable: gitExecutable,
-            arguments: arguments,
-            currentDirectory: folder
-        )
-        let result = await withTaskCancellationHandler {
-            await run(operation: operation)
-        } onCancel: {
-            operation.cancel()
-        }
-        switch result {
-        case .cancelled:
-            return .cancelled
-        case .timedOut:
-            return .timedOut(folder)
-        case let .finished(status, stdout, stderr):
-            guard status == 0 else {
-                return .notRepository(folder, stderr: bounded(stderr))
-            }
-            guard commandArguments == nil else {
-                return .valid(repository: folder)
-            }
-            let repositoryPath = URL(fileURLWithPath: stdout.trimmingCharacters(in: .whitespacesAndNewlines), isDirectory: true)
+        let args = commandArguments ?? ["-C", folder.path, "rev-parse", "--show-toplevel"]
+        // Custom validation commands in the existing test seam may produce 200 KiB.
+        // Larger output is rejected explicitly rather than silently truncated.
+        let operation = GitDiscoveryProcess(executable: gitExecutable, arguments: args, root: folder,
+                                            outputLimit: 256 * 1024)
+        do {
+            let (stdout, status, stderr) = try await operation.runDetailed(budget: timeout, accepted: Set(0...255))
+            guard !Task.isCancelled else { return .cancelled }
+            guard status == 0 else { return .notRepository(folder, stderr: stderr) }
+            guard commandArguments == nil else { return .valid(repository: folder) }
+            let repository = URL(fileURLWithPath: stdout.trimmingCharacters(in: .whitespacesAndNewlines), isDirectory: true)
                 .standardizedFileURL
-            return .valid(repository: repositoryPath)
-        case let .launchFailed(message):
-            return .failed(folder, status: -1, stderr: message)
-        }
-    }
-
-    private func run(operation: GitProcessOperation) async -> GitProcessResult {
-        let processTask = Task { await operation.run() }
-        return await withTaskGroup(of: GitProcessResult.self) { group in
-            group.addTask { await processTask.value }
-            group.addTask {
-                do {
-                    try await Task.sleep(for: self.timeout)
-                    return .timedOut
-                } catch {
-                    return .cancelled
-                }
-            }
-            let first = await group.next() ?? .cancelled
-            group.cancelAll()
-            if case .timedOut = first {
-                operation.cancel()
-            } else if Task.isCancelled {
-                operation.cancel()
-                return .cancelled
-            }
-            return first
-        }
-    }
-
-    private func bounded(_ output: String) -> String {
-        String(output.prefix(64 * 1024))
-    }
-}
-
-private enum GitProcessResult: Sendable {
-    case finished(status: Int32, stdout: String, stderr: String)
-    case launchFailed(String)
-    case timedOut
-    case cancelled
-}
-
-private final class BoundedPipeCapture: @unchecked Sendable {
-    private let handle: FileHandle
-    private let lock = NSLock()
-    private var retained = Data()
-
-    init(handle: FileHandle) {
-        self.handle = handle
-        handle.readabilityHandler = { [weak self] handle in
-            self?.drain(handle)
-        }
-    }
-
-    var data: Data {
-        lock.lock()
-        defer { lock.unlock() }
-        return retained
-    }
-
-    func stop() {
-        handle.readabilityHandler = nil
-        drain(handle)
-    }
-
-    private func drain(_ handle: FileHandle) {
-        let chunk = handle.readData(ofLength: 4096)
-        guard !chunk.isEmpty else { return }
-        lock.lock()
-        if retained.count < 64 * 1024 {
-            retained.append(chunk.prefix(64 * 1024 - retained.count))
-        }
-        lock.unlock()
-    }
-}
-
-private final class GitProcessOperation: @unchecked Sendable {
-    private let process: Process
-    private let lock = NSLock()
-    private var cancelled = false
-
-    init(executable: URL, arguments: [String], currentDirectory: URL) {
-        process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.currentDirectoryURL = currentDirectory
-    }
-
-    func cancel() {
-        lock.lock()
-        cancelled = true
-        let isRunning = process.isRunning
-        if isRunning { process.terminate() }
-        lock.unlock()
-    }
-
-    func run() async -> GitProcessResult {
-        await Task.detached(priority: .utility) { [self] in
-            lock.lock()
-            let wasCancelled = cancelled
-            lock.unlock()
-            guard !wasCancelled else { return .cancelled }
-
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
-            let stdoutCapture = BoundedPipeCapture(handle: stdout.fileHandleForReading)
-            let stderrCapture = BoundedPipeCapture(handle: stderr.fileHandleForReading)
-            do {
-                try process.run()
-            } catch {
-                return .launchFailed(error.localizedDescription)
-            }
-            process.waitUntilExit()
-            stdoutCapture.stop()
-            stderrCapture.stop()
+            return .valid(repository: repository)
+        } catch is CancellationError {
+            return .cancelled
+        } catch GitDiscoveryProcessError.timedOut {
+            return .timedOut(folder)
+        } catch GitWorktreeDiscoveryError.cleanupFailed {
+            return .failed(folder, status: -1, stderr: "Owned Git cleanup could not be confirmed. This repository is blocked for this app session; inspect owned Git before quitting and reopening gabCode.")
+        } catch {
             if Task.isCancelled { return .cancelled }
-            return .finished(
-                status: process.terminationStatus,
-                stdout: String(data: stdoutCapture.data, encoding: .utf8) ?? "",
-                stderr: String(data: stderrCapture.data, encoding: .utf8) ?? ""
-            )
-        }.value
+            return .failed(folder, status: -1, stderr: error.localizedDescription)
+        }
     }
 }

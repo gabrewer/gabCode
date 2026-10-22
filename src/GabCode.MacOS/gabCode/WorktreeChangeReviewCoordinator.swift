@@ -22,6 +22,10 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
     private var selectedMainBranch: String?
     private var generation = 0
     private var refreshTask: Task<Void, Never>?
+    private var refreshIdentity = UUID()
+    private var pendingRefresh = false
+    private var pendingManualRefresh = false
+    private var retryAfter: ContinuousClock.Instant?
     private var debounceTask: Task<Void, Never>?
     private var periodicTask: Task<Void, Never>?
     private var fileListTasks: [String: Task<Void, Never>] = [:]
@@ -73,6 +77,12 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
     }
 
     func refresh() async {
+        await WorktreeChangeReviewService.$requestDeadline.withValue(ContinuousClock.now.advanced(by: service.requestTimeout)) {
+            await refreshWithinBudget()
+        }
+    }
+
+    private func refreshWithinBudget() async {
         guard let path = selectedWorktree, let branch = selectedMainBranch else { return }
         generation += 1
         let requestedGeneration = generation
@@ -128,16 +138,63 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
             }
             isStale = false
             errorMessage = nil
+            retryAfter = nil
         } catch {
             guard !Task.isCancelled, generation == requestedGeneration, selectedWorktree == path else { return }
             isStale = true
             errorMessage = error.localizedDescription
+            retryAfter = ContinuousClock.now.advanced(by: .seconds(15))
         }
     }
 
-    func requestRefresh() {
-        refreshTask?.cancel()
-        refreshTask = Task { [weak self] in await self?.refresh() }
+    func requestRefresh(explicit: Bool = false) {
+        guard selectedWorktree != nil else { return }
+        if !explicit, let retryAfter, ContinuousClock.now < retryAfter { return }
+        guard refreshTask == nil else {
+            pendingRefresh = true
+            pendingManualRefresh = pendingManualRefresh || explicit
+            return
+        }
+        let path = selectedWorktree
+        let identity = UUID()
+        refreshIdentity = identity
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            await self.refresh()
+            if self.refreshIdentity != identity || self.selectedWorktree != path {
+                // The old scope was cancelled, but its owned subprocess had to
+                // drain before the next scope may take this window's slot.
+                self.releaseObsoleteRefresh()
+                return
+            }
+            if self.pendingRefresh {
+                let manual = self.pendingManualRefresh
+                self.pendingRefresh = false
+                self.pendingManualRefresh = false
+                // Bounded follow-up: sustained invalidation cannot drive a tight Git loop.
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, self.refreshIdentity == identity,
+                      self.selectedWorktree == path else {
+                    // Cancellation may interrupt the cooldown after Git has
+                    // exited. It still owns admission until this finalizer runs.
+                    self.releaseObsoleteRefresh()
+                    return
+                }
+                self.refreshTask = nil
+                self.requestRefresh(explicit: manual)
+            } else {
+                self.refreshTask = nil
+            }
+        }
+    }
+
+    private func releaseObsoleteRefresh() {
+        let pending = pendingRefresh
+        let manual = pendingManualRefresh
+        pendingRefresh = false
+        pendingManualRefresh = false
+        refreshTask = nil
+        if pending { requestRefresh(explicit: manual) }
     }
 
     func invalidate(overflow: Bool = false) {
@@ -200,7 +257,11 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
         fileListTasks[sha]?.cancel()
         fileListTasks[sha] = Task { [weak self, service] in
             do {
-                let files = try await service.files(in: commit, worktree: path)
+                // Commit-file expansion is a separate user-facing operation, not
+                // part of the parent snapshot's aggregate deadline.
+                let files = try await WorktreeChangeReviewService.$requestDeadline.withValue(nil) {
+                    try await service.files(in: commit, worktree: path)
+                }
                 guard let self, !Task.isCancelled, self.generation == expectedGeneration,
                       self.selectedWorktree == path else { return }
                 self.commitFiles[sha] = files
@@ -277,7 +338,11 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
 
     private func cancelActiveWork() {
         generation += 1
-        refreshTask?.cancel(); refreshTask = nil
+        refreshTask?.cancel() // retained until the old scope's cleanup completes
+        refreshIdentity = UUID()
+        pendingRefresh = false
+        pendingManualRefresh = false
+        retryAfter = nil
         debounceTask?.cancel(); debounceTask = nil
         periodicTask?.cancel(); periodicTask = nil
         pageTask?.cancel(); pageTask = nil
