@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 // Ephemeral Git-derived presentation identities. Nothing here is persisted in the workspace.
-enum ReviewGroup: String, Sendable { case staged, unstaged, commit }
+enum ReviewGroup: String, Sendable { case staged, unstaged, commit, branch }
 enum ReviewStatus: String, Sendable { case added, modified, deleted, renamed, untracked, conflicted, copied, changed }
 enum ReviewDiffState: Sendable { case patch, conflict, binary, oversized, truncated, timeout, unavailable }
 
@@ -40,6 +40,24 @@ struct ReviewSnapshot: Sendable {
 struct ReviewDiff: Sendable {
     let state: ReviewDiffState
     let text: String
+}
+
+struct ReviewTextFacts: Sendable, Equatable {
+    let bom: Bool
+    let eol: String
+    let finalNewline: Bool
+}
+
+struct ReviewDocument: Sendable {
+    let before: String
+    let after: String
+    let beforeFacts: ReviewTextFacts
+    let afterFacts: ReviewTextFacts
+    let beforeExists: Bool
+    let afterExists: Bool
+    let identity: String
+    let comparison: String
+    let rawFilter: Bool
 }
 
 enum ReviewHistoryPage: Sendable {
@@ -94,11 +112,6 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
         let status = try await run(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no"], in: root)
         let working = try Self.parseStatus(status.data, worktree: root)
         guard working.count <= 512 else { throw ReviewGitError.unavailable("Too many changed files for bounded safe review.") }
-        for file in working where file.group == .unstaged && file.status != .untracked && file.status != .conflicted {
-            if try await hasContentFilter(path: file.path, in: root) {
-                throw ReviewGitError.unavailable("A configured Git content filter prevents safe read-only review of \(file.path).")
-            }
-        }
         let allRows = try await queryCommits(worktree: root, head: head, main: main, skip: 0, count: pageSize + 1)
         return ReviewSnapshot(worktree: root, head: head, main: main, working: working, commits: Array(allRows.prefix(pageSize)), hasMoreCommits: allRows.count > pageSize)
     }
@@ -185,8 +198,10 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
         guard commit.sha.range(of: "^[0-9a-f]{40,64}$", options: .regularExpression) != nil else {
             throw ReviewGitError.unavailable("Commit is unavailable.")
         }
-        let basis = commit.parents.first ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-        let result = try await run(["diff", "--no-textconv", "--no-ext-diff", "--name-status", "-z", "--find-renames", basis, commit.sha, "--"], in: worktree)
+        let basis = commit.parents.first
+        let arguments = basis.map { ["diff", "--no-textconv", "--no-ext-diff", "--name-status", "-z", "--find-renames", $0, commit.sha, "--"] }
+            ?? ["diff-tree", "--root", "--no-commit-id", "-r", "--no-textconv", "--no-ext-diff", "--name-status", "-z", commit.sha, "--"]
+        let result = try await run(arguments, in: worktree)
         let tokens = try result.data.split(separator: 0, omittingEmptySubsequences: true).map { token -> String in
             guard let name = String(data: Data(token), encoding: .utf8) else { throw ReviewGitError.unavailable("Git returned an unsupported file path encoding.") }
             return name
@@ -201,7 +216,7 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
             guard !rename || i < tokens.count else { throw ReviewGitError.failed("Malformed Git rename.") }
             let path = rename ? tokens[i] : first
             if rename { i += 1 }
-            files.append(ReviewFile(worktree: worktree.standardizedFileURL, group: .commit, status: Self.status(flag.first ?? "M"), path: path, oldPath: rename ? first : nil, commitSHA: commit.sha, comparison: commit.parents.isEmpty ? "empty tree → \(commit.sha)" : "\(basis) → \(commit.sha)"))
+            files.append(ReviewFile(worktree: worktree.standardizedFileURL, group: .commit, status: Self.status(flag.first ?? "M"), path: path, oldPath: rename ? first : nil, commitSHA: commit.sha, comparison: basis.map { "\($0) → \(commit.sha)" } ?? "empty tree → \(commit.sha)"))
         }
         return files.sorted { $0.path < $1.path }
     }
@@ -232,14 +247,243 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
                 return try await readPatch(["diff", "--no-index", "--no-textconv", "--no-ext-diff", "--", empty.path, path], in: worktree, allowDifference: true)
             }
             args = ["diff", "--no-textconv", "--no-ext-diff", "--", ":(literal)\(file.oldPath ?? path)", ":(literal)\(path)"]
+        case .branch: throw ReviewGitError.unavailable("Branch review requires an exact snapshot.")
         case .commit:
             guard let sha = file.commitSHA else { throw ReviewGitError.unavailable("Commit is unavailable.") }
             let parentResult = try await run(["rev-list", "--parents", "-n", "1", sha], in: worktree)
             let parents = parentResult.text.split(whereSeparator: \.isWhitespace)
-            let basis = parents.count > 1 ? String(parents[1]) : "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-            args = ["diff", "--no-textconv", "--no-ext-diff", basis, sha, "--", ":(literal)\(file.oldPath ?? path)", ":(literal)\(path)"]
+            if parents.count > 1 {
+                args = ["diff", "--no-textconv", "--no-ext-diff", String(parents[1]), sha, "--", ":(literal)\(file.oldPath ?? path)", ":(literal)\(path)"]
+            } else {
+                args = ["diff-tree", "--root", "--no-commit-id", "-p", "-r", "--no-textconv", "--no-ext-diff", sha, "--", ":(literal)\(file.oldPath ?? path)", ":(literal)\(path)"]
+            }
         }
         return try await readPatch(args, in: worktree)
+    }
+
+    /// Captures both sides from Git objects/index and bounded on-disk bytes. No diff driver,
+    /// smudge/clean/textconv, shell, or worktree substitution is involved.
+    func document(for file: ReviewFile, in worktree: URL, mainBranch: String) async throws -> ReviewDocument {
+        if Self.requestDeadline != nil { return try await documentWithinBudget(for: file, in: worktree, mainBranch: mainBranch) }
+        return try await Self.$requestDeadline.withValue(ContinuousClock.now.advanced(by: .seconds(12))) {
+            try await documentWithinBudget(for: file, in: worktree, mainBranch: mainBranch)
+        }
+    }
+
+    private func documentWithinBudget(for file: ReviewFile, in worktree: URL, mainBranch: String) async throws -> ReviewDocument {
+        let root = worktree.standardizedFileURL
+        guard root == file.worktree.standardizedFileURL,
+              Self.safePath(file.path), file.oldPath.map(Self.safePath) ?? true,
+              file.status != .conflicted else { throw ReviewGitError.unavailable("Unsafe or conflicted file cannot be compared as text.") }
+        let needsHead = file.group != .commit
+        let needsIndex = file.group == .staged || file.group == .unstaged
+        let head: String? = needsHead ? try await oid("HEAD", in: root) : nil
+        let previousIndex: (String, String)? = needsIndex ? try await indexEntry(file.path, in: root) : nil
+        if file.group == .unstaged && file.status == .untracked && previousIndex != nil {
+            throw ReviewGitError.unavailable("Untracked file entered the index. Refresh review.")
+        }
+        let startMain: String? = file.group == .branch ? try await oid("refs/heads/\(mainBranch)", in: root) : nil
+        let firstParent: String?
+        if file.group == .commit {
+            guard let sha = file.commitSHA, Self.isOID(sha) else { throw ReviewGitError.unavailable("Historical commit is unavailable.") }
+            let output = try await run(["rev-list", "--parents", "-n", "1", sha], in: root)
+            let rows = output.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard rows.first == sha else { throw ReviewGitError.unavailable("Historical commit changed.") }
+            firstParent = rows.dropFirst().first
+        } else { firstParent = nil }
+        let target: String
+        let basis: String?
+        switch file.group {
+        case .staged, .unstaged: target = head!; basis = head
+        case .commit: target = file.commitSHA!; basis = firstParent
+        case .branch:
+            target = head!
+            let result = try await run(["merge-base", "--all", startMain!, target], in: root)
+            let bases = result.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard bases.count == 1, Self.isOID(bases[0]) else { throw ReviewGitError.unavailable("Branch comparison has no unique merge base.") }
+            basis = bases[0]
+            guard file.commitSHA == nil || file.commitSHA == target else { throw ReviewGitError.unavailable("Branch selection changed. Refresh review.") }
+        }
+        let oldPath = file.oldPath ?? file.path
+        let beforeEntry: (String, String)?
+        let afterEntry: (String, String)?
+        switch file.group {
+        case .staged: beforeEntry = try await treeEntry(oldPath, at: basis, in: root); afterEntry = previousIndex
+        case .unstaged:
+            beforeEntry = file.status == .untracked ? nil : previousIndex
+            afterEntry = nil
+        case .commit, .branch:
+            beforeEntry = try await treeEntry(oldPath, at: basis, in: root)
+            afterEntry = try await treeEntry(file.path, at: target, in: root)
+        }
+        let beforeBytes: Data
+        if let beforeEntry { beforeBytes = try await blob(beforeEntry, in: root) } else { beforeBytes = Data() }
+        let afterBytes: Data
+        if file.group == .unstaged && file.status != .deleted {
+            afterBytes = try Self.readWorktree(path: file.path, root: root)
+        } else if file.group == .unstaged {
+            try Self.confirmAbsent(path: file.path, root: root)
+            afterBytes = Data()
+        } else if let afterEntry { afterBytes = try await blob(afterEntry, in: root) }
+        else { afterBytes = Data() }
+        let before = try Self.decode(beforeBytes)
+        let after = try Self.decode(afterBytes)
+        let endHead: String? = needsHead ? try await oid("HEAD", in: root) : nil
+        let endIndex: (String, String)? = needsIndex ? try await indexEntry(file.path, in: root) : nil
+        let endMain: String? = startMain != nil ? try await oid("refs/heads/\(mainBranch)", in: root) : nil
+        guard endHead == head, endIndex?.0 == previousIndex?.0, endIndex?.1 == previousIndex?.1,
+              endMain == startMain else {
+            throw ReviewGitError.unavailable("Comparison changed during capture. Retry.")
+        }
+        if file.group == .unstaged && file.status != .deleted {
+            guard try Self.readWorktree(path: file.path, root: root) == afterBytes else {
+                throw ReviewGitError.unavailable("Worktree file changed during capture. Retry.")
+            }
+        } else if file.group == .unstaged { try Self.confirmAbsent(path: file.path, root: root) }
+        let rawFilter = try await hasContentFilter(path: file.path, in: root)
+        let label: String
+        switch file.group {
+        case .staged: label = "HEAD → index"
+        case .unstaged: label = file.status == .untracked ? "empty → worktree" : "index → worktree"
+        case .commit: label = basis.map { "\($0) → \(target)" } ?? "empty tree → \(target)"
+        case .branch: label = "\(basis!) → \(target)"
+        }
+        return ReviewDocument(before: before.0, after: after.0, beforeFacts: before.1, afterFacts: after.1,
+                              beforeExists: beforeEntry != nil, afterExists: file.group == .unstaged ? file.status != .deleted : afterEntry != nil,
+                              identity: "\(file.id):\(basis ?? "empty"):\(target):\(beforeEntry?.1 ?? "empty"): \(afterEntry?.1 ?? "empty")",
+                              comparison: label, rawFilter: rawFilter)
+    }
+
+    private static func safePath(_ path: String) -> Bool {
+        !path.isEmpty && !path.hasPrefix("/") && !path.contains("\\") && !path.contains("\0") &&
+        !path.split(separator: "/").contains("..") && !path.split(separator: "/").contains(".")
+    }
+    private static func isOID(_ value: String) -> Bool {
+        value.range(of: "^[a-f0-9]{40,64}$", options: .regularExpression) != nil
+    }
+
+    private func treeEntry(_ path: String, at revision: String?, in root: URL) async throws -> (String, String)? {
+        guard let revision else { return nil }
+        let output = try await run(["ls-tree", "--full-tree", "-z", revision, "--", ":(literal)\(path)"], in: root)
+        let records = output.data.split(separator: 0, omittingEmptySubsequences: true)
+        guard records.count <= 1 else { throw ReviewGitError.unavailable("Ambiguous Git tree entry.") }
+        guard let record = records.first else { return nil }
+        let parts = record.split(separator: 9, maxSplits: 1)
+        guard parts.count == 2, String(data: Data(parts[1]), encoding: .utf8) == path else {
+            throw ReviewGitError.unavailable("Git tree entry does not match selected path.")
+        }
+        let header = String(decoding: parts[0], as: UTF8.self).split(separator: " ")
+        guard header.count == 3, header[1] == "blob", ["100644", "100755"].contains(String(header[0])), Self.isOID(String(header[2])) else {
+            throw ReviewGitError.unavailable("Unsupported Git file kind.")
+        }
+        return (String(header[0]), String(header[2]))
+    }
+
+    private func indexEntry(_ path: String, in root: URL) async throws -> (String, String)? {
+        let output = try await run(["ls-files", "--stage", "-z", "--", ":(literal)\(path)"], in: root)
+        let records = output.data.split(separator: 0, omittingEmptySubsequences: true)
+        guard records.count <= 1 else { throw ReviewGitError.unavailable("Unmerged or ambiguous index entry.") }
+        guard let record = records.first else { return nil }
+        let parts = record.split(separator: 9, maxSplits: 1)
+        let header = parts.first.map { String(decoding: $0, as: UTF8.self).split(separator: " ") } ?? []
+        guard parts.count == 2, String(data: Data(parts[1]), encoding: .utf8) == path,
+              header.count == 3, header[2] == "0", ["100644", "100755"].contains(String(header[0])),
+              Self.isOID(String(header[1])) else { throw ReviewGitError.unavailable("Unsupported index file kind.") }
+        return (String(header[0]), String(header[1]))
+    }
+
+    private func blob(_ entry: (String, String), in root: URL) async throws -> Data {
+        let result = try await run(["cat-file", "blob", entry.1], in: root)
+        guard result.data.count <= 1_000_000 else { throw ReviewGitError.unavailable("Diff unavailable: file exceeds text size limit.") }
+        return result.data
+    }
+
+    private static func decode(_ bytes: Data) throws -> (String, ReviewTextFacts) {
+        guard bytes.count <= 1_000_000 else { throw ReviewGitError.unavailable("Diff unavailable: file exceeds text size limit.") }
+        let data: Data
+        let bom = bytes.starts(with: [0xef, 0xbb, 0xbf])
+        if bom { data = Data(bytes.dropFirst(3)) } else { data = bytes }
+        if bytes.starts(with: [0xff, 0xfe]) || bytes.starts(with: [0xfe, 0xff]) ||
+            bytes.starts(with: [0, 0, 0xfe, 0xff]) || bytes.starts(with: [0xff, 0xfe, 0, 0]) {
+            throw ReviewGitError.unavailable("Diff unavailable: unsupported text encoding.")
+        }
+        guard !data.contains(0), let text = String(data: data, encoding: .utf8) else {
+            throw ReviewGitError.unavailable(data.contains(0) ? "Binary content cannot be reviewed as text." : "Diff unavailable: unsupported text encoding.")
+        }
+        let lf = data.filter { $0 == 10 }.count
+        let cr = data.filter { $0 == 13 }.count
+        let crlf = zip(data, data.dropFirst()).filter { $0 == 13 && $1 == 10 }.count
+        let eol = lf == 0 && cr == 0 ? "none" : crlf == lf && crlf == cr ? "CRLF" : lf > 0 && cr == 0 ? "LF" : cr > 0 && lf == 0 ? "CR" : "mixed"
+        return (text, ReviewTextFacts(bom: bom, eol: eol, finalNewline: data.last == 10 || data.last == 13))
+    }
+
+    private static func confirmAbsent(path: String, root: URL) throws {
+        let base = open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard base >= 0 else { throw ReviewGitError.unavailable("Worktree is unavailable.") }
+        defer { close(base) }
+        var parent = base
+        defer { if parent != base { close(parent) } }
+        let components = path.split(separator: "/").map(String.init)
+        for component in components.dropLast() {
+            let next = openat(parent, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard next >= 0 else { throw ReviewGitError.unavailable("Unsafe worktree path.") }
+            if parent != base { close(parent) }
+            parent = next
+        }
+        var info = stat()
+        if fstatat(parent, components.last!, &info, AT_SYMLINK_NOFOLLOW) == 0 || errno != ENOENT {
+            throw ReviewGitError.unavailable("Deleted file changed or cannot be verified absent.")
+        }
+    }
+
+    private static func readWorktree(path: String, root: URL) throws -> Data {
+        let rootFD = open(root.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        guard rootFD >= 0 else { throw ReviewGitError.unavailable("Worktree is unavailable.") }
+        defer { close(rootFD) }
+        let components = path.split(separator: "/").map(String.init)
+        var parent = rootFD
+        defer { if parent != rootFD { close(parent) } }
+        for component in components.dropLast() {
+            let next = openat(parent, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard next >= 0 else { throw ReviewGitError.unavailable("Unsafe worktree path.") }
+            if parent != rootFD { close(parent) }
+            parent = next
+        }
+        let fd = openat(parent, components.last!, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { throw ReviewGitError.unavailable("Selected worktree file is unavailable.") }
+        defer { close(fd) }
+        var initial = stat(), finish = stat()
+        var rootPath = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        var resolved = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(rootFD, F_GETPATH, &rootPath) == 0,
+              fcntl(fd, F_GETPATH, &resolved) == 0,
+              String(cString: resolved).hasPrefix(String(cString: rootPath) + "/"),
+              fstat(fd, &initial) == 0, initial.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              initial.st_size <= 1_000_000, initial.st_size >= 0 else {
+            throw ReviewGitError.unavailable("Unsupported or oversized worktree file.")
+        }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        while true {
+            let count = read(fd, &buffer, buffer.count)
+            guard count >= 0 else { throw ReviewGitError.unavailable("Worktree file read failed.") }
+            if count == 0 { break }
+            guard data.count + count <= 1_000_000 else { throw ReviewGitError.unavailable("Diff unavailable: file exceeds text size limit.") }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        resolved = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(fd, F_GETPATH, &resolved) == 0,
+              String(cString: resolved).hasPrefix(String(cString: rootPath) + "/"),
+              fstat(fd, &finish) == 0, initial.st_dev == finish.st_dev, initial.st_ino == finish.st_ino,
+              initial.st_size == finish.st_size,
+              initial.st_mtimespec.tv_sec == finish.st_mtimespec.tv_sec,
+              initial.st_mtimespec.tv_nsec == finish.st_mtimespec.tv_nsec,
+              initial.st_ctimespec.tv_sec == finish.st_ctimespec.tv_sec,
+              initial.st_ctimespec.tv_nsec == finish.st_ctimespec.tv_nsec,
+              data.count == Int(initial.st_size) else {
+            throw ReviewGitError.unavailable("Worktree file changed during capture.")
+        }
+        return data
     }
 
     private func readPatch(_ args: [String], in root: URL, allowDifference: Bool = false) async throws -> ReviewDiff {
