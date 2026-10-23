@@ -221,6 +221,63 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
         return files.sorted { $0.path < $1.path }
     }
 
+    func branchFiles(worktree: URL, mainBranch: String) async throws -> [ReviewFile] {
+        if Self.requestDeadline == nil {
+            return try await Self.$requestDeadline.withValue(ContinuousClock.now.advanced(by: .seconds(12))) {
+                try await branchFiles(worktree: worktree, mainBranch: mainBranch)
+            }
+        }
+        let root = worktree.standardizedFileURL
+        guard !mainBranch.isEmpty, !mainBranch.hasPrefix("-"), !mainBranch.contains("\0") else {
+            throw ReviewGitError.unavailable("Invalid configured main branch.")
+        }
+        let head = try await oid("HEAD", in: root)
+        let main = try await oid("refs/heads/\(mainBranch)", in: root)
+        let merge = try await run(["merge-base", "--all", main, head], in: root)
+        let bases = merge.text.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard bases.count == 1, Self.isOID(bases[0]) else {
+            throw ReviewGitError.unavailable("Branch comparison has no unique merge base.")
+        }
+        guard try await oid("HEAD", in: root) == head,
+              try await oid("refs/heads/\(mainBranch)", in: root) == main else {
+            throw ReviewGitError.unavailable("Branch changed while listing files. Refresh review.")
+        }
+        let output = try await run(["diff", "--no-textconv", "--no-ext-diff", "--name-status", "-z", "--find-renames", bases[0], head, "--"], in: root)
+        guard try await oid("HEAD", in: root) == head,
+              try await oid("refs/heads/\(mainBranch)", in: root) == main else {
+            throw ReviewGitError.unavailable("Branch changed while listing files. Refresh review.")
+        }
+        let tokens = try output.data.split(separator: 0, omittingEmptySubsequences: true).map { token -> String in
+            guard let name = String(data: Data(token), encoding: .utf8) else {
+                throw ReviewGitError.unavailable("Git returned an unsupported file path encoding.")
+            }
+            return name
+        }
+        var files: [ReviewFile] = []
+        var index = 0
+        while index < tokens.count {
+            let statusToken = tokens[index]; index += 1
+            guard index < tokens.count else { throw ReviewGitError.failed("Malformed branch file list.") }
+            let firstPath = tokens[index]; index += 1
+            let renamed = statusToken.hasPrefix("R") || statusToken.hasPrefix("C")
+            guard !renamed || index < tokens.count else { throw ReviewGitError.failed("Malformed branch rename.") }
+            let path = renamed ? tokens[index] : firstPath
+            if renamed { index += 1 }
+            guard Self.safePath(path), !renamed || Self.safePath(firstPath) else {
+                throw ReviewGitError.unavailable("Branch file path is unsafe.")
+            }
+            files.append(ReviewFile(worktree: root, group: .branch, status: Self.status(statusToken.first ?? "M"),
+                                    path: path, oldPath: renamed ? firstPath : nil, commitSHA: head,
+                                    comparison: "\(bases[0]) → \(head)"))
+        }
+        guard try await oid("HEAD", in: root) == head,
+              try await oid("refs/heads/\(mainBranch)", in: root) == main else {
+            throw ReviewGitError.unavailable("Branch changed while listing files. Refresh review.")
+        }
+        guard files.count <= 512 else { throw ReviewGitError.unavailable("Too many branch changes for bounded review.") }
+        return files.sorted { $0.path < $1.path }
+    }
+
     func diff(for file: ReviewFile, in worktree: URL) async throws -> ReviewDiff {
         let selected = worktree.standardizedFileURL
         guard file.worktree.standardizedFileURL == selected,
@@ -302,7 +359,9 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
             let bases = result.text.split(whereSeparator: \.isWhitespace).map(String.init)
             guard bases.count == 1, Self.isOID(bases[0]) else { throw ReviewGitError.unavailable("Branch comparison has no unique merge base.") }
             basis = bases[0]
-            guard file.commitSHA == nil || file.commitSHA == target else { throw ReviewGitError.unavailable("Branch selection changed. Refresh review.") }
+            guard file.commitSHA == target, file.comparison == "\(basis!) → \(target)" else {
+                throw ReviewGitError.unavailable("Branch selection or merge base changed. Refresh review.")
+            }
         }
         let oldPath = file.oldPath ?? file.path
         let beforeEntry: (String, String)?

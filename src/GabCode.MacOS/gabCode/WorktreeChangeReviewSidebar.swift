@@ -9,6 +9,7 @@ struct WorktreeChangeReviewSidebar: View {
     @State private var workingExpanded = true
     @State private var stagedExpanded = true
     @State private var unstagedExpanded = true
+    @State private var branchExpanded = false
     @State private var historyExpanded = true
     @ScaledMetric(relativeTo: .subheadline) private var commitRowHeight = 26.0
 
@@ -45,6 +46,7 @@ struct WorktreeChangeReviewSidebar: View {
                     LazyVStack(alignment: .leading, spacing: 2) {
                         if let snapshot = coordinator.snapshot {
                             workingChanges(snapshot)
+                            branchChanges(snapshot)
                             history(snapshot)
                         } else if coordinator.isLoading {
                             Text("Loading Git changes…").foregroundStyle(.secondary)
@@ -64,6 +66,12 @@ struct WorktreeChangeReviewSidebar: View {
                maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("change-review-sidebar")
+        .onChange(of: coordinator.snapshot?.head) { _, _ in
+            if branchExpanded { coordinator.loadBranchFiles() }
+        }
+        .onChange(of: coordinator.snapshot?.main) { _, _ in
+            if branchExpanded { coordinator.loadBranchFiles() }
+        }
     }
 
     @ViewBuilder private func workingChanges(_ snapshot: ReviewSnapshot) -> some View {
@@ -125,7 +133,7 @@ struct WorktreeChangeReviewSidebar: View {
         case .conflicted: state = "Conflicted"
         case .copied: state = "Copied"
         }
-        let group = file.group == .staged ? "Staged" : file.group == .unstaged ? "Unstaged" : "Commit"
+        let group = file.group == .staged ? "Staged" : file.group == .unstaged ? "Unstaged" : file.group == .branch ? "Branch" : "Commit"
         let glyph: String
         switch file.status {
         case .added, .untracked: glyph = file.status == .untracked ? "U" : "A"
@@ -170,6 +178,29 @@ struct WorktreeChangeReviewSidebar: View {
         .accessibilityValue(coordinator.selectedFile?.id == file.id ? "Selected diff" : "Not selected")
         .help("\(badge.accessibilityName) · \(file.oldPath.map { "\($0) → " } ?? "")\(file.path) · \(comparison)")
         .accessibilityIdentifier("review-file-\(file.group.rawValue)-\(file.path)")
+    }
+
+    @ViewBuilder private func branchChanges(_ snapshot: ReviewSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            disclosure("Branch changes", expanded: $branchExpanded, identifier: "review-group-branch")
+                .accessibilityAddTraits(.isHeader)
+                .onChange(of: branchExpanded) { _, expanded in if expanded { coordinator.loadBranchFiles() } }
+            if branchExpanded {
+                if coordinator.isLoadingBranchFiles {
+                    ProgressView("Loading branch changes…").controlSize(.small)
+                } else if let error = coordinator.branchFilesError {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                        Button("Retry branch changes") { coordinator.loadBranchFiles() }
+                            .accessibilityIdentifier("retry-branch-changes")
+                    }.padding(.leading, 20)
+                } else if coordinator.branchFiles.isEmpty {
+                    Text("No branch changes.").font(.caption).foregroundStyle(.secondary).padding(.leading, 20)
+                } else {
+                    ForEach(coordinator.branchFiles) { file in fileButton(file).padding(.leading, 16) }
+                }
+            }
+        }
     }
 
     @ViewBuilder private func history(_ snapshot: ReviewSnapshot) -> some View {

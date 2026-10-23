@@ -5,6 +5,28 @@ import XCTest
 
 @MainActor
 final class WorktreeChangeReviewCoordinatorTests: XCTestCase {
+    func testBranchListingRejectsObsoleteHeadAndKeepsComparisonIdentity() async throws {
+        let root = URL(fileURLWithPath: "/tmp/review branch coordinator \(UUID())", isDirectory: true)
+        let oldHead = String(repeating: "a", count: 40)
+        let main = String(repeating: "b", count: 40)
+        let newHead = String(repeating: "c", count: 40)
+        let loader = SnapshotSequence([snapshot(root, head: oldHead, main: main, working: [], commits: []), snapshot(root, head: newHead, main: main, working: [], commits: [])])
+        let coordinator = WorktreeChangeReviewCoordinator(
+            snapshotLoader: { _, _ in try await loader.next() },
+            branchFileLoader: { _, _ in
+                try await Task.sleep(for: .milliseconds(150))
+                return [ReviewFile(worktree: root, group: .branch, status: .added, path: "change.txt", oldPath: nil,
+                                   commitSHA: oldHead, comparison: "\(main) → \(oldHead)")]
+            })
+        coordinator.activate(worktree: root, mainBranch: "trunk")
+        await coordinator.refresh()
+        coordinator.loadBranchFiles()
+        await coordinator.refresh()
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertTrue(coordinator.branchFiles.isEmpty, "A result captured for obsolete HEAD cannot appear")
+        XCTAssertNil(coordinator.branchFiles.first?.commitSHA)
+    }
+
     func testRefreshRetainsReviewContextAndClosesInvalidatedDiff() async throws {
         let root = URL(fileURLWithPath: "/tmp/review coordinator \(UUID())", isDirectory: true)
         let sha = String(repeating: "a", count: 40)
@@ -197,8 +219,8 @@ final class WorktreeChangeReviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.selectedWorktree, second)
     }
 
-    nonisolated private func snapshot(_ root: URL, working: [ReviewFile], commits: [ReviewCommit]) -> ReviewSnapshot {
-        ReviewSnapshot(worktree: root, head: String(repeating: "1", count: 40), main: String(repeating: "0", count: 40), working: working, commits: commits, hasMoreCommits: false)
+    nonisolated private func snapshot(_ root: URL, head: String = String(repeating: "1", count: 40), main: String = String(repeating: "0", count: 40), working: [ReviewFile], commits: [ReviewCommit]) -> ReviewSnapshot {
+        ReviewSnapshot(worktree: root, head: head, main: main, working: working, commits: commits, hasMoreCommits: false)
     }
 
     private actor SnapshotSequence {

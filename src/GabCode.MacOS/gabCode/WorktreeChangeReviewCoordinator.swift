@@ -15,10 +15,16 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
     @Published private(set) var expandedCommits: Set<String> = []
     @Published private(set) var commitFiles: [String: [ReviewFile]] = [:]
     @Published private(set) var selectedFile: ReviewFile?
+    @Published private(set) var branchFiles: [ReviewFile] = []
+    private var branchFilesHead: String?
+    private var branchFilesMain: String?
+    @Published private(set) var isLoadingBranchFiles = false
+    @Published private(set) var branchFilesError: String?
     @Published private(set) var isLoadingMore = false
 
     private let service: WorktreeChangeReviewService
     private let snapshotLoader: @Sendable (URL, String) async throws -> ReviewSnapshot
+    private let branchFileLoader: @Sendable (URL, String) async throws -> [ReviewFile]
     private var selectedMainBranch: String?
     private var generation = 0
     private var refreshTask: Task<Void, Never>?
@@ -29,16 +35,20 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
     private var debounceTask: Task<Void, Never>?
     private var periodicTask: Task<Void, Never>?
     private var fileListTasks: [String: Task<Void, Never>] = [:]
+    private var branchFileTask: Task<Void, Never>?
+    private var branchFileIdentity = UUID()
     private var pageTask: Task<Void, Never>?
     private var observer: WorktreeReviewObserver?
     private weak var selectedPresentation: TerminalWorkspacePresentation?
 
     init(
         service: WorktreeChangeReviewService = WorktreeChangeReviewService(),
-        snapshotLoader: (@Sendable (URL, String) async throws -> ReviewSnapshot)? = nil
+        snapshotLoader: (@Sendable (URL, String) async throws -> ReviewSnapshot)? = nil,
+        branchFileLoader: (@Sendable (URL, String) async throws -> [ReviewFile])? = nil
     ) {
         self.service = service
         self.snapshotLoader = snapshotLoader ?? { path, branch in try await service.snapshot(worktree: path, mainBranch: branch) }
+        self.branchFileLoader = branchFileLoader ?? { path, branch in try await service.branchFiles(worktree: path, mainBranch: branch) }
     }
 
     func activate(worktree: URL, mainBranch: String) {
@@ -48,6 +58,10 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
         selectedPresentation?.closeReviewDocument(restoreFocus: false)
         selectedPresentation = nil
         selectedFile = nil
+        branchFiles = []
+        branchFilesHead = nil
+        branchFilesMain = nil
+        branchFilesError = nil
         snapshot = nil
         isStale = false
         errorMessage = nil
@@ -66,6 +80,10 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
         selectedWorktree = nil
         selectedMainBranch = nil
         selectedFile = nil
+        branchFiles = []
+        branchFilesHead = nil
+        branchFilesMain = nil
+        branchFilesError = nil
         snapshot = nil
         expandedCommits = []
         commitFiles = [:]
@@ -134,6 +152,22 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
                 }
             }
             snapshot = reconciled
+            if previous?.head != reconciled.head || previous?.main != reconciled.main {
+                branchFileIdentity = UUID()
+                branchFileTask?.cancel()
+                branchFileTask = nil
+                isLoadingBranchFiles = false
+            }
+            if branchFilesHead != reconciled.head || branchFilesMain != reconciled.main {
+                if selectedFile?.group == .branch {
+                    selectedPresentation?.closeReviewDocument(restoreFocus: true)
+                    selectedFile = nil
+                    notice = "Branch comparison changed. Select a file from the refreshed branch list."
+                }
+                branchFiles = []
+                branchFilesHead = nil
+                branchFilesMain = nil
+            }
             for commit in reconciled.commits where expandedCommits.contains(commit.sha) && commitFiles[commit.sha] == nil {
                 loadFiles(for: commit)
             }
@@ -243,6 +277,46 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
         selectedFile = nil
     }
 
+    func loadBranchFiles() {
+        guard let snapshot, !isLoadingBranchFiles, !branchFilesAreCurrent(for: snapshot),
+              let path = selectedWorktree, let branch = selectedMainBranch else { return }
+        let identity = UUID()
+        branchFileIdentity = identity
+        let head = snapshot.head
+        let main = snapshot.main
+        isLoadingBranchFiles = true
+        branchFilesError = nil
+        branchFileTask = Task { [weak self, branchFileLoader] in
+            defer {
+                if self?.branchFileIdentity == identity {
+                    self?.isLoadingBranchFiles = false
+                    self?.branchFileTask = nil
+                }
+            }
+            do {
+                let files = try await branchFileLoader(path, branch)
+                guard let self, !Task.isCancelled, self.branchFileIdentity == identity,
+                      self.selectedWorktree == path, self.snapshot?.head == head, self.snapshot?.main == main else { return }
+                guard files.allSatisfy({ $0.worktree.standardizedFileURL == path && $0.group == .branch &&
+                    $0.commitSHA == head && $0.comparison.hasSuffix(" → \(head)") }) else {
+                    self.branchFilesError = "Branch file list changed. Refresh review."
+                    return
+                }
+                self.branchFiles = files
+                self.branchFilesHead = head
+                self.branchFilesMain = main
+            } catch {
+                guard let self, !Task.isCancelled, self.branchFileIdentity == identity,
+                      self.selectedWorktree == path else { return }
+                self.branchFilesError = error.localizedDescription
+            }
+        }
+    }
+
+    private func branchFilesAreCurrent(for snapshot: ReviewSnapshot) -> Bool {
+        branchFilesHead == snapshot.head && branchFilesMain == snapshot.main
+    }
+
     func toggleCommit(_ sha: String) {
         guard snapshot?.commits.contains(where: { $0.sha == sha }) == true else { return }
         if expandedCommits.contains(sha) { expandedCommits.remove(sha); return }
@@ -330,6 +404,10 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
 
     private func isValid(_ file: ReviewFile, in next: ReviewSnapshot) -> Bool {
         guard file.worktree.standardizedFileURL == next.worktree.standardizedFileURL else { return false }
+        if file.group == .branch {
+            return branchFilesAreCurrent(for: next) && file.commitSHA == next.head &&
+                branchFiles.contains(where: { $0.id == file.id && $0.comparison == file.comparison })
+        }
         if file.group == .commit {
             return next.commits.contains(where: { $0.sha == file.commitSHA }) &&
                 commitFiles[file.commitSHA ?? ""]?.contains(where: { $0.id == file.id }) == true
@@ -351,6 +429,10 @@ final class WorktreeChangeReviewCoordinator: ObservableObject {
         isLoading = false
         fileListTasks.values.forEach { $0.cancel() }
         fileListTasks.removeAll()
+        branchFileIdentity = UUID()
+        branchFileTask?.cancel()
+        branchFileTask = nil
+        isLoadingBranchFiles = false
         observer?.stop(); observer = nil
     }
 

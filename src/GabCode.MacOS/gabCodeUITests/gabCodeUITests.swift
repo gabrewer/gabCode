@@ -454,6 +454,15 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["No staged files."].exists, "Group disclosure collapses empty content")
         stagedGroup.click()
         XCTAssertTrue(app.staticTexts["No staged files."].exists)
+        let branchGroup = app.buttons["review-group-branch"]
+        XCTAssertTrue(branchGroup.waitForExistence(timeout: 5))
+        branchGroup.click()
+        let branchFile = app.buttons["review-file-branch-history.txt"]
+        XCTAssertTrue(branchFile.waitForExistence(timeout: 10), "Branch changes list must expose the selected branch file")
+        branchFile.click()
+        XCTAssertEqual(branchFile.value as? String, "Selected diff")
+        XCTAssertTrue(app.descendants(matching: .any)["native-diff-viewer"].waitForExistence(timeout: 8))
+        app.buttons["close-review-diff"].click()
         let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
         XCTAssertTrue(commit.waitForExistence(timeout: 8))
         commit.click()
