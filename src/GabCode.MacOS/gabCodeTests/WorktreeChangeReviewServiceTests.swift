@@ -3,6 +3,164 @@ import Foundation
 import XCTest
 
 final class WorktreeChangeReviewServiceTests: XCTestCase {
+    func testExactStagedUnstagedHistoricalAndBranchPairsUseRealGitBytes() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review pairs ü \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try git(["config", "core.autocrlf", "false"], in: root)
+        let path = root.appendingPathComponent("sample.txt")
+        try Data("committed\n".utf8).write(to: path)
+        try git(["add", "sample.txt"], in: root)
+        try commit("base", in: root)
+        try git(["switch", "-c", "feature"], in: root)
+        try Data("historical\n".utf8).write(to: path)
+        try git(["add", "sample.txt"], in: root)
+        try commit("historical", in: root)
+        let historical = try gitOutput(["rev-parse", "HEAD"], in: root).trimmingCharacters(in: .whitespacesAndNewlines)
+        try Data("staged\r\n".utf8).write(to: path)
+        try git(["add", "sample.txt"], in: root)
+        try Data([0xef, 0xbb, 0xbf] + Array("worktree".utf8)).write(to: path)
+        let service = WorktreeChangeReviewService()
+        let listing = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let staged = try XCTUnwrap(listing.working.first { $0.group == .staged })
+        let unstaged = try XCTUnwrap(listing.working.first { $0.group == .unstaged })
+        let pair1 = try await service.document(for: staged, in: root, mainBranch: "trunk")
+        XCTAssertEqual(pair1.before, "historical\n")
+        XCTAssertEqual(pair1.after, "staged\r\n")
+        XCTAssertTrue(pair1.afterFacts.finalNewline)
+        let pair2 = try await service.document(for: unstaged, in: root, mainBranch: "trunk")
+        XCTAssertEqual(pair2.before, "staged\r\n")
+        XCTAssertEqual(pair2.after, "worktree")
+        XCTAssertTrue(pair2.afterFacts.bom)
+        XCTAssertFalse(pair2.afterFacts.finalNewline)
+        let history = try XCTUnwrap(listing.commits.first { $0.sha == historical })
+        let files = try await service.files(in: history, worktree: root)
+        let file = try XCTUnwrap(files.first)
+        let commitPair = try await service.document(for: file, in: root, mainBranch: "trunk")
+        XCTAssertEqual(commitPair.before, "committed\n")
+        XCTAssertEqual(commitPair.after, "historical\n", "Historical content must not come from today's worktree")
+        let branch = ReviewFile(worktree: root, group: .branch, status: .modified, path: "sample.txt", oldPath: nil,
+                                commitSHA: historical, comparison: "trunk merge base → HEAD")
+        let branchPair = try await service.document(for: branch, in: root, mainBranch: "trunk")
+        XCTAssertEqual(branchPair.before, "committed\n")
+        XCTAssertEqual(branchPair.after, "historical\n")
+        XCTAssertEqual(try Data(contentsOf: path), Data([0xef, 0xbb, 0xbf] + Array("worktree".utf8)))
+    }
+
+    func testFilterManagedRawPairDoesNotExecuteCleanHook() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raw filter \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        let path = root.appendingPathComponent("filtered.txt")
+        try Data("stored\n".utf8).write(to: path)
+        try git(["add", "filtered.txt"], in: root)
+        try commit("base", in: root)
+        let marker = root.appendingPathComponent("hook-ran")
+        let helper = root.appendingPathComponent("clean-hook")
+        try "#!/bin/sh\ntouch '\(marker.path)'\ncat\n".write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        try "filtered.txt filter=probe\n".write(to: root.appendingPathComponent(".gitattributes"), atomically: true, encoding: .utf8)
+        try git(["config", "filter.probe.clean", helper.path], in: root)
+        try Data("edited\n".utf8).write(to: path)
+        let service = WorktreeChangeReviewService()
+        let snapshot = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let file = try XCTUnwrap(snapshot.working.first { $0.path == "filtered.txt" })
+        let pair = try await service.document(for: file, in: root, mainBranch: "trunk")
+        XCTAssertEqual(pair.before, "stored\n")
+        XCTAssertEqual(pair.after, "edited\n")
+        XCTAssertTrue(pair.rawFilter)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testDeletedRowWithUnsafeSymlinkCannotPretendTargetIsAbsent() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("deleted symlink \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try Data("before\n".utf8).write(to: root.appendingPathComponent("file.txt"))
+        try git(["add", "file.txt"], in: root)
+        try commit("base", in: root)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("file.txt"))
+        let row = ReviewFile(worktree: root, group: .unstaged, status: .deleted, path: "file.txt", oldPath: nil,
+                             commitSHA: nil, comparison: "index → worktree")
+        let deleted = try await WorktreeChangeReviewService().document(for: row, in: root, mainBranch: "trunk")
+        XCTAssertFalse(deleted.afterExists)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("file.txt"),
+                                                   withDestinationURL: root.appendingPathComponent("missing-outside.txt"))
+        do {
+            _ = try await WorktreeChangeReviewService().document(for: row, in: root, mainBranch: "trunk")
+            XCTFail("A dangling symlink is not a confirmed deleted regular file")
+        } catch ReviewGitError.unavailable { /* expected */ }
+    }
+
+    func testSha256RootCommitUsesActualEmptyBeforeWithoutSha1TreeConstant() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review sha256 \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "--object-format=sha256", "-b", "trunk"], in: root)
+        try Data("root\n".utf8).write(to: root.appendingPathComponent("root.txt"))
+        try git(["add", "root.txt"], in: root)
+        try commit("root", in: root)
+        let sha = try gitOutput(["rev-parse", "HEAD"], in: root).trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(sha.count, 64)
+        let commit = ReviewCommit(sha: sha, subject: "root", author: "Test", timestamp: .now, summary: "", parents: [])
+        let service = WorktreeChangeReviewService()
+        let files = try await service.files(in: commit, worktree: root)
+        let pair = try await service.document(for: XCTUnwrap(files.first), in: root, mainBranch: "trunk")
+        XCTAssertEqual(pair.before, "")
+        XCTAssertFalse(pair.beforeExists)
+        XCTAssertEqual(pair.after, "root\n")
+    }
+
+    func testHistoricalCommitDoesNotDependOnTodaysConflictedIndexOrHead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("historical conflict \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try Data("historical\n".utf8).write(to: root.appendingPathComponent("file.txt"))
+        try git(["add", "file.txt"], in: root)
+        try commit("historical", in: root)
+        let selectedSHA = try gitOutput(["rev-parse", "HEAD"], in: root).trimmingCharacters(in: .whitespacesAndNewlines)
+        let selected = ReviewFile(worktree: root, group: .commit, status: .added, path: "file.txt", oldPath: nil,
+                                  commitSHA: selectedSHA, comparison: "empty tree → selected commit")
+        try git(["symbolic-ref", "HEAD", "refs/heads/missing"], in: root)
+        let pair = try await WorktreeChangeReviewService().document(for: selected, in: root, mainBranch: "trunk")
+        XCTAssertEqual(pair.before, "")
+        XCTAssertEqual(pair.after, "historical\n")
+    }
+
+    func testUntrackedRowWithNewIndexEntryIsUnavailable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("untracked stale \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try commit("base", in: root, allowEmpty: true)
+        try Data("new\n".utf8).write(to: root.appendingPathComponent("file.txt"))
+        let stale = ReviewFile(worktree: root, group: .unstaged, status: .untracked, path: "file.txt", oldPath: nil,
+                               commitSHA: nil, comparison: "empty → worktree")
+        try git(["add", "file.txt"], in: root)
+        do {
+            _ = try await WorktreeChangeReviewService().document(for: stale, in: root, mainBranch: "trunk")
+            XCTFail("An indexed file cannot still be reviewed as empty → untracked")
+        } catch ReviewGitError.unavailable { /* expected */ }
+    }
+
+    func testInvalidUtf8IsUnavailableRatherThanReplacementText() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review encoding \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try commit("base", in: root, allowEmpty: true)
+        try Data([0xff, 0xfe, 0x61, 0]).write(to: root.appendingPathComponent("invalid.txt"))
+        let file = ReviewFile(worktree: root, group: .unstaged, status: .untracked, path: "invalid.txt", oldPath: nil,
+                              commitSHA: nil, comparison: "empty → worktree")
+        do {
+            _ = try await WorktreeChangeReviewService().document(for: file, in: root, mainBranch: "trunk")
+            XCTFail("UTF-16 must not be decoded with replacements or mislabeled as a clean diff")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("encoding"), "\(error)") }
+    }
     func testStagedUnstagedRenameUntrackedAndUniqueHistoryUseRealGit() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("gabCode review ünicode \(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
