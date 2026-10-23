@@ -34,6 +34,8 @@ struct TerminalWorkspaceView: View {
     @ObservedObject private var presentation: TerminalWorkspacePresentation
     @ObservedObject private var document: ReadOnlyDiffDocumentState
     private let reviewService = WorktreeChangeReviewService()
+    private let modePreference = ReviewModePreference()
+    @State private var reviewMode = "side-by-side"
     private let isActive: Bool
 
     init(workingDirectory: URL, font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular), isActive: Bool = true) {
@@ -98,10 +100,24 @@ struct TerminalWorkspaceView: View {
         .task(id: document.revision) {
             guard let file = document.selectedFile, isActive else { return }
             let revision = document.revision
+            guard let branch = presentation.reviewMainBranch, let host = document.viewerHost else {
+                document.fail("Configured local main branch is unavailable.")
+                return
+            }
             do {
-                let result = try await reviewService.diff(for: file, in: presentation.workingDirectory)
+                let result = try await reviewService.document(for: file, in: presentation.workingDirectory, mainBranch: branch)
+                guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
+                if !host.isReady { try await host.load() }
+                guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
+                host.select(identity: result.identity, generation: revision)
+                host.onEvent = { [weak document] event in document?.updateViewerEvent(event) }
+                try await host.show(before: result.before, after: result.after, path: file.path,
+                                    identity: result.identity, generation: revision, mode: reviewMode,
+                                    beforeLabel: file.oldPath ?? file.path, afterLabel: file.path,
+                                    beforeFacts: facts(result.beforeFacts), afterFacts: facts(result.afterFacts))
                 guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
                 document.apply(result)
+                if document.wantsFocus { try? await host.focusCode(); document.didFocus() }
             } catch {
                 guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
                 document.fail(error.localizedDescription)
@@ -111,6 +127,7 @@ struct TerminalWorkspaceView: View {
             if isActive { presentation.apply(font: fontPreference.effectiveFont) }
         }
         .onAppear {
+            reviewMode = modePreference.mode
             if isActive { TerminalCommandRouter.shared.connect(presentation) }
         }
         .onDisappear {
@@ -126,7 +143,7 @@ struct TerminalWorkspaceView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
                             .lineLimit(1).truncationMode(.middle).font(.headline)
-                        Text("\(file.status.rawValue.capitalized) · \(file.comparison)\(file.commitSHA.map { " · \($0.prefix(12))" } ?? "")")
+                        Text("\(file.status.rawValue.capitalized) · \(document.reviewPair?.comparison ?? file.comparison)\(file.commitSHA.map { " · \($0.prefix(12))" } ?? "")\(document.reviewPair?.rawFilter == true ? " · Raw content — Git filters not applied" : "")\(document.reviewPair?.afterExists == false && document.hasLoadedContent ? " · Deleted result" : "")")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -137,26 +154,56 @@ struct TerminalWorkspaceView: View {
                     Button("Close Diff") { presentation.closeReviewDocument() }
                         .accessibilityIdentifier("close-review-diff")
                 }.padding(8)
-                Divider()
-                if document.isLoading && !document.hasLoadedContent {
-                    ProgressView("Loading read-only diff")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = document.errorMessage {
-                    ContentUnavailableView("Diff unavailable", systemImage: "doc.text.magnifyingglass", description: Text(error))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ReadOnlyUnifiedDiffView(text: document.content, requestFocus: document.wantsFocus) {
-                        document.didFocus()
+                HStack(spacing: 6) {
+                    Picker("Review mode", selection: $reviewMode) {
+                        Text("Side by side").tag("side-by-side")
+                        Text("Inline").tag("inline")
+                        Text("File").tag("file")
                     }
-                    .accessibilityIdentifier("read-only-unified-diff")
-                    .overlay(alignment: .topTrailing) {
-                        if document.isLoading {
-                            ProgressView("Refreshing diff")
-                                .controlSize(.small)
-                                .padding(8)
-                                .allowsHitTesting(false)
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 260)
+                    .accessibilityIdentifier("review-mode")
+                    .onChange(of: reviewMode) { _, mode in
+                        modePreference.mode = mode
+                        viewerCommand("mode", mode)
+                    }
+                    Button("Previous change") { viewerCommand("change", "previous") }
+                    Button("Next change") { viewerCommand("change", "next") }
+                    Text(document.changePosition).font(.caption).lineLimit(1)
+                        .accessibilityIdentifier("review-change-position")
+                    if document.canJumpToDeletion {
+                        Button("Show deletion in Inline") {
+                            guard let host = document.viewerHost else { return }
+                            Task {
+                                try? await host.command("deletion")
+                                guard document.viewerHost === host else { return }
+                                reviewMode = "inline"
+                            }
                         }
                     }
+                    Spacer()
+                    Button("Find") { viewerCommand("find") }
+                    Button("Focus code (F6 to leave)") { viewerCommand("focus") }
+                    if document.errorMessage != nil {
+                        Button("Retry") { document.retry() }.accessibilityIdentifier("review-retry")
+                    }
+                }.controlSize(.small).padding(6)
+                Divider()
+                if let error = document.errorMessage {
+                    Text("Diff unavailable — \(error)\(document.reviewPair == nil ? "" : " · Previous review snapshot is stale")")
+                        .font(.caption).foregroundStyle(.orange)
+                        .accessibilityIdentifier("review-diff-error")
+                } else if document.isLoading {
+                    ProgressView(document.hasLoadedContent ? "Refreshing diff" : "Loading read-only diff")
+                        .controlSize(.small)
+                }
+                if let host = document.viewerHost {
+                    NativeReviewDocumentHost(host: host, onExit: { presentation.focus(document.selectedBottomTerminal) })
+                        .id(ObjectIdentifier(host))
+                        .accessibilityIdentifier("native-diff-viewer")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView("Diff unavailable", systemImage: "doc.text.magnifyingglass")
                 }
             }
             .background(ReadOnlyDiffAnnouncement(message: document.isLoading
@@ -166,6 +213,27 @@ struct TerminalWorkspaceView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Read-only diff for \(file.path), \(file.comparison)")
             .accessibilityIdentifier("review-diff-document")
+        }
+    }
+
+    private func facts(_ value: ReviewTextFacts) -> [String: Any] {
+        ["bom": value.bom, "eol": value.eol, "finalNewline": value.finalNewline]
+    }
+
+    private func viewerCommand(_ kind: String, _ value: String? = nil) {
+        guard let host = document.viewerHost, host.isReady else { return }
+        let revision = document.revision
+        Task {
+            do {
+                if kind == "find" || kind == "focus" {
+                    guard document.reviewPair != nil else { return }
+                    try await host.focusCode()
+                }
+                try await host.command(kind, value: value)
+            } catch {
+                guard document.viewerHost === host, document.revision == revision else { return }
+                document.fail(error.localizedDescription)
+            }
         }
     }
 
@@ -218,6 +286,21 @@ struct TerminalWorkspaceView: View {
         .padding(.horizontal, 10)
         .frame(height: 38)
     }
+}
+
+@MainActor
+private struct NativeReviewDocumentHost: NSViewRepresentable {
+    let host: MacDiffViewerHost
+    let onExit: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        host.onFocusExit = onExit
+        host.webView.setAccessibilityLabel("Read-only code review. Press F6 to return to native controls.")
+        host.webView.setAccessibilityIdentifier("native-diff-viewer")
+        return host.webView
+    }
+
+    func updateNSView(_ view: NSView, context: Context) { host.onFocusExit = onExit }
 }
 
 @MainActor

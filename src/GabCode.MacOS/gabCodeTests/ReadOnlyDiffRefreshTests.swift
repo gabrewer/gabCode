@@ -1,101 +1,125 @@
 import AppKit
 import Combine
 import SwiftUI
+import WebKit
 @testable import gabCode
 import XCTest
 
 @MainActor
 final class ReadOnlyDiffRefreshTests: XCTestCase {
-    func testBackgroundRefreshRetainsNativeTextHostFocusSelectionAndScroll() async throws {
-        let root = try repository()
+    func testNativeViewerRefreshKeepsSameHostAndCapturedPair() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review WK refresh \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let nextText = (0..<180).map { "changed line \($0)\n" }.joined()
-        try Data(nextText.utf8).write(to: root.appendingPathComponent("history.txt"))
-        let service = WorktreeChangeReviewService()
-        let snapshot = try await service.snapshot(worktree: root, mainBranch: "trunk")
-        let file = try XCTUnwrap(snapshot.working.first)
-        let presentation = TerminalWorkspacePresentation(workingDirectory: root)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 720), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-        window.contentView = NSHostingView(rootView: TerminalWorkspaceView(presentation: presentation, isActive: true)
-            .environmentObject(TerminalFontPreferenceStore()))
-        window.makeKeyAndOrderFront(nil)
-        defer { window.orderOut(nil); window.contentView = nil }
-        presentation.openReviewDocument(file)
-        try await waitUntil { !presentation.reviewDocument.isLoading && self.diffText(in: window.contentView!) != nil }
-        let original = try XCTUnwrap(diffText(in: window.contentView!))
-        let selection = NSRange(location: 25, length: 10)
-        original.setSelectedRange(selection)
-        original.scrollRangeToVisible(NSRange(location: original.string.utf16.count - 80, length: 10))
-        let scroll = try XCTUnwrap(original.enclosingScrollView)
-        let scrollOrigin = scroll.contentView.bounds.origin
-        XCTAssertTrue(window.makeFirstResponder(original))
-        presentation.reviewDocument.didFocus()
-        presentation.reviewDocument.reload()
-        window.contentView?.layoutSubtreeIfNeeded()
-        XCTAssertTrue(presentation.reviewDocument.isLoading)
-        XCTAssertTrue(diffText(in: window.contentView!) === original, "Do not replace a visible diff with a loading spinner")
-        try await waitUntil { !presentation.reviewDocument.isLoading && self.diffText(in: window.contentView!) != nil }
-        XCTAssertTrue(diffText(in: window.contentView!) === original)
-        XCTAssertEqual(original.selectedRange(), selection)
-        XCTAssertTrue(window.firstResponder === original)
-        XCTAssertEqual(scroll.contentView.bounds.origin, scrollOrigin)
-    }
-
-    func testChangedPatchUpdatesInPlaceAndClampsSelectionWithoutStealingFocus() async throws {
-        let root = try repository()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let path = root.appendingPathComponent("history.txt")
-        try Data(String(repeating: "first version\n", count: 80).utf8).write(to: path)
+        func git(_ args: [String]) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = args
+            process.currentDirectoryURL = root
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run(); process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        try git(["init", "-b", "trunk"])
+        try Data("committed\n".utf8).write(to: root.appendingPathComponent("file.swift"))
+        try git(["add", "file.swift"])
+        try git(["-c", "user.name=Review", "-c", "user.email=review@example.invalid", "commit", "-m", "base"])
+        try Data("first staged\nsecond staged\nthird staged\n".utf8).write(to: root.appendingPathComponent("file.swift"))
+        try git(["add", "file.swift"])
+        try Data("unstaged\n".utf8).write(to: root.appendingPathComponent("file.swift"))
         let snapshot = try await WorktreeChangeReviewService().snapshot(worktree: root, mainBranch: "trunk")
-        let file = try XCTUnwrap(snapshot.working.first)
+        let file = try XCTUnwrap(snapshot.working.first { $0.group == .staged })
         let presentation = TerminalWorkspacePresentation(workingDirectory: root)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 720), styleMask: [.titled], backing: .buffered, defer: false)
-        window.contentView = NSHostingView(rootView: TerminalWorkspaceView(presentation: presentation, isActive: true)
-            .environmentObject(TerminalFontPreferenceStore()))
-        window.makeKeyAndOrderFront(nil)
-        defer { window.orderOut(nil); window.contentView = nil }
-        presentation.openReviewDocument(file)
-        try await waitUntil { !presentation.reviewDocument.isLoading && self.diffText(in: window.contentView!) != nil }
-        let original = try XCTUnwrap(diffText(in: window.contentView!))
-        original.setSelectedRange(NSRange(location: original.string.utf16.count - 10, length: 5))
-        XCTAssertTrue(window.makeFirstResponder(original))
-        presentation.reviewDocument.didFocus()
-        try Data("shorter\n".utf8).write(to: path)
-        presentation.reviewDocument.reload()
-        try await waitUntil { !presentation.reviewDocument.isLoading && self.diffText(in: window.contentView!)?.string.contains("+shorter") == true }
-        XCTAssertTrue(diffText(in: window.contentView!) === original)
-        let range = original.selectedRange()
-        XCTAssertLessThanOrEqual(range.location + range.length, original.string.utf16.count)
-        XCTAssertTrue(window.firstResponder === original)
-    }
-
-    func testEmptyLoadedPatchRetainsNativeHostDuringRefresh() async throws {
-        let root = try repository()
-        defer { try? FileManager.default.removeItem(at: root) }
-        try Data("temporary edit\n".utf8).write(to: root.appendingPathComponent("history.txt"))
-        let snapshot = try await WorktreeChangeReviewService().snapshot(worktree: root, mainBranch: "trunk")
-        let file = try XCTUnwrap(snapshot.working.first)
-        try git(["restore", "--worktree", "history.txt"], in: root)
-        let presentation = TerminalWorkspacePresentation(workingDirectory: root)
+        presentation.reviewMainBranch = "trunk"
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 720), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: TerminalWorkspaceView(presentation: presentation, isActive: true)
             .environmentObject(TerminalFontPreferenceStore()))
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil); window.contentView = nil }
         presentation.openReviewDocument(file)
-        try await waitUntil { !presentation.reviewDocument.isLoading && self.diffText(in: window.contentView!) != nil }
-        let original = try XCTUnwrap(diffText(in: window.contentView!))
-        XCTAssertTrue(original.string.isEmpty)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while (!presentation.reviewDocument.hasLoadedContent || viewer(in: window.contentView!) == nil) && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let view = try XCTUnwrap(viewer(in: window.contentView!))
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.before, "committed\n")
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "first staged\nsecond staged\nthird staged\n")
+        let host = try XCTUnwrap(presentation.reviewDocument.viewerHost)
+        _ = try await host.webView.evaluateJavaScript("window.gabCodeViewer.line(2)")
+        try await host.focusCode()
         presentation.reviewDocument.reload()
-        window.contentView?.layoutSubtreeIfNeeded()
-        XCTAssertTrue(diffText(in: window.contentView!) === original, "Empty is valid loaded content, not an initial load")
-        try await waitUntil { !presentation.reviewDocument.isLoading }
-        XCTAssertTrue(diffText(in: window.contentView!) === original)
+        XCTAssertTrue(presentation.reviewDocument.isLoading)
+        XCTAssertTrue(viewer(in: window.contentView!) === view, "Retain the hosted view while refreshing")
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "first staged\nsecond staged\nthird staged\n")
+        let refreshDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while presentation.reviewDocument.isLoading && ContinuousClock.now < refreshDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertFalse(presentation.reviewDocument.isLoading)
+        XCTAssertTrue(viewer(in: window.contentView!) === view)
+        let retainedLine = try await host.webView.evaluateJavaScript("window.gabCodeViewer.line()") as? Int
+        XCTAssertEqual(retainedLine, 2)
+        let retainedFocus = try await host.webView.evaluateJavaScript("document.activeElement?.tagName") as? String
+        XCTAssertEqual(retainedFocus, "TEXTAREA",
+                       "Refresh must return keyboard focus to code when code had focus")
+        try Data("shorter".utf8).write(to: root.appendingPathComponent("file.swift"))
+        try git(["add", "file.swift"])
+        presentation.reviewDocument.reload()
+        let changedDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while presentation.reviewDocument.isLoading && ContinuousClock.now < changedDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "shorter")
+        XCTAssertTrue(viewer(in: window.contentView!) === view)
+        let clampedLine = try await host.webView.evaluateJavaScript("window.gabCodeViewer.line()") as? Int
+        XCTAssertEqual(clampedLine, 1,
+                       "Changed shorter result must retain a surviving code line")
+        try FileManager.default.removeItem(at: root.appendingPathComponent(".git"))
+        presentation.reviewDocument.reload()
+        let failureDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while presentation.reviewDocument.isLoading && ContinuousClock.now < failureDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNotNil(presentation.reviewDocument.errorMessage)
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "shorter")
+        XCTAssertTrue(viewer(in: window.contentView!) === view, "Failed refresh must leave last-good viewer visibly stale")
+        presentation.reviewDocument.retry()
+        XCTAssertTrue(presentation.reviewDocument.isLoading)
+        XCTAssertFalse(presentation.reviewDocument.viewerHost === host, "Retry creates a fresh host after an error")
+        let retryDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while viewer(in: window.contentView!) === view && ContinuousClock.now < retryDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(viewer(in: window.contentView!) === presentation.reviewDocument.viewerHost?.webView,
+                      "Retry must reparent the fresh WKWebView, not retain the disposed native view")
     }
 
     func testUnrelatedWorkingRefreshDoesNotReloadImmutableHistoricalDocument() async throws {
-        let root = try repository()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review history \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["init", "-b", "trunk"]
+        process.currentDirectoryURL = root
+        process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
+        try process.run(); process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        func git(_ args: [String]) throws {
+            let command = Process()
+            command.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            command.arguments = args
+            command.currentDirectoryURL = root
+            command.standardOutput = FileHandle.nullDevice; command.standardError = FileHandle.nullDevice
+            try command.run(); command.waitUntilExit()
+            XCTAssertEqual(command.terminationStatus, 0)
+        }
+        try git(["-c", "user.name=Review", "-c", "user.email=review@example.invalid", "commit", "--allow-empty", "-m", "base"])
+        try git(["switch", "-c", "feature"])
+        try Data("initial\n".utf8).write(to: root.appendingPathComponent("history.txt"))
+        try git(["add", "history.txt"])
+        try git(["-c", "user.name=Review", "-c", "user.email=review@example.invalid", "commit", "-m", "history"])
         let coordinator = WorktreeChangeReviewCoordinator()
         defer { coordinator.deactivate() }
         coordinator.activate(worktree: root, mainBranch: "trunk")
@@ -109,56 +133,22 @@ final class ReadOnlyDiffRefreshTests: XCTestCase {
         let file = try XCTUnwrap(coordinator.commitFiles[commit.sha]?.first)
         let presentation = TerminalWorkspacePresentation(workingDirectory: root)
         coordinator.open(file: file, in: presentation)
-        presentation.reviewDocument.apply(ReviewDiff(state: .patch, text: "diff --git a/history.txt b/history.txt\n+initial\n"))
+        let pair = try await WorktreeChangeReviewService().document(for: file, in: root, mainBranch: "trunk")
+        presentation.reviewDocument.apply(pair)
         let revision = presentation.reviewDocument.revision
         try Data("untracked\n".utf8).write(to: root.appendingPathComponent("new.txt"))
         await coordinator.refresh()
-        XCTAssertEqual(presentation.reviewDocument.revision, revision, "Historical content is immutable across working-tree refresh")
+        XCTAssertEqual(presentation.reviewDocument.revision, revision, "Unrelated working changes do not reload immutable history")
         XCTAssertEqual(coordinator.selectedFile?.id, file.id)
-        XCTAssertTrue(presentation.reviewDocument.isOpen)
         presentation.reviewDocument.fail("Transient Git failure")
         let failedRevision = presentation.reviewDocument.revision
         await coordinator.refresh()
-        XCTAssertGreaterThan(presentation.reviewDocument.revision, failedRevision, "Refresh must still retry an unavailable historical diff")
+        XCTAssertGreaterThan(presentation.reviewDocument.revision, failedRevision, "Reconciliation retries failed history")
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "initial\n")
     }
 
-    private func diffText(in view: NSView) -> NSTextView? {
-        if let text = view as? NSTextView, text.accessibilityLabel() == "Read-only unified diff" { return text }
-        return view.subviews.lazy.compactMap { self.diffText(in: $0) }.first
-    }
-
-    private func waitUntil(_ condition: () -> Bool) async throws {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while !condition() && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertTrue(condition(), "Native diff failed to settle")
-    }
-
-    private func repository() throws -> URL {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review refresh ünicode \(UUID())", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        do {
-            try git(["init", "-b", "trunk"], in: root)
-            try git(["-c", "user.name=Review", "-c", "user.email=review@example.invalid", "commit", "--allow-empty", "-m", "base"], in: root)
-            try git(["switch", "-c", "feature"], in: root)
-            try Data("initial\n".utf8).write(to: root.appendingPathComponent("history.txt"))
-            try git(["add", "history.txt"], in: root)
-            try git(["-c", "user.name=Review", "-c", "user.email=review@example.invalid", "commit", "-m", "history"], in: root)
-            return root
-        } catch {
-            try? FileManager.default.removeItem(at: root)
-            throw error
-        }
-    }
-
-    private func git(_ arguments: [String], in root: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = root
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { throw NSError(domain: "ReadOnlyDiffRefresh", code: Int(process.terminationStatus)) }
+    private func viewer(in view: NSView) -> MacReviewWebView? {
+        if let web = view as? MacReviewWebView { return web }
+        return view.subviews.lazy.compactMap { self.viewer(in: $0) }.first
     }
 }

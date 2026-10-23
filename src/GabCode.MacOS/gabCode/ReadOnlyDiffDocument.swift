@@ -8,7 +8,11 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
     @Published private(set) var selectedFile: ReviewFile?
     @Published private(set) var revision = 0
     @Published private(set) var content = ""
+    @Published private(set) var reviewPair: ReviewDocument?
     @Published private(set) var hasLoadedContent = false
+    @Published private(set) var viewerHost: MacDiffViewerHost?
+    @Published private(set) var changePosition = "No text changes"
+    @Published private(set) var canJumpToDeletion = false
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var wantsFocus = false
@@ -19,6 +23,12 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
 
     func open(_ file: ReviewFile, mainTerminal: TerminalWorkspaceTerminal) {
         if !isOpen { restoreTerminal = mainTerminal }
+        let replacing = selectedFile?.id != file.id
+        if replacing {
+            viewerHost?.close()
+            viewerHost = MacDiffViewerHost()
+            reviewPair = nil
+        }
         selectedFile = file
         revision += 1
         errorMessage = nil
@@ -35,6 +45,36 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
         isLoading = true
         errorMessage = nil
         wantsFocus = false
+    }
+
+    func apply(_ pair: ReviewDocument) {
+        guard isOpen else { return }
+        reviewPair = pair
+        isLoading = false
+        hasLoadedContent = true
+        errorMessage = nil
+    }
+
+    func updateViewerEvent(_ event: [String: Any]) {
+        guard let pair = reviewPair, let identity = event["identity"] as? String, identity == pair.identity else { return }
+        if event["kind"] as? String == "failure", let message = event["message"] as? String {
+            errorMessage = message
+        } else if event["kind"] as? String == "progress" {
+            let index = event["index"] as? Int ?? 0
+            let total = event["total"] as? Int ?? 0
+            let description = event["description"] as? String ?? ""
+            changePosition = "\(index) of \(total) · \(description)"
+            canJumpToDeletion = event["deletion"] as? Bool == true
+        }
+    }
+
+    func retry() {
+        guard selectedFile != nil else { return }
+        if errorMessage != nil {
+            viewerHost?.close()
+            viewerHost = MacDiffViewerHost()
+        }
+        reload()
     }
 
     func selectBottom(_ terminal: TerminalWorkspaceTerminal) {
@@ -55,12 +95,14 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
     func fail(_ message: String) {
         guard isOpen else { return }
         isLoading = false
-        content = ""
-        hasLoadedContent = false
+        hasLoadedContent = reviewPair != nil
         errorMessage = message
     }
 
     func close() {
+        viewerHost?.close()
+        viewerHost = nil
+        reviewPair = nil
         selectedFile = nil
         revision += 1
         content = ""

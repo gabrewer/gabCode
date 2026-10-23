@@ -120,6 +120,42 @@ final class ReadOnlyDiffPresentationTests: XCTestCase {
         XCTAssertNil(ReviewCurrentFileLocator.existingFile(for: escaped, selectedWorktree: root))
     }
 
+    func testDocumentStateRetainsExactPairAndStaleSnapshotForRetry() throws {
+        let root = URL(fileURLWithPath: "/tmp/review state")
+        let file = ReviewFile(worktree: root, group: .staged, status: .modified, path: "file.swift", oldPath: nil,
+                              commitSHA: nil, comparison: "HEAD → index")
+        let document = ReadOnlyDiffDocumentState()
+        document.open(file, mainTerminal: .terminal1)
+        let facts = ReviewTextFacts(bom: false, eol: "LF", finalNewline: true)
+        let pair = ReviewDocument(before: "committed\n", after: "staged\n", beforeFacts: facts, afterFacts: facts,
+                                  beforeExists: true, afterExists: true, identity: "selected", comparison: "HEAD → index", rawFilter: false)
+        document.apply(pair)
+        XCTAssertEqual(document.reviewPair?.before, "committed\n")
+        XCTAssertEqual(document.reviewPair?.after, "staged\n")
+        document.reload()
+        XCTAssertEqual(document.reviewPair?.identity, "selected", "Refresh must keep last-good pair while visibly stale")
+        XCTAssertTrue(document.isLoading)
+        document.fail("Git unavailable")
+        XCTAssertEqual(document.reviewPair?.identity, "selected")
+        XCTAssertNotNil(document.errorMessage)
+        document.close()
+        XCTAssertNil(document.reviewPair)
+    }
+
+    func testReviewModeIsLocalValidatedPresentationPreference() throws {
+        let name = "gabcode.review.mode.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let preference = ReviewModePreference(defaults: defaults)
+        XCTAssertEqual(preference.mode, "side-by-side")
+        preference.mode = "file"
+        XCTAssertEqual(ReviewModePreference(defaults: defaults).mode, "file")
+        preference.mode = "editable"
+        XCTAssertEqual(preference.mode, "file", "Unknown or editable modes must not persist")
+        defaults.set("malformed", forKey: ReviewModePreference.key)
+        XCTAssertEqual(preference.mode, "side-by-side")
+    }
+
     func testReadOnlyDiffViewIsNotEditableAndHasNativeAccessibleDescription() throws {
         let view = ReadOnlyDiffTextView.make(text: "diff --git a/file b/file\n+added\n")
         XCTAssertFalse(view.isEditable)
