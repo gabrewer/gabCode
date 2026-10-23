@@ -22,6 +22,7 @@ final class TerminalWorkspacePresentation: ObservableObject {
     @Published private(set) var mainTerminal: TerminalWorkspaceTerminal = .terminal1
     @Published private(set) var isMutationLocked = false
     let reviewDocument = ReadOnlyDiffDocumentState()
+    var reviewMainBranch: String?
     private var cancellables: Set<AnyCancellable> = []
     private var didStart = false
 

@@ -118,6 +118,23 @@ final class MacDiffViewerHost: NSObject, WKNavigationDelegate, WKScriptMessageHa
         }
     }
 
+    func command(_ kind: String, value: String? = nil) async throws {
+        guard !closed, isReady, selectedGeneration >= 0, ["mode", "change", "find", "focus", "deletion"].contains(kind) else {
+            throw HostError.unavailable("Viewer command is unavailable")
+        }
+        var payload: [String: Any] = ["kind": kind, "generation": selectedGeneration, "identity": selectedIdentity]
+        if kind == "mode" {
+            guard let value, ["side-by-side", "inline", "file"].contains(value) else { throw HostError.unavailable("Invalid mode") }
+            payload["mode"] = value
+        } else if kind == "change" {
+            guard let value, ["next", "previous"].contains(value) else { throw HostError.unavailable("Invalid change direction") }
+            payload["direction"] = value
+        } else if value != nil { throw HostError.unavailable("Unexpected command value") }
+        let bytes = try JSONSerialization.data(withJSONObject: payload)
+        guard let json = String(data: bytes, encoding: .utf8) else { throw HostError.unavailable("Invalid viewer command") }
+        try await webView.evaluateJavaScript("window.gabCodeViewer.show(\(json))")
+    }
+
     func close() {
         guard !closed else { return }
         closed = true

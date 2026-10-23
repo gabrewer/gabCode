@@ -732,6 +732,7 @@ struct WorkspaceProjectView: View {
             review.deactivate()
             return
         }
+        terminalRegistry.presentation(for: path).reviewMainBranch = descriptor.mainBranch
         review.activate(worktree: path, mainBranch: descriptor.mainBranch)
         review.observeSelectedWorktree()
         review.requestRefresh()

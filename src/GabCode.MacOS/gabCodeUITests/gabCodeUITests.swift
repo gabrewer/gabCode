@@ -260,7 +260,7 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["close-review-diff"].waitForExistence(timeout: 8),
                       "A staged row click must open the diff document")
         XCTAssertTrue(app.descendants(matching: .any)["review-diff-document"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["read-only-unified-diff"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["native-diff-viewer"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.descendants(matching: .any)["review-terminal-tabs"].exists)
         app.buttons["close-review-diff"].click()
         XCTAssertFalse(app.descendants(matching: .any)["review-diff-document"].exists)
@@ -462,7 +462,7 @@ final class gabCodeUITests: XCTestCase {
         history.click()
         XCTAssertEqual(history.value as? String, "Selected diff")
         XCTAssertTrue(app.buttons["close-review-diff"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.descendants(matching: .any)["read-only-unified-diff"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["native-diff-viewer"].waitForExistence(timeout: 8))
     }
 
     @MainActor
