@@ -144,14 +144,21 @@ struct TerminalWorkspaceView: View {
                         Text(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
                             .lineLimit(1).truncationMode(.middle).font(.headline)
                         Text("\(file.status.rawValue.capitalized) · \(document.reviewPair?.comparison ?? file.comparison)\(file.commitSHA.map { " · \($0.prefix(12))" } ?? "")\(document.reviewPair?.rawFilter == true ? " · Raw content — Git filters not applied" : "")\(document.reviewPair?.afterExists == false && document.hasLoadedContent ? " · Deleted result" : "")")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        if let pair = document.reviewPair {
+                            Text("line endings \(pair.beforeFacts.eol) → \(pair.afterFacts.eol) · \(pair.beforeFacts.finalNewline == pair.afterFacts.finalNewline ? "final newline unchanged" : "final newline differs") · \(pair.beforeExists ? "Before version present" : "Before version is absent")")
+                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                .accessibilityIdentifier("review-byte-facts")
+                        }
                     }
                     Spacer()
                     if let currentFile = validCurrentFile(for: file) {
-                        Button("Open in VS Code") { openCurrentFileInVSCode(currentFile) }
+                        Button("Open in VS Code", systemImage: "arrow.up.forward.app") { openCurrentFileInVSCode(currentFile) }
+                            .labelStyle(.iconOnly)
                             .accessibilityIdentifier("review-open-current-file-vscode")
                     }
-                    Button("Close Diff") { presentation.closeReviewDocument() }
+                    Button("Close Diff", systemImage: "xmark") { presentation.closeReviewDocument() }
+                        .labelStyle(.iconOnly)
                         .accessibilityIdentifier("close-review-diff")
                 }.padding(8)
                 HStack(spacing: 6) {
@@ -167,8 +174,10 @@ struct TerminalWorkspaceView: View {
                         modePreference.mode = mode
                         viewerCommand("mode", mode)
                     }
-                    Button("Previous change") { viewerCommand("change", "previous") }
-                    Button("Next change") { viewerCommand("change", "next") }
+                    Button("Previous change", systemImage: "chevron.up") { viewerCommand("change", "previous") }
+                        .labelStyle(.iconOnly)
+                    Button("Next change", systemImage: "chevron.down") { viewerCommand("change", "next") }
+                        .labelStyle(.iconOnly)
                     Text(document.changePosition).font(.caption).lineLimit(1)
                         .accessibilityIdentifier("review-change-position")
                     if document.canJumpToDeletion {
@@ -182,8 +191,10 @@ struct TerminalWorkspaceView: View {
                         }
                     }
                     Spacer()
-                    Button("Find") { viewerCommand("find") }
-                    Button("Focus code (F6 to leave)") { viewerCommand("focus") }
+                    Button("Find", systemImage: "magnifyingglass") { viewerCommand("find") }
+                        .labelStyle(.iconOnly)
+                    Button("Focus code (F6 to leave)", systemImage: "text.cursor") { viewerCommand("focus") }
+                        .labelStyle(.iconOnly)
                     if document.errorMessage != nil {
                         Button("Retry") { document.retry() }.accessibilityIdentifier("review-retry")
                     }

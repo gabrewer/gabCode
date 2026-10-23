@@ -63,7 +63,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
             let index = event["index"] as? Int ?? 0
             let total = event["total"] as? Int ?? 0
             let description = event["description"] as? String ?? ""
-            changePosition = "\(index) of \(total) · \(description)"
+            changePosition = total > 0 ? "\(index) of \(total)" : description
             canJumpToDeletion = event["deletion"] as? Bool == true
         }
     }

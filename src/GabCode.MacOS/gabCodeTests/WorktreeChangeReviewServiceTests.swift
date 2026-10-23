@@ -3,6 +3,32 @@ import Foundation
 import XCTest
 
 final class WorktreeChangeReviewServiceTests: XCTestCase {
+    func testBranchFileListMatchesExactDocumentAndRejectsMissingLocalMain() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review branch list \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try Data("base\n".utf8).write(to: root.appendingPathComponent("base.txt"))
+        try git(["add", "base.txt"], in: root); try commit("base", in: root)
+        try git(["switch", "-c", "feature"], in: root)
+        try Data("branch contents\n".utf8).write(to: root.appendingPathComponent("branch-only.swift"))
+        try git(["add", "branch-only.swift"], in: root); try commit("branch", in: root)
+        let service = WorktreeChangeReviewService()
+        let files = try await service.branchFiles(worktree: root, mainBranch: "trunk")
+        let file = try XCTUnwrap(files.first { $0.path == "branch-only.swift" })
+        XCTAssertEqual(file.group, .branch)
+        XCTAssertEqual(file.status, .added)
+        let pair = try await service.document(for: file, in: root, mainBranch: "trunk")
+        XCTAssertFalse(pair.beforeExists)
+        XCTAssertTrue(pair.afterExists)
+        XCTAssertEqual(pair.after, "branch contents\n")
+        XCTAssertTrue(pair.identity.contains(file.commitSHA ?? ""))
+        do {
+            _ = try await service.branchFiles(worktree: root, mainBranch: "missing")
+            XCTFail("Missing local main must not produce an arbitrary branch list")
+        } catch { XCTAssertNotNil(error as? ReviewGitError) }
+    }
+
     func testExactStagedUnstagedHistoricalAndBranchPairsUseRealGitBytes() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("review pairs ü \(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -40,8 +66,8 @@ final class WorktreeChangeReviewServiceTests: XCTestCase {
         let commitPair = try await service.document(for: file, in: root, mainBranch: "trunk")
         XCTAssertEqual(commitPair.before, "committed\n")
         XCTAssertEqual(commitPair.after, "historical\n", "Historical content must not come from today's worktree")
-        let branch = ReviewFile(worktree: root, group: .branch, status: .modified, path: "sample.txt", oldPath: nil,
-                                commitSHA: historical, comparison: "trunk merge base → HEAD")
+        let branchRows = try await service.branchFiles(worktree: root, mainBranch: "trunk")
+        let branch = try XCTUnwrap(branchRows.first { $0.path == "sample.txt" })
         let branchPair = try await service.document(for: branch, in: root, mainBranch: "trunk")
         XCTAssertEqual(branchPair.before, "committed\n")
         XCTAssertEqual(branchPair.after, "historical\n")
@@ -684,7 +710,7 @@ final class WorktreeChangeReviewServiceTests: XCTestCase {
         }
         let count = root.appendingPathComponent("commands.log")
         let fakeGit = root.appendingPathComponent("slow git")
-        try "#!/bin/sh\necho query >> '\(count.path)'\n/bin/sleep 0.06\nexec /usr/bin/git \"$@\"\n".write(to: fakeGit, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\necho query >> '\(count.path)'\n/bin/sleep 0.15\nexec /usr/bin/git \"$@\"\n".write(to: fakeGit, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGit.path)
         let start = ContinuousClock.now
         do {
