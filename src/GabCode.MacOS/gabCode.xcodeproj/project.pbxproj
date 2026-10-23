@@ -115,6 +115,7 @@
 				6F4D39023019AA9500608C1D /* Sources */,
 				6F4D39033019AA9500608C1D /* Frameworks */,
 				6F4D39043019AA9500608C1D /* Resources */,
+				6F4D3960301B785100608C1D /* Bundle native diff viewer */,
 			);
 			buildRules = (
 			);
@@ -247,6 +248,23 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		6F4D3960301B785100608C1D /* Bundle native diff viewer */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle native diff viewer";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\nviewer=\"$SRCROOT/../../shared/native-diff-viewer\"\ncommand -v npm >/dev/null || { echo 'npm is required to package the pinned offline viewer' >&2; exit 1; }\n(cd \"$viewer\" && npm ci --no-audit && npm run build)\ntarget=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/NativeDiffViewer\"\nmkdir -p \"$target\"\n/usr/bin/rsync -a --delete \"$viewer/dist/\" \"$target/\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		6F4D39023019AA9500608C1D /* Sources */ = {
@@ -407,6 +425,7 @@
 		6F4D39283019AA9600608C1D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
@@ -439,6 +458,7 @@
 		6F4D39293019AA9600608C1D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
