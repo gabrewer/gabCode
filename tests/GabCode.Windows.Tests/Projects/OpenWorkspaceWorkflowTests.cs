@@ -23,7 +23,10 @@ public sealed class OpenWorkspaceWorkflowTests
         {
             await RunOnStaAsync(async () =>
             {
-                var window = new MainWindow();
+                var preferences = Path.Combine(root, "isolated-preferences");
+                var window = new MainWindow(CreateCmdResolver(), new CloseTerminalsConfirmation(),
+                    new LastWorkspacePreference(Path.Combine(preferences, "last-workspace.txt")),
+                    new WorkspaceSelectionPreference(Path.Combine(preferences, "workspace-selections.json")));
                 try
                 {
                     Assert.True(await window.OpenWorkspaceAsync(descriptor));
@@ -48,7 +51,10 @@ public sealed class OpenWorkspaceWorkflowTests
         {
             await RunOnStaAsync(async () =>
             {
-                var window = new MainWindow();
+                var preferences = Path.Combine(root, "isolated-preferences");
+                var window = new MainWindow(CreateCmdResolver(), new CloseTerminalsConfirmation(),
+                    new LastWorkspacePreference(Path.Combine(preferences, "last-workspace.txt")),
+                    new WorkspaceSelectionPreference(Path.Combine(preferences, "workspace-selections.json")));
                 try
                 {
                     Assert.True(await window.OpenWorkspaceAsync(descriptor));
