@@ -284,6 +284,8 @@ public sealed class ReadOnlyDiffWindowTests
                     Assert.Same(first, Assert.IsType<TabItem>(tabs.Items[0]).Content);
                     Assert.Same(second, Assert.IsType<TabItem>(tabs.Items[1]).Content);
                     tabs.SelectedIndex = 0;
+                    using var openingFocusProbe = new GabCode.Windows.Tests.Terminal.NativeFocusProbe(window);
+                    var foregroundAtOpen = openingFocusProbe.IsForeground;
                     await window.OpenReviewDiffAsync(new ReviewFile("notes.txt", null, ReviewGroup.Unstaged, ReviewStatus.Untracked));
                     Assert.Same(tabs, bottom.Content);
                     Assert.Equal(firstPid, first.ProcessId);
@@ -292,7 +294,11 @@ public sealed class ReadOnlyDiffWindowTests
                     view.ApplyTemplate();
                     view.UpdateLayout();
                     var close = Assert.Single(Descendants<Button>(view), b => AutomationProperties.GetName(b).StartsWith("Close diff", StringComparison.Ordinal));
-                    await WaitUntil(() => close.IsKeyboardFocused);
+                    using var focusProbe = new GabCode.Windows.Tests.Terminal.NativeFocusProbe(window);
+                    if (foregroundAtOpen && focusProbe.IsForeground)
+                        await WaitUntil(() => close.IsKeyboardFocused);
+                    else if (!focusProbe.IsForeground)
+                        Assert.False(close.IsKeyboardFocused); // Do not demand activation of a background test window.
                     close.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                     Assert.Same(second, main.Content);
                     Assert.Same(first, bottom.Content);
@@ -360,11 +366,23 @@ public sealed class ReadOnlyDiffWindowTests
                     var refreshedGroup = Assert.Single(Descendants<Expander>(sidebar), b => Equals(b.Header, "Unstaged (1)"));
                     refreshedGroup.ApplyTemplate(); refreshedGroup.UpdateLayout();
                     var refreshedDisclosure = Assert.Single(Descendants<System.Windows.Controls.Primitives.ToggleButton>(refreshedGroup));
-                    Assert.Same(refreshedDisclosure, Keyboard.FocusedElement);
-                    Assert.True(refreshedGroup.IsExpanded);
-                    PressSpace(refreshedDisclosure, window);
-                    Assert.False(refreshedGroup.IsExpanded);
-                    PressSpace(refreshedDisclosure, window);
+                    // A background test window must not request OS focus just to restore a tree row.
+                    using (var nativeFocusProbe = new GabCode.Windows.Tests.Terminal.NativeFocusProbe(window))
+                    {
+                        if (nativeFocusProbe.IsForeground)
+                        {
+                            Assert.Same(refreshedDisclosure, Keyboard.FocusedElement);
+                            PressSpace(refreshedDisclosure, window);
+                            Assert.False(refreshedGroup.IsExpanded);
+                            PressSpace(refreshedDisclosure, window);
+                        }
+                        else
+                        {
+                            refreshedDisclosure.IsChecked = false;
+                            Assert.False(refreshedGroup.IsExpanded);
+                            refreshedDisclosure.IsChecked = true;
+                        }
+                    }
                     Assert.True(refreshedGroup.IsExpanded);
                     await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Untracked: added.txt")));
                     var file = Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Untracked: added.txt"));
@@ -495,11 +513,23 @@ public sealed class ReadOnlyDiffWindowTests
                     var refreshedCommit = Assert.Single(Descendants<Expander>(sidebar), b => b.Tag is string key && key.StartsWith("commit:", StringComparison.Ordinal));
                     refreshedCommit.ApplyTemplate(); refreshedCommit.UpdateLayout();
                     var refreshedToggle = Assert.Single(Descendants<System.Windows.Controls.Primitives.ToggleButton>(refreshedCommit));
-                    Assert.Same(refreshedToggle, Keyboard.FocusedElement);
-                    Assert.True(refreshedCommit.IsExpanded);
-                    PressSpace(refreshedToggle, window);
-                    Assert.False(refreshedCommit.IsExpanded);
-                    PressSpace(refreshedToggle, window);
+                    // When another app owns the foreground, row restoration must not activate this window.
+                    using (var nativeFocusProbe = new GabCode.Windows.Tests.Terminal.NativeFocusProbe(window))
+                    {
+                        if (nativeFocusProbe.IsForeground)
+                        {
+                            Assert.Same(refreshedToggle, Keyboard.FocusedElement);
+                            PressSpace(refreshedToggle, window);
+                            Assert.False(refreshedCommit.IsExpanded);
+                            PressSpace(refreshedToggle, window);
+                        }
+                        else
+                        {
+                            refreshedToggle.IsChecked = false;
+                            Assert.False(refreshedCommit.IsExpanded);
+                            refreshedToggle.IsChecked = true;
+                        }
+                    }
                     Assert.True(refreshedCommit.IsExpanded);
                     await WaitUntil(() => Descendants<Button>(sidebar).Any(b => Equals(b.Content, "Modified: committed.txt")));
                     Assert.Single(Descendants<Button>(sidebar), b => Equals(b.Content, "Modified: committed.txt"))

@@ -376,10 +376,52 @@ internal sealed class ReadOnlyDiffView : UserControl
         onLoaded = (_, _) =>
         {
             Loaded -= onLoaded;
-            Dispatcher.BeginInvoke(() => { if (IsVisible) closeButton.Focus(); }, System.Windows.Threading.DispatcherPriority.Input);
+            var owner = Window.GetWindow(this);
+            var nativeFocusAtQueue = NativeFocusHandle();
+            var superseded = false;
+            EventHandler? onDeactivated = (_, _) => superseded = true;
+            if (owner is not null) owner.Deactivated += onDeactivated;
+            System.Windows.Input.KeyboardFocusChangedEventHandler? onFocus = null;
+            onFocus = (_, args) =>
+            {
+                if (args.NewFocus is DependencyObject next && !ReferenceEquals(next, owner) &&
+                    !ReferenceEquals(next, this))
+                    superseded = true;
+            };
+            if (owner is not null) System.Windows.Input.Keyboard.AddGotKeyboardFocusHandler(owner, onFocus);
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (owner is not null)
+                {
+                    System.Windows.Input.Keyboard.RemoveGotKeyboardFocusHandler(owner, onFocus);
+                    owner.Deactivated -= onDeactivated;
+                }
+                if (!superseded && IsVisible && owner is { IsActive: true } && HasWindowKeyboardFocus(owner, nativeFocusAtQueue))
+                    closeButton.Focus();
+            }, System.Windows.Threading.DispatcherPriority.Input);
         };
         Loaded += onLoaded;
     }
+
+    private static bool HasWindowKeyboardFocus(Window window, IntPtr nativeFocusAtQueue)
+    {
+        var source = System.Windows.PresentationSource.FromVisual(window) as System.Windows.Interop.HwndSource;
+        if (source is null || NativeForegroundWindow() != source.Handle) return false;
+        var focused = NativeFocusHandle();
+        return focused == source.Handle || focused != IntPtr.Zero && focused == nativeFocusAtQueue && NativeIsChild(source.Handle, focused) ||
+            focused == IntPtr.Zero && (System.Windows.Input.Keyboard.FocusedElement is null ||
+                                      ReferenceEquals(System.Windows.Input.Keyboard.FocusedElement, window));
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetFocus")]
+    private static extern IntPtr NativeFocusHandle();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
+    private static extern IntPtr NativeForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "IsChild")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool NativeIsChild(IntPtr parent, IntPtr child);
 
     internal static string? CurrentFile(string worktree, ReviewFile file)
     {
