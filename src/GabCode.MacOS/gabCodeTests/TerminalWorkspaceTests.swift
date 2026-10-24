@@ -151,42 +151,43 @@ final class TerminalWorkspaceTests: XCTestCase {
     func testStopRacingStartupCannotLeaveAReadyHiddenSession() async throws {
         let workspaceDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: workspaceDirectory) }
-        var observedStartingState = false
+        let gate = StartupPause()
+        let reachedStartup = expectation(description: "session forked a PTY child while still .starting")
+        var launchedPID: pid_t = 0
+        let session = TerminalSession(workingDirectory: workspaceDirectory,
+                                      environment: ["SHELL": "/bin/sh"],
+                                      afterFork: { pid in
+            launchedPID = pid
+            reachedStartup.fulfill()
+            await gate.wait()
+        })
+        let startTask = Task { try await session.start() }
+        await fulfillment(of: [reachedStartup], timeout: 5)
+        XCTAssertEqual(session.state, .starting)
+        XCTAssertGreaterThan(launchedPID, 0, "The race must own a real forked PTY child")
 
-        for _ in 0..<10 {
-            let session = TerminalSession(
-                workingDirectory: workspaceDirectory,
-                environment: ["SHELL": "/bin/sh"]
-            )
-            let startTask = Task { try await session.start() }
+        let stopTask = Task { await session.stop(gracePeriod: .milliseconds(250)) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while session.state != .closing && ContinuousClock.now < deadline { await Task.yield() }
+        // Always release the launch gate before asserting: failures must not strand a child task.
+        let stopWasAccepted = session.state == .closing
+        gate.release()
+        let outcome = await stopTask.value
+        _ = try? await startTask.value
+        XCTAssertTrue(stopWasAccepted, "Stop must be accepted while startup is paused")
+        XCTAssertNotEqual(outcome, .failed)
+        XCTAssertEqual(session.state, .closed, "An accepted stop must finish cleanup before returning")
+        XCTAssertNil(session.processIdentifier)
+        XCTAssertNil(session.processGroupIdentifier)
+        XCTAssertNil(session.pseudoTerminalDescriptor)
+        XCTAssertNotEqual(kill(launchedPID, 0), 0, "The child must be reaped before stop returns")
+    }
 
-            while session.state == .idle {
-                await Task.yield()
-            }
-
-            if session.state == .starting {
-                observedStartingState = true
-                _ = await session.stop(gracePeriod: .milliseconds(250))
-                _ = try? await startTask.value
-                let stateAfterRace = session.state
-                if stateAfterRace == .ready {
-                    _ = await session.stop(gracePeriod: .milliseconds(250))
-                }
-                XCTAssertEqual(
-                    stateAfterRace,
-                    .closed,
-                    "A stop accepted during launch must finish bounded cleanup before returning."
-                )
-                XCTAssertNil(session.processIdentifier)
-                XCTAssertNil(session.processGroupIdentifier)
-                XCTAssertNil(session.pseudoTerminalDescriptor)
-            } else {
-                _ = try? await startTask.value
-                _ = await session.stop(gracePeriod: .milliseconds(250))
-            }
-        }
-
-        XCTAssertTrue(observedStartingState, "The stress run did not exercise the startup cleanup race.")
+    @MainActor
+    private final class StartupPause {
+        private var continuation: CheckedContinuation<Void, Never>?
+        func wait() async { await withCheckedContinuation { continuation = $0 } }
+        func release() { continuation?.resume(); continuation = nil }
     }
 
     func testConcurrentWorkspaceStopsLeaveBothSessionsClosed() async throws {
