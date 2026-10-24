@@ -54,6 +54,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     private let workingDirectory: URL
     private let environment: [String: String]
     private let processGroupSignaler: (pid_t, Int32) -> Void
+    /// Optional test-controlled suspension after forkpty, before process identity is published.
+    private let afterFork: (@MainActor (pid_t) async -> Void)?
     private var hostedTerminalView: LocalProcessTerminalView?
     private var hostedProcessTerminationRequested = false
     private var startupInProgress = false
@@ -103,12 +105,14 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         font: NSFont = NSFont.monospacedSystemFont(ofSize: TerminalFontSelection.defaultPointSize, weight: .regular),
         processGroupSignaler: @escaping (pid_t, Int32) -> Void = { processGroup, signal in
             _ = kill(-processGroup, signal)
-        }
+        },
+        afterFork: (@MainActor (pid_t) async -> Void)? = nil
     ) {
         self.workingDirectory = workingDirectory
         self.environment = environment
         self.configuredFont = font
         self.processGroupSignaler = processGroupSignaler
+        self.afterFork = afterFork
         let terminalView = LocalProcessTerminalView(
             frame: CGRect(x: 0, y: 0, width: 800, height: 500)
         )
@@ -170,6 +174,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
             state = startupStopRequested ? .closing : .failed
             throw TerminalSessionError.launchFailed
         }
+
+        if let afterFork { await afterFork(pid) }
 
         // forkpty can return to the parent before the child completes login_tty/setsid.
         // Never accept the host's Unix session as terminal-owned cleanup scope.
