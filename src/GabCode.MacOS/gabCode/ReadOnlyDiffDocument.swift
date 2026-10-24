@@ -18,6 +18,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
     @Published private(set) var wantsFocus = false
     @Published private(set) var selectedBottomTerminal: TerminalWorkspaceTerminal = .terminal2
     private(set) var restoreTerminal: TerminalWorkspaceTerminal?
+    private var automaticViewerRetryUsed = false
 
     var isOpen: Bool { selectedFile != nil }
 
@@ -30,6 +31,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
             if replacing { reviewPair = nil }
         }
         selectedFile = file
+        automaticViewerRetryUsed = false
         revision += 1
         errorMessage = nil
         content = ""
@@ -74,6 +76,7 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
 
     func retry() {
         guard selectedFile != nil else { return }
+        automaticViewerRetryUsed = false
         if errorMessage != nil {
             viewerHost?.close()
             viewerHost = MacDiffViewerHost()
@@ -103,9 +106,30 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
         errorMessage = message
     }
 
+    /// One fresh WK host per explicit selection/Retry, never a loop on repeated viewer failures.
+    func viewerFailed(_ message: String, from host: MacDiffViewerHost, revision failedRevision: Int) {
+        guard isOpen, viewerHost === host, revision == failedRevision else { return }
+        if automaticViewerRetryUsed {
+            fail(message)
+            hasLoadedContent = false // A closed or failed web process cannot show the last snapshot.
+            return
+        }
+        automaticViewerRetryUsed = true
+        host.close()
+        viewerHost = MacDiffViewerHost()
+        revision += 1
+        isLoading = true
+        hasLoadedContent = false
+        errorMessage = nil
+        wantsFocus = false
+        changePosition = "No text changes"
+        canJumpToDeletion = false
+    }
+
     func close() {
         viewerHost?.close()
         viewerHost = nil
+        automaticViewerRetryUsed = false
         reviewPair = nil
         selectedFile = nil
         revision += 1

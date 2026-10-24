@@ -120,6 +120,52 @@ final class ReadOnlyDiffPresentationTests: XCTestCase {
         XCTAssertNil(ReviewCurrentFileLocator.existingFile(for: escaped, selectedWorktree: root))
     }
 
+    func testViewerFailureGetsOneAutomaticRetryThenVisibleManualRecovery() throws {
+        let root = URL(fileURLWithPath: "/tmp/review one retry")
+        let file = ReviewFile(worktree: root, group: .staged, status: .modified, path: "first.swift", oldPath: nil,
+                              commitSHA: nil, comparison: "HEAD → index")
+        let document = ReadOnlyDiffDocumentState()
+        document.open(file, mainTerminal: .terminal1)
+        let first = try XCTUnwrap(document.viewerHost)
+        let firstRevision = document.revision
+        document.viewerFailed("WebKit stopped", from: first, revision: firstRevision)
+        let second = try XCTUnwrap(document.viewerHost)
+        XCTAssertFalse(second === first)
+        XCTAssertTrue(first.isClosed)
+        XCTAssertEqual(document.revision, firstRevision + 1)
+        XCTAssertTrue(document.isLoading)
+        XCTAssertNil(document.errorMessage, "First viewer failure should retry rather than show an error")
+        document.viewerFailed("Late stale failure", from: first, revision: firstRevision)
+        XCTAssertTrue(document.viewerHost === second)
+        document.viewerFailed("WebKit stopped again", from: second, revision: document.revision)
+        XCTAssertTrue(document.viewerHost === second, "A second failure must not create an automatic loop")
+        XCTAssertEqual(document.errorMessage, "WebKit stopped again")
+        XCTAssertFalse(document.isLoading)
+        document.retry()
+        let manual = try XCTUnwrap(document.viewerHost)
+        XCTAssertFalse(manual === second)
+        XCTAssertNil(document.errorMessage)
+        document.viewerFailed("New attempt failed", from: manual, revision: document.revision)
+        XCTAssertTrue(document.isLoading, "Manual Retry grants one new automatic attempt")
+        document.close()
+    }
+
+    func testGitUnavailableDoesNotSpendAutomaticViewerRetry() throws {
+        let file = ReviewFile(worktree: URL(fileURLWithPath: "/tmp/review Git error"), group: .staged,
+                              status: .modified, path: "unsupported.swift", oldPath: nil,
+                              commitSHA: nil, comparison: "HEAD → index")
+        let document = ReadOnlyDiffDocumentState()
+        document.open(file, mainTerminal: .terminal1)
+        let initialRevision = document.revision
+        let initialHost = document.viewerHost
+        document.fail("Unsupported file encoding")
+        XCTAssertEqual(document.errorMessage, "Unsupported file encoding")
+        XCTAssertEqual(document.revision, initialRevision)
+        XCTAssertTrue(document.viewerHost === initialHost)
+        XCTAssertFalse(document.isLoading, "An invalid Git/file snapshot is not retried as a WK failure")
+        document.close()
+    }
+
     func testReplacingPendingLoadDoesNotReuseHostOwnedByCancelledTask() async throws {
         let root = URL(fileURLWithPath: "/tmp/review WK pending")
         let file = ReviewFile(worktree: root, group: .unstaged, status: .modified, path: "pending.swift", oldPath: nil,

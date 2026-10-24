@@ -105,16 +105,30 @@ struct TerminalWorkspaceView: View {
                 return
             }
             host.onUnavailable = { [weak document, weak host] message in
-                guard let host, document?.viewerHost === host, document?.revision == revision else { return }
-                document?.fail(message)
+                guard let host else { return }
+                document?.viewerFailed(message, from: host, revision: revision)
             }
+            let result: ReviewDocument
             do {
-                let result = try await reviewService.document(for: file, in: presentation.workingDirectory, mainBranch: branch)
+                result = try await reviewService.document(for: file, in: presentation.workingDirectory, mainBranch: branch)
+            } catch {
                 guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
+                document.fail(error.localizedDescription) // Git/content failures are not viewer retries.
+                return
+            }
+            guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
+            do {
                 if !host.isReady { try await host.load() }
                 guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
                 host.select(identity: result.identity, generation: revision)
-                host.onEvent = { [weak document] event in document?.updateViewerEvent(event) }
+                host.onEvent = { [weak document, weak host] event in
+                    guard let host, let document, document.viewerHost === host, document.revision == revision else { return }
+                    if event["kind"] as? String == "failure", let message = event["message"] as? String {
+                        document.viewerFailed(message, from: host, revision: revision)
+                    } else {
+                        document.updateViewerEvent(event)
+                    }
+                }
                 try await host.show(before: result.before, after: result.after, path: file.path,
                                     identity: result.identity, generation: revision, mode: reviewMode,
                                     beforeLabel: beforeVersionLabel(for: file), afterLabel: afterVersionLabel(for: file),
@@ -124,7 +138,11 @@ struct TerminalWorkspaceView: View {
                 if document.wantsFocus { try? await host.focusCode(); document.didFocus() }
             } catch {
                 guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
-                document.fail(error.localizedDescription)
+                if host.isClosed {
+                    if document.isLoading { document.viewerFailed(error.localizedDescription, from: host, revision: revision) }
+                } else {
+                    document.fail(error.localizedDescription)
+                }
             }
         }
         .onReceive(fontPreference.$effectiveSelection) { _ in
@@ -217,9 +235,11 @@ struct TerminalWorkspaceView: View {
                         .accessibilityIdentifier("native-diff-viewer")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay(alignment: .topTrailing) {
-                            if document.isLoading {
-                                ProgressView(document.hasLoadedContent ? "Refreshing diff" : "Loading read-only diff")
-                                    .controlSize(.mini).padding(5)
+                            if document.isLoading && !document.hasLoadedContent {
+                                Rectangle().fill(Color(nsColor: .windowBackgroundColor))
+                                    .overlay { ProgressView("Loading read-only diff").controlSize(.small) }
+                            } else if document.isLoading {
+                                ProgressView("Refreshing diff").controlSize(.mini).padding(5)
                             }
                         }
                 } else {
@@ -272,7 +292,7 @@ struct TerminalWorkspaceView: View {
     }
 
     private func viewerCommand(_ kind: String, _ value: String? = nil) {
-        guard let host = document.viewerHost, host.isReady else { return }
+        guard let host = document.viewerHost, host.isReady, document.hasLoadedContent else { return }
         let revision = document.revision
         Task {
             do {
@@ -283,7 +303,7 @@ struct TerminalWorkspaceView: View {
                 try await host.command(kind, value: value)
             } catch {
                 guard document.viewerHost === host, document.revision == revision else { return }
-                document.fail(error.localizedDescription)
+                document.viewerFailed(error.localizedDescription, from: host, revision: revision)
             }
         }
     }

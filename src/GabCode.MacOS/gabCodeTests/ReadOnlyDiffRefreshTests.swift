@@ -77,9 +77,8 @@ final class ReadOnlyDiffRefreshTests: XCTestCase {
                        "Changed shorter result must retain a surviving code line")
 
         host.webViewWebContentProcessDidTerminate(host.webView)
-        XCTAssertNotNil(presentation.reviewDocument.errorMessage, "A white/terminated viewer needs a visible native failure")
-        presentation.openReviewDocument(file)
-        XCTAssertFalse(presentation.reviewDocument.viewerHost === host, "Reopen the same file without switching worktrees")
+        XCTAssertNil(presentation.reviewDocument.errorMessage, "The first white/terminated viewer should retry silently")
+        XCTAssertFalse(presentation.reviewDocument.viewerHost === host, "Automatically retry in a new WK host")
         let recoveryDeadline = ContinuousClock.now.advanced(by: .seconds(8))
         while (presentation.reviewDocument.isLoading || presentation.reviewDocument.errorMessage != nil) && ContinuousClock.now < recoveryDeadline {
             try await Task.sleep(for: .milliseconds(50))
@@ -88,6 +87,18 @@ final class ReadOnlyDiffRefreshTests: XCTestCase {
         XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "shorter")
         host = try XCTUnwrap(presentation.reviewDocument.viewerHost)
         XCTAssertTrue(host.isReady)
+        view = try XCTUnwrap(viewer(in: window.contentView!))
+        host.webViewWebContentProcessDidTerminate(host.webView)
+        XCTAssertNotNil(presentation.reviewDocument.errorMessage, "The second failure should offer manual Retry")
+        XCTAssertFalse(presentation.reviewDocument.isLoading)
+        presentation.reviewDocument.retry()
+        let manualDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while presentation.reviewDocument.isLoading && ContinuousClock.now < manualDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(presentation.reviewDocument.errorMessage)
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "shorter")
+        host = try XCTUnwrap(presentation.reviewDocument.viewerHost)
         view = try XCTUnwrap(viewer(in: window.contentView!))
 
         try Data("other selected file\n".utf8).write(to: root.appendingPathComponent("other.swift"))
