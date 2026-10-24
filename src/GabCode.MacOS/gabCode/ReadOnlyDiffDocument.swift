@@ -24,10 +24,10 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
     func open(_ file: ReviewFile, mainTerminal: TerminalWorkspaceTerminal) {
         if !isOpen { restoreTerminal = mainTerminal }
         let replacing = selectedFile?.id != file.id
-        if replacing {
+        if replacing || errorMessage != nil || viewerHost?.isClosed != false || (isLoading && viewerHost?.isReady != true) {
             viewerHost?.close()
             viewerHost = MacDiffViewerHost()
-            reviewPair = nil
+            if replacing { reviewPair = nil }
         }
         selectedFile = file
         revision += 1
@@ -41,6 +41,10 @@ final class ReadOnlyDiffDocumentState: ObservableObject {
 
     func reload() {
         guard selectedFile != nil else { return }
+        if viewerHost?.isClosed != false || (isLoading && viewerHost?.isReady != true) {
+            viewerHost?.close()
+            viewerHost = MacDiffViewerHost()
+        }
         revision += 1
         isLoading = true
         errorMessage = nil

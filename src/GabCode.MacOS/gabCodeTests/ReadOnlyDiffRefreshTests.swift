@@ -42,10 +42,10 @@ final class ReadOnlyDiffRefreshTests: XCTestCase {
         while (!presentation.reviewDocument.hasLoadedContent || viewer(in: window.contentView!) == nil) && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(50))
         }
-        let view = try XCTUnwrap(viewer(in: window.contentView!))
+        var view = try XCTUnwrap(viewer(in: window.contentView!))
         XCTAssertEqual(presentation.reviewDocument.reviewPair?.before, "committed\n")
         XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "first staged\nsecond staged\nthird staged\n")
-        let host = try XCTUnwrap(presentation.reviewDocument.viewerHost)
+        var host = try XCTUnwrap(presentation.reviewDocument.viewerHost)
         _ = try await host.webView.evaluateJavaScript("window.gabCodeViewer.line(2)")
         try await host.focusCode()
         presentation.reviewDocument.reload()
@@ -75,6 +75,41 @@ final class ReadOnlyDiffRefreshTests: XCTestCase {
         let clampedLine = try await host.webView.evaluateJavaScript("window.gabCodeViewer.line()") as? Int
         XCTAssertEqual(clampedLine, 1,
                        "Changed shorter result must retain a surviving code line")
+
+        host.webViewWebContentProcessDidTerminate(host.webView)
+        XCTAssertNotNil(presentation.reviewDocument.errorMessage, "A white/terminated viewer needs a visible native failure")
+        presentation.openReviewDocument(file)
+        XCTAssertFalse(presentation.reviewDocument.viewerHost === host, "Reopen the same file without switching worktrees")
+        let recoveryDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while (presentation.reviewDocument.isLoading || presentation.reviewDocument.errorMessage != nil) && ContinuousClock.now < recoveryDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(presentation.reviewDocument.errorMessage)
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "shorter")
+        host = try XCTUnwrap(presentation.reviewDocument.viewerHost)
+        XCTAssertTrue(host.isReady)
+        view = try XCTUnwrap(viewer(in: window.contentView!))
+
+        try Data("other selected file\n".utf8).write(to: root.appendingPathComponent("other.swift"))
+        try git(["add", "other.swift"])
+        let nextSnapshot = try await WorktreeChangeReviewService().snapshot(worktree: root, mainBranch: "trunk")
+        let other = try XCTUnwrap(nextSnapshot.working.first { $0.path == "other.swift" })
+        presentation.openReviewDocument(other)
+        let otherDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while presentation.reviewDocument.isLoading && ContinuousClock.now < otherDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "other selected file\n",
+                       "A failed WK process must not poison subsequent file selections")
+        presentation.openReviewDocument(file)
+        let backDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while presentation.reviewDocument.isLoading && ContinuousClock.now < backDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(presentation.reviewDocument.reviewPair?.after, "shorter")
+        host = try XCTUnwrap(presentation.reviewDocument.viewerHost)
+        view = try XCTUnwrap(viewer(in: window.contentView!))
+
         try FileManager.default.removeItem(at: root.appendingPathComponent(".git"))
         presentation.reviewDocument.reload()
         let failureDeadline = ContinuousClock.now.advanced(by: .seconds(8))

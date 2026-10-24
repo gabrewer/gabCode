@@ -36,6 +36,20 @@ final class MacDiffViewerHostTests: XCTestCase {
         XCTAssertFalse(host.accepts(event: valid, origin: host.pageURL, isMainFrame: true))
     }
 
+    func testWebContentTerminationNotifiesNativeOwnerAndInvalidatesReadyState() async throws {
+        let host = MacDiffViewerHost()
+        try await host.load()
+        host.select(identity: "selected", generation: 7)
+        var reported: String?
+        host.onUnavailable = { reported = $0 }
+        host.webViewWebContentProcessDidTerminate(host.webView)
+        XCTAssertNotNil(reported, "White WKWebView content must show a native unavailable state")
+        XCTAssertFalse(host.isReady)
+        XCTAssertTrue(host.isClosed)
+        do { try await host.command("focus"); XCTFail("A terminated WKWebView cannot accept commands") }
+        catch { /* expected */ }
+    }
+
     func testClosingDuringLoadCannotPublishReadyOrAcceptMessages() async throws {
         let host = MacDiffViewerHost()
         let operation = Task { try await host.load() }

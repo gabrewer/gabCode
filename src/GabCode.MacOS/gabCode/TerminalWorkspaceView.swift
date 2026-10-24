@@ -104,6 +104,10 @@ struct TerminalWorkspaceView: View {
                 document.fail("Configured local main branch is unavailable.")
                 return
             }
+            host.onUnavailable = { [weak document, weak host] message in
+                guard let host, document?.viewerHost === host, document?.revision == revision else { return }
+                document?.fail(message)
+            }
             do {
                 let result = try await reviewService.document(for: file, in: presentation.workingDirectory, mainBranch: branch)
                 guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
