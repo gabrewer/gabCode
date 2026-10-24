@@ -11,7 +11,6 @@ namespace GabCode.Windows.Terminal.Views;
 
 internal partial class TerminalSessionView : UserControl, IAsyncDisposable
 {
-    private static WeakReference<TerminalSessionView>? focusedTerminal;
     private readonly TerminalSessionKind kind;
     private readonly string workingDirectory;
     private readonly Func<TerminalProfileResolution> resolveProfile;
@@ -21,7 +20,6 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
     private Exception? localFailure;
     private bool startAttempted;
     private bool retrying;
-    private bool terminalOwnedFocus;
 
     internal TerminalSessionView(
         TerminalSessionKind kind,
@@ -79,6 +77,21 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
             return;
         }
 
+        var retryFocusRequested = RetryButton.IsKeyboardFocused;
+        var owner = Window.GetWindow(this);
+        var nativeFocusAtRetry = NativeFocusHandle();
+        var superseded = false;
+        EventHandler? onDeactivated = (_, _) => superseded = true;
+        KeyboardFocusChangedEventHandler? onFocus = (_, args) =>
+        {
+            if (args.NewFocus is DependencyObject next && !ReferenceEquals(next, owner) &&
+                !ReferenceEquals(next, this) && !IsAncestorOf(next)) superseded = true;
+        };
+        if (retryFocusRequested && owner is not null)
+        {
+            owner.Deactivated += onDeactivated;
+            Keyboard.AddGotKeyboardFocusHandler(owner, onFocus);
+        }
         retrying = true;
         RetryButton.IsEnabled = false;
         try
@@ -86,8 +99,6 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
             if (session is not null)
             {
                 session.StateChanged -= Session_StateChanged;
-                session.Control.GotFocus -= TerminalControl_GotFocus;
-                session.Control.LostFocus -= TerminalControl_LostFocus;
                 await session.CloseAsync();
             }
 
@@ -96,9 +107,20 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
             localFailure = null;
             startAttempted = true;
             await StartNewSessionAsync();
+            var source = owner is null ? null : PresentationSource.FromVisual(owner) as System.Windows.Interop.HwndSource;
+            var nativeFocus = NativeFocusHandle();
+            if (retryFocusRequested && !superseded && owner is { IsActive: true } && source is not null &&
+                NativeForegroundWindow() == source.Handle &&
+                (nativeFocus == nativeFocusAtRetry || nativeFocus == source.Handle || nativeFocus == IntPtr.Zero || session?.HasNativeFocus is true))
+                TryFocusReadyTerminal();
         }
         finally
         {
+            if (retryFocusRequested && owner is not null)
+            {
+                owner.Deactivated -= onDeactivated;
+                Keyboard.RemoveGotKeyboardFocusHandler(owner, onFocus);
+            }
             retrying = false;
             RetryButton.IsEnabled = true;
         }
@@ -122,9 +144,15 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
             return;
         }
 
-        session.Focus();
-        ClaimTerminalFocus();
+        _ = session.Focus();
     }
+
+    internal bool TryFocusReadyTerminal()
+    {
+        return state == TerminalSessionState.Running && session?.Control.IsLoaded is true && session.Focus();
+    }
+
+    internal bool TryFocusFailedRetry() => state == TerminalSessionState.Failed && RetryButton.IsVisible && RetryButton.IsEnabled && RetryButton.Focus();
 
     internal void ApplyFont(TerminalFontSelection selection) => session?.ApplyFont(selection);
 
@@ -137,8 +165,6 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
         if (session is not null)
         {
             session.StateChanged -= Session_StateChanged;
-            session.Control.GotFocus -= TerminalControl_GotFocus;
-            session.Control.LostFocus -= TerminalControl_LostFocus;
             await session.DisposeAsync();
         }
     }
@@ -154,8 +180,6 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
             SetProfileStatus(profile.StatusMessage);
             session = new TerminalHostedSession(kind, workingDirectory, profile, resolveFont());
             session.StateChanged += Session_StateChanged;
-            session.Control.GotFocus += TerminalControl_GotFocus;
-            session.Control.LostFocus += TerminalControl_LostFocus;
             TerminalSurfaceHost.Content = session.Control;
             await session.StartAsync();
             UpdateState(session.State);
@@ -208,68 +232,46 @@ internal partial class TerminalSessionView : UserControl, IAsyncDisposable
 
     private void ShowFailure(Exception exception)
     {
-        var failedTerminalOwnedFocus = terminalOwnedFocus || session?.Control.IsKeyboardFocusWithin is true;
-        ReleaseTerminalFocus();
+        var failedTerminalOwnedFocus = session?.HasNativeFocus is true;
         FailureMessageText.Text = exception.Message;
         TerminalSurfaceHost.Visibility = Visibility.Collapsed;
         FailureSurface.Visibility = Visibility.Visible;
         RetryButton.Visibility = Visibility.Visible;
         if (failedTerminalOwnedFocus)
         {
+            var owner = Window.GetWindow(this);
+            var nativeFocusAtQueue = NativeFocusHandle();
+            var interrupted = false;
+            EventHandler? onDeactivated = (_, _) => interrupted = true;
+            if (owner is not null) owner.Deactivated += onDeactivated;
             _ = Dispatcher.BeginInvoke(
                 () =>
                 {
-                    if (state == TerminalSessionState.Failed && RetryButton.IsVisible && RetryButton.IsEnabled)
-                    {
+                    if (owner is not null) owner.Deactivated -= onDeactivated;
+                    var next = Keyboard.FocusedElement as DependencyObject;
+                    var source = owner is null ? null : PresentationSource.FromVisual(owner) as System.Windows.Interop.HwndSource;
+                    var nativeFocus = NativeFocusHandle();
+                    if (!interrupted && owner is { IsActive: true } && source is not null && NativeForegroundWindow() == source.Handle &&
+                        (nativeFocus == nativeFocusAtQueue || nativeFocus == source.Handle || nativeFocus == IntPtr.Zero) &&
+                        state == TerminalSessionState.Failed &&
+                        RetryButton.IsVisible && RetryButton.IsEnabled &&
+                        (next is null || ReferenceEquals(next, owner) || ReferenceEquals(next, this) || IsAncestorOf(next)))
                         _ = RetryButton.Focus();
-                    }
                 },
                 System.Windows.Threading.DispatcherPriority.Input);
         }
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
+    private static extern IntPtr NativeForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetFocus")]
+    private static extern IntPtr NativeFocusHandle();
+
     private void TerminalSessionView_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (session is null || e.NewSize.Width <= 0 || e.NewSize.Height <= 0) return;
         _ = Dispatcher.BeginInvoke(() => session?.RefreshLayout(), System.Windows.Threading.DispatcherPriority.Loaded);
-    }
-
-    private void TerminalControl_GotFocus(object sender, RoutedEventArgs e) => ClaimTerminalFocus();
-
-    private void TerminalControl_LostFocus(object sender, RoutedEventArgs e)
-    {
-        _ = Dispatcher.BeginInvoke(
-            () =>
-            {
-                var focusedElement = Keyboard.FocusedElement as DependencyObject;
-                if (focusedElement is not null &&
-                    !ReferenceEquals(focusedElement, this) &&
-                    !IsAncestorOf(focusedElement))
-                {
-                    ReleaseTerminalFocus();
-                }
-            },
-            System.Windows.Threading.DispatcherPriority.Input);
-    }
-
-    private void ClaimTerminalFocus()
-    {
-        if (focusedTerminal?.TryGetTarget(out var previous) is true && !ReferenceEquals(previous, this))
-        {
-            previous.terminalOwnedFocus = false;
-        }
-
-        terminalOwnedFocus = true;
-        focusedTerminal = new WeakReference<TerminalSessionView>(this);
-    }
-
-    private void ReleaseTerminalFocus()
-    {
-        terminalOwnedFocus = false;
-        if (focusedTerminal?.TryGetTarget(out var current) is true && ReferenceEquals(current, this))
-        {
-            focusedTerminal = null;
-        }
     }
 
     private async void TerminalSessionView_Loaded(object sender, RoutedEventArgs e)

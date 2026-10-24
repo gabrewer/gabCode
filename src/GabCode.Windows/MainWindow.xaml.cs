@@ -19,9 +19,10 @@ namespace GabCode.Windows;
 public partial class MainWindow : Window
 {
     private ProjectContext? project;
-    private readonly WorkspaceProjectLoader projectLoader = new();
+    private readonly WorkspaceProjectLoader projectLoader;
     private readonly WorkspaceProjectCreator projectCreator = new();
-    private readonly WorkspaceSelectionPreference selectionPreference = new();
+    private readonly WorkspaceSelectionPreference selectionPreference;
+    private readonly LastWorkspacePreference lastWorkspacePreference;
     private readonly WorktreeReferenceStore worktreeReferences = new();
     private string? activeWorkspacePath;
     private readonly GitWorktreeDiscovery worktreeDiscovery = new();
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     private WorktreeTerminalRegistry? terminalRegistry;
     private TerminalSessionView? piTerminal;
     private TerminalSessionView? commandsTerminal;
+    private TerminalSessionView? openingFocusTarget;
     private bool closeInProgress;
     private bool allowClose;
     private CancellationTokenSource? discoveryCancellation;
@@ -80,9 +82,22 @@ public partial class MainWindow : Window
     {
     }
 
-    private MainWindow(ProjectContext? project, TerminalProfileResolver profileResolver, ITerminalExitConfirmationService exitConfirmation, bool isProjectInitialization, IGabCodeInstanceLauncher? instanceLauncher = null)
+    // Explicit preference injection keeps isolated workflow tests away from the real user profile.
+    internal MainWindow(TerminalProfileResolver profileResolver, ITerminalExitConfirmationService exitConfirmation,
+        LastWorkspacePreference lastWorkspacePreference, WorkspaceSelectionPreference selectionPreference)
+        : this(null, profileResolver, exitConfirmation, isProjectInitialization: true, null,
+            lastWorkspacePreference, selectionPreference)
+    {
+    }
+
+    private MainWindow(ProjectContext? project, TerminalProfileResolver profileResolver, ITerminalExitConfirmationService exitConfirmation,
+        bool isProjectInitialization, IGabCodeInstanceLauncher? instanceLauncher = null,
+        LastWorkspacePreference? lastWorkspacePreference = null, WorkspaceSelectionPreference? selectionPreference = null)
     {
         this.project = project;
+        this.selectionPreference = selectionPreference ?? new WorkspaceSelectionPreference();
+        this.lastWorkspacePreference = lastWorkspacePreference ?? new LastWorkspacePreference();
+        projectLoader = new WorkspaceProjectLoader(selectionPreference: this.selectionPreference);
         this.profileResolver = profileResolver ?? throw new ArgumentNullException(nameof(profileResolver));
         this.exitConfirmation = exitConfirmation ?? throw new ArgumentNullException(nameof(exitConfirmation));
         this.instanceLauncher = instanceLauncher ?? new GabCodeInstanceLauncher();
@@ -91,7 +106,14 @@ public partial class MainWindow : Window
         InputBindings.Add(new KeyBinding(RefreshWorktreesCommand, Key.F5, ModifierKeys.None) { CommandTarget = this });
         CommandBindings.Add(new CommandBinding(RefreshWorktreesCommand, RefreshWorktreesCommand_Executed, RefreshWorktreesCommand_CanExecute));
         Closing += MainWindow_Closing;
-        Activated += (_, _) => reviewSidebar?.RequestRefresh();
+        Activated += (_, _) => { reviewSidebar?.RequestRefresh(); TryApplyOpeningFocus(); };
+        Deactivated += (_, _) => openingFocusTarget = null;
+        PreviewGotKeyboardFocus += (_, args) =>
+        {
+            if (openingFocusTarget is not { } target || args.NewFocus is not DependencyObject next ||
+                ReferenceEquals(next, this) || ReferenceEquals(next, target) || target.IsAncestorOf(next)) return;
+            openingFocusTarget = null;
+        };
 
         if (project is null)
         {
@@ -116,18 +138,24 @@ public partial class MainWindow : Window
 
     internal void ShowPiInMain()
     {
+        openingFocusTarget = null;
         terminalLayout?.ShowPiInMain();
         piTerminal?.RefreshLayout();
         commandsTerminal?.RefreshLayout();
         piTerminal?.FocusTerminal();
+        if (piTerminal is { } top && top.State is not GabCode.Windows.Terminal.Conpty.TerminalSessionState.Running)
+            openingFocusTarget = top;
     }
 
     internal void ShowCommandsInMain()
     {
+        openingFocusTarget = null;
         terminalLayout?.ShowCommandsInMain();
         piTerminal?.RefreshLayout();
         commandsTerminal?.RefreshLayout();
         commandsTerminal?.FocusTerminal();
+        if (commandsTerminal is { } top && top.State is not GabCode.Windows.Terminal.Conpty.TerminalSessionState.Running)
+            openingFocusTarget = top;
     }
 
     private void ActivateProject(ProjectContext nextProject)
@@ -176,8 +204,10 @@ public partial class MainWindow : Window
 
     private void CreateTerminalWorkspace()
     {
+        openingFocusTarget = null;
         ClosedWorkspaceSurface.Visibility = Visibility.Collapsed;
         var pair = (terminalRegistry ??= new WorktreeTerminalRegistry(profileResolver.Resolve, () => terminalFontPreference.EffectiveSelection)).GetOrCreate(project!.ProjectFolder);
+        var newlyOpened = !pair.First.HasStarted && !pair.Second.HasStarted;
         ObserveTerminalPair(pair);
         MarkTerminalPairOwned(pair);
         pair.Attach(MainTerminalRegion, BottomTerminalRegion);
@@ -185,6 +215,8 @@ public partial class MainWindow : Window
         commandsTerminal = pair.Second;
         terminalLayout = pair.Layout;
         ShowPiInMain();
+        if (newlyOpened) openingFocusTarget = piTerminal;
+        _ = Dispatcher.BeginInvoke(TryApplyOpeningFocus, DispatcherPriority.Input);
     }
 
     private void ShowWorkingDirectoryFailure(string directory)
@@ -231,7 +263,7 @@ public partial class MainWindow : Window
             ActivateProject(nextProject);
             activeWorkspacePath = Path.GetFullPath(workspacePath);
             _ = UpdateWorktreeReferencesAsync();
-            await new LastWorkspacePreference().WriteAsync(activeWorkspacePath);
+            await lastWorkspacePreference.WriteAsync(activeWorkspacePath);
             if (nextProject.UsedPrimaryFallback)
                 RefreshStatusText.Text = $"The previously selected worktree is no longer available. Opened {Path.GetFileName(nextProject.ProjectFolder)} instead.";
             return true;
@@ -345,6 +377,7 @@ public partial class MainWindow : Window
         {
             if (ActiveTerminalCount != 0 && exitConfirmation.Confirm(this, ActiveTerminalCount) == TerminalExitDecision.Cancel) return false;
             await (terminalRegistry?.CloseAllAsync() ?? Task.CompletedTask);
+            openingFocusTarget = null;
             piTerminal = null;
             commandsTerminal = null;
             terminalLayout = null;
@@ -610,9 +643,43 @@ public partial class MainWindow : Window
     private void TerminalPair_SessionChanged(object? sender, EventArgs e)
     {
         if (closeInProgress || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
-        if (Dispatcher.CheckAccess()) UpdateSidebarIndicators();
-        else _ = Dispatcher.BeginInvoke(UpdateSidebarIndicators, DispatcherPriority.DataBind);
+        if (Dispatcher.CheckAccess()) { UpdateSidebarIndicators(); TryApplyOpeningFocus(); }
+        else _ = Dispatcher.BeginInvoke(() => { UpdateSidebarIndicators(); TryApplyOpeningFocus(); }, DispatcherPriority.DataBind);
     }
+
+    private void TryApplyOpeningFocus()
+    {
+        var target = openingFocusTarget;
+        if (target is null || !ReferenceEquals(target, IsPiInMain ? piTerminal : commandsTerminal) || !ReferenceEquals(MainTerminalRegion.Content, target) ||
+            !IsVisible || !IsActive || closeInProgress || Dispatcher.HasShutdownStarted) return;
+        var source = PresentationSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+        if (source is null || NativeForegroundWindow() != source.Handle) return;
+        if (target.State == GabCode.Windows.Terminal.Conpty.TerminalSessionState.Failed
+            ? target.TryFocusFailedRetry() : target.TryFocusReadyTerminal())
+        {
+            openingFocusTarget = null;
+            return;
+        }
+        var nativeFocusAtQueue = NativeFocusHandle();
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            var nativeFocus = NativeFocusHandle();
+            if (ReferenceEquals(openingFocusTarget, target) && !closeInProgress && IsVisible && IsActive &&
+                ReferenceEquals(MainTerminalRegion.Content, target) &&
+                ReferenceEquals(target, IsPiInMain ? piTerminal : commandsTerminal) &&
+                terminalLayout?.HasDocument is not true && NativeForegroundWindow() == source.Handle &&
+                (nativeFocus == nativeFocusAtQueue || nativeFocus == source.Handle || nativeFocus == IntPtr.Zero) &&
+                (target.State == GabCode.Windows.Terminal.Conpty.TerminalSessionState.Failed
+                    ? target.TryFocusFailedRetry() : target.TryFocusReadyTerminal()))
+                openingFocusTarget = null;
+        }, DispatcherPriority.Input);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
+    private static extern IntPtr NativeForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetFocus")]
+    private static extern IntPtr NativeFocusHandle();
 
     private void UpdateSidebarIndicators()
     {
@@ -980,6 +1047,7 @@ public partial class MainWindow : Window
                 CloseReviewDiff(restoreFocus: false);
                 MainTerminalRegion.Content = null;
                 BottomTerminalRegion.Content = null;
+                openingFocusTarget = null;
                 piTerminal = null;
                 commandsTerminal = null;
                 terminalLayout = null;
@@ -1007,7 +1075,6 @@ public partial class MainWindow : Window
         if (project is null || piTerminal is not null || commandsTerminal is not null) return;
         CreateTerminalWorkspace();
         UpdateSidebarIndicators();
-        piTerminal?.FocusTerminal();
     }
 
     private async void DeleteWorktree_Click(object sender, RoutedEventArgs e)
@@ -1313,6 +1380,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        openingFocusTarget = null;
         closeInProgress = true;
         CloseReviewDiff(restoreFocus: false);
         IsEnabled = false;

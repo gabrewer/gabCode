@@ -90,7 +90,28 @@ internal sealed class TerminalHostedSession : IAsyncDisposable
 
     internal string GetSelectedText() => Control.GetSelectedText();
 
-    internal void Focus() => _ = Control.Focus();
+    internal bool HasNativeFocus => nativePasteInterceptor is { TerminalWindow: not 0 } interceptor && NativeFocusHandle() == interceptor.TerminalWindow;
+
+    internal bool Focus()
+    {
+        var terminalWindow = nativePasteInterceptor?.TerminalWindow ?? IntPtr.Zero;
+        if (terminalWindow == IntPtr.Zero || Window.GetWindow(Control) is not { IsActive: true } owner ||
+            System.Windows.PresentationSource.FromVisual(owner) is not System.Windows.Interop.HwndSource source ||
+            NativeForegroundWindow() != source.Handle) return false;
+        _ = Control.Focus();
+        if (HasNativeFocus) return true;
+        _ = NativeSetFocus(terminalWindow);
+        return HasNativeFocus;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetFocus")]
+    private static extern IntPtr NativeFocusHandle();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetFocus")]
+    private static extern IntPtr NativeSetFocus(IntPtr window);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
+    private static extern IntPtr NativeForegroundWindow();
 
     public async ValueTask DisposeAsync()
     {

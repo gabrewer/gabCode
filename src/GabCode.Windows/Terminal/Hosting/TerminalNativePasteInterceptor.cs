@@ -34,6 +34,8 @@ internal sealed class TerminalNativePasteInterceptor : IDisposable
         subclassProc = WindowProcedure;
     }
 
+    internal IntPtr TerminalWindow => terminalWindow;
+
     internal void Attach()
     {
         ObjectDisposedException.ThrowIf(disposed, this);

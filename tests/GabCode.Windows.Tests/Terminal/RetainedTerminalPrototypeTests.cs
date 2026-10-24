@@ -249,7 +249,13 @@ public sealed class RetainedTerminalPrototypeTests
 
                 var retry = Assert.IsType<Button>(view.FindName("RetryButton"));
                 var terminalSurface = Assert.IsType<ContentControl>(view.FindName("TerminalSurfaceHost"));
-                Assert.True(retry.IsKeyboardFocused || retry.IsKeyboardFocusWithin, "The retry action did not receive focus after the terminal failed.");
+                using (var focusProbe = new NativeFocusProbe(window))
+                {
+                    if (focusProbe.IsForeground)
+                        Assert.True(retry.IsKeyboardFocused || retry.IsKeyboardFocusWithin, "The foreground terminal's retry action did not receive focus after failure.");
+                    else
+                        Assert.False(retry.IsKeyboardFocused); // A background test window must not reclaim input.
+                }
                 Assert.Equal(Visibility.Collapsed, terminalSurface.Visibility);
             }
             finally
