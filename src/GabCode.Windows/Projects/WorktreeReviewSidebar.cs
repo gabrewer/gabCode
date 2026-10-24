@@ -150,7 +150,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
         DockPanel.SetDock(worktreeRow, Dock.Top); root.Children.Add(worktreeRow);
         AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
         DockPanel.SetDock(status, Dock.Top); root.Children.Add(status);
-        scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rows };
+        scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rows, Focusable = true };
         AutomationProperties.SetName(scroller, "Selected worktree changes and commits");
         root.Children.Add(scroller);
         Content = root;
@@ -430,8 +430,10 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private void Render(ReviewSnapshot? snapshot)
     {
         if (disposed || worktree is null || snapshot is not null && !string.Equals(snapshot.Worktree, worktree, StringComparison.OrdinalIgnoreCase)) return;
-        var focusedKey = (Keyboard.FocusedElement as Button)?.Tag as string;
-        var focusedSection = FocusedSectionKey(Keyboard.FocusedElement as DependencyObject);
+        var focusedElement = Keyboard.FocusedElement as DependencyObject;
+        var ownedFocus = focusedElement is not null && (ReferenceEquals(focusedElement, this) || IsAncestorOf(focusedElement));
+        var focusedKey = ownedFocus ? (focusedElement as Button)?.Tag as string : null;
+        var focusedSection = ownedFocus ? FocusedSectionKey(focusedElement) : null;
         var offset = scroller.VerticalOffset;
         var renderedWorktree = worktree;
         var renderedSnapshot = coordinator.Snapshot;
@@ -577,10 +579,17 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                     content.Children.Add(ActionPage("Next branch files", () => { branchOffset += WorkingPageSize; Render(coordinator.Snapshot); }));
             }
         });
+        var ownerWindow = Window.GetWindow(this);
+        var deactivated = false;
+        EventHandler? onDeactivated = (_, _) => deactivated = true;
+        if (ownerWindow is not null) ownerWindow.Deactivated += onDeactivated;
         Dispatcher.BeginInvoke(() =>
         {
+            if (ownerWindow is not null) ownerWindow.Deactivated -= onDeactivated;
             if (disposed || epoch != renderEpoch || !string.Equals(worktree, renderedWorktree, StringComparison.OrdinalIgnoreCase) || !ReferenceEquals(coordinator.Snapshot, renderedSnapshot)) return;
             scroller.ScrollToVerticalOffset(offset);
+            if (deactivated || !ownedFocus || !IsVisible || ownerWindow is not { IsActive: true } ||
+                !ReviewFocusMayBeRestored()) return;
             if (focusedKey is not null && fileButtons.TryGetValue(focusedKey, out var button)) button.Focus();
             else if (focusedSection is not null && sections.TryGetValue(focusedSection, out var section))
             {
@@ -588,6 +597,7 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
                 if (section.Template.FindName("Disclosure", section) is ToggleButton disclosure) disclosure.Focus();
                 else section.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
             }
+            else if (focusedKey is not null || focusedSection is not null) scroller.Focus();
         }, DispatcherPriority.Loaded);
     }
 
@@ -631,6 +641,25 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             }
         }
     }
+
+    private bool ReviewFocusMayBeRestored()
+    {
+        // A retained WPF focus reference can point at a removed row while the native
+        // terminal HWND already owns input. Never use that reference to seize input.
+        var current = Keyboard.FocusedElement as DependencyObject;
+        if (current is not null && !ReferenceEquals(current, this) && IsAncestorOf(current)) return false;
+        if (current is not null && Window.GetWindow(current) is not null) return false;
+        var window = Window.GetWindow(this);
+        var source = window is null ? null : System.Windows.PresentationSource.FromVisual(window) as System.Windows.Interop.HwndSource;
+        var nativeFocus = NativeFocusHandle();
+        return source is not null && NativeForegroundWindow() == source.Handle && nativeFocus == source.Handle;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetFocus")]
+    private static extern IntPtr NativeFocusHandle();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
+    private static extern IntPtr NativeForegroundWindow();
 
     private static string? FocusedSectionKey(DependencyObject? focused)
     {
