@@ -262,7 +262,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "set -euo pipefail\nviewer=\"$SRCROOT/../../shared/native-diff-viewer\"\ncommand -v npm >/dev/null || { echo 'npm is required to package the pinned offline viewer' >&2; exit 1; }\n(cd \"$viewer\" && npm ci --no-audit && npm run build)\ntarget=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/NativeDiffViewer\"\nmkdir -p \"$target\"\n/usr/bin/rsync -a --delete \"$viewer/dist/\" \"$target/\"\n";
+			shellScript = "set -euo pipefail\nviewer=\"$SRCROOT/../../shared/native-diff-viewer\"\n# Finder-launched Xcode does not inherit shell startup paths for nvm/Homebrew.\nif ! command -v node >/dev/null || ! command -v npm >/dev/null; then\n  for bin in /opt/homebrew/bin /usr/local/bin \"$HOME\"/.nvm/versions/node/*/bin \"$HOME\"/.volta/bin \"$HOME\"/.asdf/shims; do\n    if [[ -x \"$bin/node\" && -x \"$bin/npm\" ]]; then export PATH=\"$bin:$PATH\"; break; fi\n  done\nfi\ncommand -v node >/dev/null && command -v npm >/dev/null || { echo 'Node and npm are required to build the pinned offline viewer (install Node or expose its bin directory to Xcode)' >&2; exit 1; }\n(cd \"$viewer\" && npm ci --no-audit && npm run build)\ntarget=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/NativeDiffViewer\"\nmkdir -p \"$target\"\n/usr/bin/rsync -a --delete \"$viewer/dist/\" \"$target/\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

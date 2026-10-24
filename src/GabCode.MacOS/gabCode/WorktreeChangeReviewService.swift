@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -407,10 +408,12 @@ final class WorktreeChangeReviewService: @unchecked Sendable {
         case .commit: label = basis.map { "\($0) → \(target)" } ?? "empty tree → \(target)"
         case .branch: label = "\(basis!) → \(target)"
         }
+        let scopedIdentity = Data("\(file.id.utf8.count):\(file.id):\(label.utf8.count):\(label):\(beforeBytes.count):".utf8)
+            + beforeBytes + Data(":\(afterBytes.count):".utf8) + afterBytes
+        let identity = SHA256.hash(data: scopedIdentity).map { String(format: "%02x", $0) }.joined()
         return ReviewDocument(before: before.0, after: after.0, beforeFacts: before.1, afterFacts: after.1,
                               beforeExists: beforeEntry != nil, afterExists: file.group == .unstaged ? file.status != .deleted : afterEntry != nil,
-                              identity: "\(file.id):\(basis ?? "empty"):\(target):\(beforeEntry?.1 ?? "empty"): \(afterEntry?.1 ?? "empty")",
-                              comparison: label, rawFilter: rawFilter)
+                              identity: identity, comparison: label, rawFilter: rawFilter)
     }
 
     private static func safePath(_ path: String) -> Bool {

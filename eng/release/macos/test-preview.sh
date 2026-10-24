@@ -28,7 +28,7 @@ require_command() {
 
 [[ -f "$dmg_path" ]] || fail "DMG does not exist: $dmg_path"
 [[ -f "$expected_license" && ! -L "$expected_license" ]] || fail "reviewed gabCode license is missing"
-[[ -f "$expected_third_party_notices" && ! -L "$expected_third_party_notices" ]] || fail "reviewed SwiftTerm notice is missing"
+[[ -f "$expected_third_party_notices" && ! -L "$expected_third_party_notices" ]] || fail "reviewed native viewer/SwiftTerm notices are missing"
 
 for command in hdiutil codesign plutil lipo file shasum cmp; do
     require_command "$command"
@@ -52,16 +52,16 @@ attached=1
 [[ -L "$mount_dir/Applications" ]] || fail "DMG does not contain an Applications drag target"
 [[ "$(readlink "$mount_dir/Applications")" == '/Applications' ]] || fail "Applications target must point to /Applications"
 [[ -f "$mount_dir/LICENSE.txt" ]] || fail "DMG does not contain gabCode MIT license"
-[[ -f "$mount_dir/THIRD-PARTY-NOTICES.txt" ]] || fail "DMG does not contain SwiftTerm notice"
+[[ -f "$mount_dir/THIRD-PARTY-NOTICES.txt" ]] || fail "DMG does not contain native viewer/SwiftTerm notice"
 
 expected_root_entries=$'Applications\nLICENSE.txt\nTHIRD-PARTY-NOTICES.txt\ngabCode.app'
 actual_root_entries="$(find "$mount_dir" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort)"
 [[ "$actual_root_entries" == "$expected_root_entries" ]] || fail "DMG root contains unexpected or missing files: ${actual_root_entries}"
 
 [[ ! -L "$mount_dir/LICENSE.txt" ]] || fail "gabCode license must not be a symlink"
-[[ ! -L "$mount_dir/THIRD-PARTY-NOTICES.txt" ]] || fail "SwiftTerm notice must not be a symlink"
+[[ ! -L "$mount_dir/THIRD-PARTY-NOTICES.txt" ]] || fail "third-party notice must not be a symlink"
 cmp -s "$expected_license" "$mount_dir/LICENSE.txt" || fail "packaged gabCode license differs from the reviewed source"
-cmp -s "$expected_third_party_notices" "$mount_dir/THIRD-PARTY-NOTICES.txt" || fail "packaged SwiftTerm notice differs from the reviewed pinned source"
+cmp -s "$expected_third_party_notices" "$mount_dir/THIRD-PARTY-NOTICES.txt" || fail "packaged third-party notice differs from the reviewed pinned source"
 
 readonly app_path="$mount_dir/gabCode.app"
 readonly executable_path="$app_path/Contents/MacOS/gabCode"
@@ -71,6 +71,12 @@ readonly executable_path="$app_path/Contents/MacOS/gabCode"
 [[ "$(plutil -extract CFBundleVersion raw -expect string "$app_path/Contents/Info.plist")" == "$expected_build_number" ]] || fail "unexpected build number"
 [[ "$(plutil -extract CFBundleIconName raw -expect string "$app_path/Contents/Info.plist")" == 'AppIcon' ]] || fail "app does not declare the compiled AppIcon catalog"
 [[ -f "$app_path/Contents/Resources/Assets.car" ]] || fail "app does not contain the compiled asset catalog"
+[[ -f "$app_path/Contents/Resources/NativeDiffViewer/manifest.json" ]] || fail "app does not contain the offline diff viewer manifest"
+[[ ! -L "$app_path/Contents/Resources/NativeDiffViewer/manifest.json" ]] || fail "app viewer manifest must not be a symlink"
+readonly viewer_resources="$app_path/Contents/Resources/NativeDiffViewer"
+for relative in index.html viewer.js viewer.css workers/editor.js workers/json.js workers/css.js workers/html.js workers/typescript.js MONACO-LICENSE.txt MONACO-THIRD-PARTY-NOTICES.txt DOMPURIFY-LICENSE.txt DOMPURIFY-LICENSE-MPL.txt MARKED-LICENSE.md; do
+    [[ -f "$viewer_resources/$relative" && ! -L "$viewer_resources/$relative" ]] || fail "offline viewer asset missing or linked: $relative"
+done
 [[ "$(lipo -archs "$executable_path")" == 'arm64' ]] || fail "app executable must be arm64 only"
 file "$executable_path" | grep -F 'arm64' >/dev/null || fail "file inspection did not report arm64"
 

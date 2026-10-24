@@ -88,7 +88,9 @@ On the declared target Mac, from the repository root:
   artifacts/v0.0.3-preview
 ```
 
-The build uses a temporary clean DerivedData directory, forces an arm64 Release bundle with marketing version `0.0.3` and build number `3` (the patch component), signs nested code before the containing app with an ad-hoc identity, assembles the four-item DMG root, verifies the image, and prints its SHA-256 value. Its DMG volume is `gabCode 0.0.3 Preview`. It does not select a signing team or permanently change project publisher settings.
+For human offline qualification (**NOT CHECKED** by the agent): copy the unsigned preview to a scratch location, disconnect network, launch under the preview-specific Gatekeeper steps below, open an added file from a selected worktree and confirm Side by side shows an empty hatched before pane and highlighted added lines. Switch to Inline and File, navigate changes, inspect EOL/final-newline facts, then return to terminals using F6. Verify that `gabCode.app/Contents/Resources/NativeDiffViewer/` contains `manifest.json`, `viewer.js`, `workers/`, licenses and font, and that `THIRD-PARTY-NOTICES.txt` is present at the DMG root. Do not replace an installed app or change system-wide security settings.
+
+The build uses a temporary clean DerivedData directory, forces an arm64 Release bundle with marketing version `0.0.3` and build number `3` (the patch component), signs nested code before the containing app with an ad-hoc identity, assembles the four-item DMG root, verifies the image, and prints its SHA-256 value. The app embeds the same offline viewer build as the developer target under `Contents/Resources/NativeDiffViewer`; `manifest.json` records every runtime asset's size and SHA-256, and the native host verifies that inventory before loading. Its DMG volume is `gabCode 0.0.3 Preview`. It does not select a signing team or permanently change project publisher settings.
 
 The DMG includes gabCode's MIT license and the SwiftTerm 1.15.0 notice pinned at revision `dd2fb8ac5b861e7bf617c872895e338f38165648`.
 

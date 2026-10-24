@@ -113,7 +113,7 @@ struct TerminalWorkspaceView: View {
                 host.onEvent = { [weak document] event in document?.updateViewerEvent(event) }
                 try await host.show(before: result.before, after: result.after, path: file.path,
                                     identity: result.identity, generation: revision, mode: reviewMode,
-                                    beforeLabel: file.oldPath ?? file.path, afterLabel: file.path,
+                                    beforeLabel: beforeVersionLabel(for: file), afterLabel: afterVersionLabel(for: file),
                                     beforeFacts: facts(result.beforeFacts), afterFacts: facts(result.afterFacts))
                 guard !Task.isCancelled, document.revision == revision, document.selectedFile?.id == file.id else { return }
                 document.apply(result)
@@ -139,28 +139,11 @@ struct TerminalWorkspaceView: View {
     private var readOnlyDiffSurface: some View {
         if let file = document.selectedFile {
             VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
-                            .lineLimit(1).truncationMode(.middle).font(.headline)
-                        Text("\(file.status.rawValue.capitalized) · \(document.reviewPair?.comparison ?? file.comparison)\(file.commitSHA.map { " · \($0.prefix(12))" } ?? "")\(document.reviewPair?.rawFilter == true ? " · Raw content — Git filters not applied" : "")\(document.reviewPair?.afterExists == false && document.hasLoadedContent ? " · Deleted result" : "")")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        if let pair = document.reviewPair {
-                            Text("line endings \(pair.beforeFacts.eol) → \(pair.afterFacts.eol) · \(pair.beforeFacts.finalNewline == pair.afterFacts.finalNewline ? "final newline unchanged" : "final newline differs") · \(pair.beforeExists ? "Before version present" : "Before version is absent")")
-                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                                .accessibilityIdentifier("review-byte-facts")
-                        }
-                    }
-                    Spacer()
-                    if let currentFile = validCurrentFile(for: file) {
-                        Button("Open in VS Code", systemImage: "arrow.up.forward.app") { openCurrentFileInVSCode(currentFile) }
-                            .labelStyle(.iconOnly)
-                            .accessibilityIdentifier("review-open-current-file-vscode")
-                    }
-                    Button("Close Diff", systemImage: "xmark") { presentation.closeReviewDocument() }
-                        .labelStyle(.iconOnly)
-                        .accessibilityIdentifier("close-review-diff")
-                }.padding(8)
+                Text("\(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path) — \(file.status.rawValue.capitalized) — \(document.reviewPair?.comparison ?? file.comparison)")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8).padding(.top, 5)
                 HStack(spacing: 6) {
                     Picker("Review mode", selection: $reviewMode) {
                         Text("Side by side").tag("side-by-side")
@@ -168,7 +151,7 @@ struct TerminalWorkspaceView: View {
                         Text("File").tag("file")
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 260)
+                    .frame(maxWidth: 230)
                     .accessibilityIdentifier("review-mode")
                     .onChange(of: reviewMode) { _, mode in
                         modePreference.mode = mode
@@ -190,29 +173,51 @@ struct TerminalWorkspaceView: View {
                             }
                         }
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
                     Button("Find", systemImage: "magnifyingglass") { viewerCommand("find") }
                         .labelStyle(.iconOnly)
                     Button("Focus code (F6 to leave)", systemImage: "text.cursor") { viewerCommand("focus") }
                         .labelStyle(.iconOnly)
-                    if document.errorMessage != nil {
-                        Button("Retry") { document.retry() }.accessibilityIdentifier("review-retry")
+                    if let currentFile = validCurrentFile(for: file) {
+                        Button("Open in VS Code", systemImage: "arrow.up.forward.app") { openCurrentFileInVSCode(currentFile) }
+                            .labelStyle(.iconOnly)
+                            .accessibilityIdentifier("review-open-current-file-vscode")
                     }
-                }.controlSize(.small).padding(6)
-                Divider()
+                    if document.errorMessage != nil {
+                        Button("Retry", systemImage: "arrow.clockwise") { document.retry() }
+                            .labelStyle(.iconOnly).accessibilityIdentifier("review-retry")
+                    }
+                    Button("Close Diff", systemImage: "xmark") { presentation.closeReviewDocument() }
+                        .labelStyle(.iconOnly)
+                        .accessibilityIdentifier("close-review-diff")
+                }
+                .controlSize(.mini)
+                .padding(.horizontal, 8).padding(.vertical, 2)
                 if let error = document.errorMessage {
                     Text("Diff unavailable — \(error)\(document.reviewPair == nil ? "" : " · Previous review snapshot is stale")")
-                        .font(.caption).foregroundStyle(.orange)
+                        .font(.caption).foregroundStyle(.orange).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
                         .accessibilityIdentifier("review-diff-error")
-                } else if document.isLoading {
-                    ProgressView(document.hasLoadedContent ? "Refreshing diff" : "Loading read-only diff")
-                        .controlSize(.small)
+                } else if let pair = document.reviewPair, let notice = byteFactsNotice(for: pair) {
+                    Text(notice)
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                        .accessibilityIdentifier("review-byte-facts")
                 }
+                Divider()
                 if let host = document.viewerHost {
                     NativeReviewDocumentHost(host: host, onExit: { presentation.focus(document.selectedBottomTerminal) })
                         .id(ObjectIdentifier(host))
                         .accessibilityIdentifier("native-diff-viewer")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay(alignment: .topTrailing) {
+                            if document.isLoading {
+                                ProgressView(document.hasLoadedContent ? "Refreshing diff" : "Loading read-only diff")
+                                    .controlSize(.mini).padding(5)
+                            }
+                        }
                 } else {
                     ContentUnavailableView("Diff unavailable", systemImage: "doc.text.magnifyingglass")
                 }
@@ -224,6 +229,37 @@ struct TerminalWorkspaceView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Read-only diff for \(file.path), \(file.comparison)")
             .accessibilityIdentifier("review-diff-document")
+        }
+    }
+
+    private func byteFactsNotice(for pair: ReviewDocument) -> String? {
+        var facts: [String] = []
+        if pair.beforeFacts.eol != pair.afterFacts.eol {
+            facts.append("line endings \(pair.beforeFacts.eol) → \(pair.afterFacts.eol)")
+        }
+        if pair.beforeFacts.finalNewline != pair.afterFacts.finalNewline { facts.append("final newline differs") }
+        if pair.beforeFacts.bom != pair.afterFacts.bom { facts.append("UTF-8 BOM differs") }
+        if !pair.beforeExists { facts.append("Before version absent") }
+        if !pair.afterExists { facts.append("Deleted result") }
+        if pair.rawFilter { facts.append("Raw content — Git filters not applied") }
+        return facts.isEmpty ? nil : facts.joined(separator: " — ")
+    }
+
+    private func beforeVersionLabel(for file: ReviewFile) -> String {
+        switch file.group {
+        case .staged: "HEAD"
+        case .unstaged: file.status == .untracked ? "Empty" : "Index"
+        case .commit: file.comparison.hasPrefix("empty tree") ? "Empty tree" : "First parent"
+        case .branch: "Merge base"
+        }
+    }
+
+    private func afterVersionLabel(for file: ReviewFile) -> String {
+        switch file.group {
+        case .staged: "Index"
+        case .unstaged: "Worktree"
+        case .commit: "Selected commit"
+        case .branch: "HEAD"
         }
     }
 

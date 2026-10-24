@@ -209,12 +209,15 @@ final class MacDiffViewerHost: NSObject, WKNavigationDelegate, WKScriptMessageHa
         let data = try Data(contentsOf: manifestURL)
         guard data.count < 64_000,
               let manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(manifest.keys) == ["monaco", "assets"],
               manifest["monaco"] as? String == "0.57.0",
               let assets = manifest["assets"] as? [[String: Any]], !assets.isEmpty, assets.count <= 100 else {
             throw HostError.unavailable("Invalid bundled viewer inventory")
         }
+        var seen = Set<String>()
         for asset in assets {
-            guard let path = asset["path"] as? String, !path.isEmpty, !path.hasPrefix("/"),
+            guard Set(asset.keys) == ["path", "bytes", "sha256"],
+                  let path = asset["path"] as? String, !path.isEmpty, seen.insert(path).inserted, !path.hasPrefix("/"),
                   !path.split(separator: "/").contains(".."), !path.contains("\\"),
                   let size = asset["bytes"] as? Int, size >= 0, size <= 20_000_000,
                   let hash = asset["sha256"] as? String, hash.count == 64 else {

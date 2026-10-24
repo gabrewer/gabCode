@@ -3,6 +3,27 @@ import Foundation
 import XCTest
 
 final class WorktreeChangeReviewServiceTests: XCTestCase {
+    func testDeepNormalPathHasBoundedStableSnapshotIdentity() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("review deep identity \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "trunk"], in: root)
+        try Data("base\n".utf8).write(to: root.appendingPathComponent("base.txt"))
+        try git(["add", "base.txt"], in: root); try commit("base", in: root)
+        let path = [String(repeating: "a", count: 140), String(repeating: "b", count: 140), String(repeating: "c", count: 140), "file.swift"].joined(separator: "/")
+        let nested = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: nested.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("long path contents\n".utf8).write(to: nested)
+        let service = WorktreeChangeReviewService()
+        let listing = try await service.snapshot(worktree: root, mainBranch: "trunk")
+        let file = try XCTUnwrap(listing.working.first)
+        let document = try await service.document(for: file, in: root, mainBranch: "trunk")
+        XCTAssertLessThanOrEqual(document.identity.utf16.count, 512)
+        let repeated = try await service.document(for: file, in: root, mainBranch: "trunk")
+        XCTAssertEqual(document.identity, repeated.identity)
+        XCTAssertEqual(document.after, "long path contents\n")
+    }
+
     func testBranchFileListMatchesExactDocumentAndRejectsMissingLocalMain() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("review branch list \(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -22,7 +43,7 @@ final class WorktreeChangeReviewServiceTests: XCTestCase {
         XCTAssertFalse(pair.beforeExists)
         XCTAssertTrue(pair.afterExists)
         XCTAssertEqual(pair.after, "branch contents\n")
-        XCTAssertTrue(pair.identity.contains(file.commitSHA ?? ""))
+        XCTAssertEqual(pair.identity.count, 64, "Snapshot identity is a stable bounded native digest")
         do {
             _ = try await service.branchFiles(worktree: root, mainBranch: "missing")
             XCTFail("Missing local main must not produce an arbitrary branch list")

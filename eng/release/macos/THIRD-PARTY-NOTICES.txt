@@ -29,3 +29,13 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Monaco Editor 0.57.0 (MIT), DOMPurify and Marked
+The pinned viewer bundle ships full upstream notices and licenses under
+gabCode.app/Contents/Resources/NativeDiffViewer/:
+MONACO-LICENSE.txt, MONACO-THIRD-PARTY-NOTICES.txt,
+DOMPURIFY-LICENSE.txt, DOMPURIFY-LICENSE-MPL.txt, MARKED-LICENSE.md.
+The co-packaged manifest.json lists exact SHA-256 and size per asset.
+
+esbuild 0.28.2 (MIT) is a build-time dependency only; it is not included in
+the runtime app. Pinned provenance is shared/native-diff-viewer/package-lock.json.
