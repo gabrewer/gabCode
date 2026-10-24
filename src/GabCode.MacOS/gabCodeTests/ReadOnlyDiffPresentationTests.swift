@@ -120,6 +120,45 @@ final class ReadOnlyDiffPresentationTests: XCTestCase {
         XCTAssertNil(ReviewCurrentFileLocator.existingFile(for: escaped, selectedWorktree: root))
     }
 
+    func testReplacingPendingLoadDoesNotReuseHostOwnedByCancelledTask() async throws {
+        let root = URL(fileURLWithPath: "/tmp/review WK pending")
+        let file = ReviewFile(worktree: root, group: .unstaged, status: .modified, path: "pending.swift", oldPath: nil,
+                              commitSHA: nil, comparison: "index → worktree")
+        let document = ReadOnlyDiffDocumentState()
+        document.open(file, mainTerminal: .terminal1)
+        let old = try XCTUnwrap(document.viewerHost)
+        document.open(file, mainTerminal: .terminal1)
+        let replacement = try XCTUnwrap(document.viewerHost)
+        XCTAssertFalse(old === replacement, "The canceled load owns its old WKWebView, not the next selection")
+        old.close()
+        try await replacement.load()
+        XCTAssertTrue(replacement.isReady)
+        document.reload()
+        XCTAssertTrue(document.viewerHost === replacement, "Completed viewer should retain position on refresh")
+        document.close()
+    }
+
+    func testFailedWKHostCanReopenSameFileWithoutSwitchingWorktrees() async throws {
+        let root = URL(fileURLWithPath: "/tmp/review WK recovery")
+        let file = ReviewFile(worktree: root, group: .staged, status: .modified, path: "first.swift", oldPath: nil,
+                              commitSHA: nil, comparison: "HEAD → index")
+        let document = ReadOnlyDiffDocumentState()
+        document.open(file, mainTerminal: .terminal1)
+        let failedHost = try XCTUnwrap(document.viewerHost)
+        failedHost.close() // Mirrors load failure or terminated WebKit content process.
+        document.fail("The native viewer stopped unexpectedly")
+        document.open(file, mainTerminal: .terminal1)
+        let recovered = try XCTUnwrap(document.viewerHost)
+        XCTAssertFalse(recovered === failedHost, "Opening the same file must not reuse a closed WKWebView")
+        try await recovered.load()
+        XCTAssertTrue(recovered.isReady)
+        document.fail("Change computation timed out")
+        document.open(file, mainTerminal: .terminal1)
+        XCTAssertFalse(document.viewerHost === recovered,
+                       "Clicking a failed file must recreate even a ready WK host with a broken worker")
+        document.close()
+    }
+
     func testDocumentStateRetainsExactPairAndStaleSnapshotForRetry() throws {
         let root = URL(fileURLWithPath: "/tmp/review state")
         let file = ReviewFile(worktree: root, group: .staged, status: .modified, path: "file.swift", oldPath: nil,

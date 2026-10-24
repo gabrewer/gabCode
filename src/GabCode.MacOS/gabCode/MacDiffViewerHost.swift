@@ -15,7 +15,9 @@ final class MacDiffViewerHost: NSObject, WKNavigationDelegate, WKScriptMessageHa
     private var pageReady = false
     private var failure: String?
     private var closed = false
+    var isClosed: Bool { closed }
     var onEvent: (([String: Any]) -> Void)?
+    var onUnavailable: ((String) -> Void)?
     var onFocusExit: (() -> Void)?
 
     func focusCode() async throws {
@@ -49,6 +51,7 @@ final class MacDiffViewerHost: NSObject, WKNavigationDelegate, WKScriptMessageHa
         guard !closed, !identity.isEmpty, identity.utf16.count <= 512, generation >= 0 else { return }
         selectedIdentity = identity
         selectedGeneration = generation
+        failure = nil
     }
 
     func load() async throws {
@@ -112,10 +115,18 @@ final class MacDiffViewerHost: NSObject, WKNavigationDelegate, WKScriptMessageHa
             throw HostError.unavailable("Viewer snapshot exceeds its safety limit")
         }
         // JSON is a JavaScript literal only after serialization, never interpolated repository text.
-        try await webView.evaluateJavaScript("window.gabCodeViewer.show(\(string))")
+        do {
+            try await webView.evaluateJavaScript("window.gabCodeViewer.show(\(string))")
+        } catch {
+            if !closed, identity == selectedIdentity, generation == selectedGeneration {
+                markUnavailable("Diff viewer stopped while displaying the selected file. Retry to reopen it.")
+            }
+            throw error
+        }
         guard !closed, identity == selectedIdentity, generation == selectedGeneration else {
             throw HostError.unavailable("Viewer selection changed")
         }
+        if let failure { throw HostError.unavailable(failure) }
     }
 
     func command(_ kind: String, value: String? = nil) async throws {
@@ -143,6 +154,7 @@ final class MacDiffViewerHost: NSObject, WKNavigationDelegate, WKScriptMessageHa
         selectedIdentity = ""
         selectedGeneration = -1
         onEvent = nil
+        onUnavailable = nil
         onFocusExit = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
@@ -186,7 +198,10 @@ final class MacDiffViewerHost: NSObject, WKNavigationDelegate, WKScriptMessageHa
         guard message.name == "gabCode", let event = message.body as? [String: Any],
               accepts(event: event, origin: message.frameInfo.request.url, isMainFrame: message.frameInfo.isMainFrame) else { return }
         if event["kind"] as? String == "ready" { pageReady = true }
-        else { onEvent?(event) }
+        else {
+            if event["kind"] as? String == "failure" { failure = event["message"] as? String }
+            onEvent?(event)
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -197,9 +212,21 @@ final class MacDiffViewerHost: NSObject, WKNavigationDelegate, WKScriptMessageHa
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         failure = error.localizedDescription
+        if isReady { markUnavailable("Diff viewer navigation failed. Retry to reopen it.") }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         failure = error.localizedDescription
+        if isReady { markUnavailable("Diff viewer navigation failed. Retry to reopen it.") }
+    }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        markUnavailable("Diff viewer stopped unexpectedly. Retry to reopen it.")
+    }
+
+    private func markUnavailable(_ message: String) {
+        guard !closed else { return }
+        let notify = onUnavailable
+        close()
+        notify?(message)
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? { nil }
