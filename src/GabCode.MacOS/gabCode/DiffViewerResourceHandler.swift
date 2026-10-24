@@ -26,7 +26,9 @@ final class DiffViewerResourceHandler: NSObject, WKURLSchemeHandler {
         case "html": mime = "text/html"
         case "js": mime = "text/javascript"
         case "css": mime = "text/css"
-        case "woff", "woff2": mime = "font/woff2"
+        case "woff": mime = "font/woff"
+        case "woff2": mime = "font/woff2"
+        case "ttf": mime = "font/ttf"
         default: task.didFailWithError(URLError(.unsupportedURL)); return
         }
         guard let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",

@@ -462,6 +462,10 @@ final class gabCodeUITests: XCTestCase {
         branchFile.click()
         XCTAssertEqual(branchFile.value as? String, "Selected diff")
         XCTAssertTrue(app.descendants(matching: .any)["native-diff-viewer"].waitForExistence(timeout: 8))
+        let document = app.descendants(matching: .any)["review-diff-document"]
+        let viewer = app.descendants(matching: .any)["native-diff-viewer"]
+        XCTAssertLessThan(viewer.frame.minY - document.frame.minY, 75,
+                          "The native header should leave most of the document height for Monaco")
         app.buttons["close-review-diff"].click()
         let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
         XCTAssertTrue(commit.waitForExistence(timeout: 8))
