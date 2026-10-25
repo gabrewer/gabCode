@@ -39,6 +39,10 @@ internal sealed class WorktreeChangeReviewService
     private static readonly List<FileStream> QuarantinedSlots = [];
     private static readonly string MachineSlotPath = Path.Combine(Path.GetTempPath(), "gabCode.windows.git-review-slot.lock");
     private readonly string executable;
+    private readonly object historyCacheGate = new();
+    private readonly Dictionary<string, IReadOnlyList<ReviewCommit>> historyCache = new(StringComparer.Ordinal);
+    private readonly Queue<string> historyCacheOrder = new();
+    private const int MaximumCachedHistoryScopes = 8;
     private readonly TimeSpan timeout;
     private readonly TimeSpan snapshotBudget;
 
@@ -93,7 +97,25 @@ internal sealed class WorktreeChangeReviewService
             if (head is null) return new(root, null, null, working, [], false, "HEAD has no commit yet; staged files can still be reviewed.");
             if (string.IsNullOrWhiteSpace(mainBranch)) return new(root, head, null, working, [], true, "Configured local main branch is unavailable.");
             mainHead = (await RunAsync(root, ["rev-parse", "--verify", $"refs/heads/{mainBranch}^{{commit}}"], readToken).ConfigureAwait(false)).Trim();
-            var commits = await GetCommitsAsync(root, head, mainHead, 0, readToken).ConfigureAwait(false);
+            var historyKey = HistoryCacheKey(root, mainBranch, head, mainHead);
+            IReadOnlyList<ReviewCommit>? commits;
+            lock (historyCacheGate) historyCache.TryGetValue(historyKey, out commits);
+            if (commits is null)
+            {
+                commits = await GetCommitsAsync(root, head, mainHead, 0, readToken).ConfigureAwait(false);
+                readToken.ThrowIfCancellationRequested();
+                lock (historyCacheGate)
+                {
+                    if (!historyCache.ContainsKey(historyKey)) historyCacheOrder.Enqueue(historyKey);
+                    historyCache[historyKey] = commits.ToArray();
+                    while (historyCacheOrder.Count > MaximumCachedHistoryScopes)
+                    {
+                        var expired = historyCacheOrder.Dequeue();
+                        historyCache.Remove(expired);
+                    }
+                }
+            }
+            readToken.ThrowIfCancellationRequested();
             return new(root, head, mainHead, working, commits, false, null);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
@@ -103,6 +125,9 @@ internal sealed class WorktreeChangeReviewService
         { return new(root, head, mainHead, working, [], true, exception.Message, ReviewStopReason.Limit); }
         catch (Exception exception) { return new(root, head, mainHead, working, [], true, exception.Message); }
     }
+
+    private static string HistoryCacheKey(string worktree, string mainBranch, string head, string mainHead) =>
+        Path.GetFullPath(worktree).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToUpperInvariant() + "\0" + mainBranch + "\0" + head + "\0" + mainHead;
 
     internal async Task<IReadOnlyList<ReviewCommit>> GetCommitsAsync(string worktree, string head, string mainHead, int skip, CancellationToken token = default)
     {
