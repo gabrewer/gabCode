@@ -235,31 +235,118 @@ public sealed class ReviewRefreshControlsTests
     }
 
     [Fact]
-    public async Task Sustained_refresh_requests_pause_instead_of_running_forever()
+    public async Task Periodic_ticks_skip_busy_reads_then_reconcile_without_a_sustained_change_pause()
     {
-        var root = Path.Combine(Path.GetTempPath(), "gabcode sustained Ω " + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "gabcode periodic Ω " + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            var fake = Path.Combine(root, "slow-git.cmd");
-            await File.WriteAllTextAsync(fake, "@echo off\r\nping -n 2 127.0.0.1 > nul\r\necho fake\r\n");
             await OnSta(async () =>
             {
-                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService(fake));
-                sidebar.Select(root, "main");
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
                 var coordinator = (WorktreeChangeReviewCoordinator)typeof(WorktreeReviewSidebar)
                     .GetField("coordinator", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar)!;
-                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(22);
-                while (!coordinator.IsPaused && DateTime.UtcNow < deadline)
-                {
-                    sidebar.RequestRefresh();
-                    await Task.Delay(90);
-                }
-                Assert.True(coordinator.IsPaused, "Sustained notifications did not stop automatic refresh.");
-                Assert.Equal(ReviewStopReason.Limit, coordinator.Snapshot?.StopReason);
+                var blocked = new TaskCompletionSource<ReviewSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var calls = 0;
+                typeof(WorktreeChangeReviewCoordinator).GetField("read", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .SetValue(coordinator, (Func<string, string?, CancellationToken, Task<ReviewSnapshot>>)((path, _, _) =>
+                        ++calls == 2 ? blocked.Task : Task.FromResult(new ReviewSnapshot(path, "head", "main", [], [], false, null))));
+                sidebar.Select(root, "main");
+                Assert.Null(typeof(WorktreeReviewSidebar).GetField("watchers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic));
+                var poll = (DispatcherTimer)typeof(WorktreeReviewSidebar)
+                    .GetField("poll", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(sidebar)!;
+                Assert.Equal(TimeSpan.FromSeconds(12), poll.Interval);
+                poll.Interval = TimeSpan.FromMilliseconds(60);
+                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+                while (calls < 2 && DateTime.UtcNow < deadline) await Task.Delay(15);
+                Assert.Equal(2, calls);
+                await Task.Delay(300); // Several ticks arrive while the second read is still running.
+                Assert.Equal(2, calls);
+                Assert.False(coordinator.IsPaused);
+                poll.Stop();
+                blocked.SetResult(new ReviewSnapshot(root, "head", "main", [], [], false, null));
+                await Task.Delay(1300);
+                Assert.Equal(2, calls); // A busy tick must not schedule a delayed follow-up.
+                poll.Start();
+                deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+                while (calls < 3 && DateTime.UtcNow < deadline) await Task.Delay(15);
+                Assert.True(calls >= 3, "Next periodic tick should reconcile after the busy read exits.");
+                Assert.False(coordinator.IsPaused);
             });
         }
         finally { try { Directory.Delete(root, recursive: true); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { } }
+    }
+
+    [Fact]
+    public async Task Switching_during_periodic_read_cancels_old_scope_without_publishing_it()
+    {
+        await OnSta(async () =>
+        {
+            using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+            const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var coordinator = (WorktreeChangeReviewCoordinator)typeof(WorktreeReviewSidebar).GetField("coordinator", flags)!.GetValue(sidebar)!;
+            var oldRead = new TaskCompletionSource<ReviewSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var oldToken = CancellationToken.None;
+            var calls = 0;
+            typeof(WorktreeChangeReviewCoordinator).GetField("read", flags)!.SetValue(coordinator,
+                (Func<string, string?, CancellationToken, Task<ReviewSnapshot>>)((path, _, token) =>
+                {
+                    calls++;
+                    if (calls == 1) { oldToken = token; return oldRead.Task; }
+                    return Task.FromResult(new ReviewSnapshot(path, "new-head", "main", [], [], false, null));
+                }));
+            var first = Path.Combine(Path.GetTempPath(), "old-review-" + Guid.NewGuid().ToString("N"));
+            var second = first + "-new";
+            sidebar.Select(first, "main");
+            Assert.Equal(1, calls);
+            sidebar.Select(second, "main");
+            Assert.True(oldToken.IsCancellationRequested);
+            Assert.Equal(1, calls); // Cleanup capacity is still held by the old reader.
+            oldRead.SetResult(new ReviewSnapshot(first, "obsolete", "main", [], [], false, null));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (sidebar.IsRefreshing && DateTime.UtcNow < deadline) await Task.Delay(15);
+            Assert.False(sidebar.IsRefreshing);
+            Assert.Equal(2, calls);
+            Assert.Equal(second, coordinator.Snapshot?.Worktree);
+            Assert.Equal("new-head", coordinator.Snapshot?.Head);
+            sidebar.Suspend();
+            Assert.Null(coordinator.Snapshot);
+            Assert.False(((DispatcherTimer)typeof(WorktreeReviewSidebar).GetField("poll", flags)!.GetValue(sidebar)!).IsEnabled);
+        });
+    }
+
+    [Fact]
+    public async Task File_writes_alone_do_not_trigger_review_or_pause_between_periodic_ticks()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gabcode no watcher Ω " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await OnSta(async () =>
+            {
+                using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+                const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var coordinator = (WorktreeChangeReviewCoordinator)typeof(WorktreeReviewSidebar).GetField("coordinator", flags)!.GetValue(sidebar)!;
+                var calls = 0;
+                typeof(WorktreeChangeReviewCoordinator).GetField("read", flags)!.SetValue(coordinator,
+                    (Func<string, string?, CancellationToken, Task<ReviewSnapshot>>)((path, _, _) =>
+                    {
+                        calls++;
+                        return Task.FromResult(new ReviewSnapshot(path, "head", "main", [], [], false, null));
+                    }));
+                sidebar.Select(root, "main");
+                Assert.Equal(1, calls);
+                for (var round = 0; round < 8; round++)
+                {
+                    await File.WriteAllTextAsync(Path.Combine(root, "agent-edit.txt"), round.ToString());
+                    await Task.Delay(100);
+                }
+                Assert.Equal(1, calls);
+                Assert.False(coordinator.IsPaused);
+                Assert.True(sidebar.HasFreshSnapshot);
+            });
+        }
+        finally { Directory.Delete(root, true); }
     }
 
     [Fact]
