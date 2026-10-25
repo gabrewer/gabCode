@@ -54,6 +54,53 @@ public sealed class ReviewFocusPreservationTests
         });
     }
 
+    [Theory]
+    [InlineData(false, "create_schemas.sql", null)]
+    [InlineData(true, "create_schemas.sql", null)]
+    [InlineData(true, "create__schemas.sql", null)]
+    [InlineData(true, "renamed.sql", "create_schemas.sql")]
+    public async Task File_name_underscore_must_not_register_an_s_access_key_that_opens_a_diff(bool appChrome, string path, string? oldPath)
+    {
+        await OnSta(async () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "review mnemonic Ω " + Guid.NewGuid().ToString("N"));
+            using var sidebar = new WorktreeReviewSidebar(new WorktreeChangeReviewService());
+            Window window = appChrome ? new MainWindow() : new Window();
+            window.Content = sidebar;
+            window.Width = 680;
+            window.Height = 480;
+            window.ShowInTaskbar = false;
+            window.Show();
+            try
+            {
+                typeof(WorktreeReviewSidebar).GetField("worktree", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(sidebar, root);
+                var expanded = (HashSet<string>)typeof(WorktreeReviewSidebar).GetField("expanded", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(sidebar)!;
+                expanded.UnionWith(["working", "staged", "unstaged"]);
+                var file = new ReviewFile(path, oldPath, ReviewGroup.Unstaged, oldPath is null ? ReviewStatus.Untracked : ReviewStatus.Renamed);
+                var snapshot = new ReviewSnapshot(root, null, null, [file], [], false, null);
+                var coordinator = (WorktreeChangeReviewCoordinator)typeof(WorktreeReviewSidebar).GetField("coordinator", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(sidebar)!;
+                typeof(WorktreeChangeReviewCoordinator).GetProperty("Snapshot", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(coordinator, snapshot);
+                var activations = 0;
+                sidebar.DiffRequested += (_, _) => activations++;
+                Render(sidebar, snapshot);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                var button = Assert.Single(Buttons(sidebar), b => Equals(b.Tag, file.Identity));
+                button.ApplyTemplate();
+                button.UpdateLayout();
+                var scope = PresentationSource.FromVisual(window)!;
+                AccessKeyManager.ProcessKey(scope, "S", false); // Scoped WPF mnemonic processing, not a desktop keystroke.
+                Assert.Equal(0, activations);
+                Assert.False(AccessKeyManager.IsKeyRegistered(scope, "S"));
+                Assert.Contains(path, System.Windows.Automation.AutomationProperties.GetName(button));
+                var literal = Assert.Single(Descendants<TextBlock>(button));
+                Assert.Equal(button.Content, literal.Text); // Rendered underscores and old rename path stay literal.
+                button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Assert.Equal(1, activations); // Deliberately opening the file still works.
+            }
+            finally { window.Close(); }
+        });
+    }
+
     [Fact]
     public async Task Delayed_document_open_focus_cannot_override_newer_user_focus()
     {
@@ -102,13 +149,15 @@ public sealed class ReviewFocusPreservationTests
     private static void Render(WorktreeReviewSidebar sidebar, ReviewSnapshot snapshot) =>
         typeof(WorktreeReviewSidebar).GetMethod("Render", BindingFlags.Instance | BindingFlags.NonPublic, [typeof(ReviewSnapshot)])!.Invoke(sidebar, [snapshot]);
 
-    private static IEnumerable<Button> Buttons(DependencyObject root)
+    private static IEnumerable<Button> Buttons(DependencyObject root) => Descendants<Button>(root);
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
     {
         for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
         {
             var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
-            if (child is Button button) yield return button;
-            foreach (var nested in Buttons(child)) yield return nested;
+            if (child is T typed) yield return typed;
+            foreach (var nested in Descendants<T>(child)) yield return nested;
         }
     }
 
