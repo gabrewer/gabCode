@@ -8,6 +8,8 @@
 | Target | Windows native client (C#/WPF) |
 | Scope | Opening-time and subsequent Git tree/review refresh safety |
 
+**Refresh efficiency follow-up (2026-10-24):** [Windows Review Refresh Efficiency](2026-10-24-windows-automatic-review-refresh-recovery-prd.md) avoids unnecessary commit-history reads. It does not change the timeout, Retry, Cancel, or cleanup safeguards below.
+
 ## Product Name & One-Liner
 
 **gabCode Windows Git Tree Refresh Safety** — Keep Windows and gabCode usable during automatic Git refresh, stopping expensive work safely rather than requiring the user to kill the application.

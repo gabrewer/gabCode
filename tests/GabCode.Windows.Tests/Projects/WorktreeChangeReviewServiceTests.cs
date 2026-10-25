@@ -362,6 +362,223 @@ public sealed class WorktreeChangeReviewServiceTests
     }
 
     [Fact]
+    public async Task Working_file_edits_refresh_status_without_repeating_first_page_git_log()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.name", "Test");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "base\n");
+        await repo.Git("add", "tracked.txt");
+        await repo.Git("commit", "-m", "base");
+        await repo.Git("switch", "-c", "feature/test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "committed\n");
+        await repo.Git("commit", "-am", "feature commit");
+        var (executable, trace) = await GitProbeAsync(repo.Path);
+        var service = new WorktreeChangeReviewService(executable);
+
+        var first = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(first.IsStale, first.Error);
+        Assert.Equal("feature commit", Assert.Single(first.Commits).Subject);
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "working edit\n");
+        var second = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(second.IsStale, second.Error);
+        Assert.Contains(second.Working, file => file.Path == "tracked.txt" && file.Group == ReviewGroup.Unstaged);
+        Assert.Equal(first.Commits.Select(commit => commit.Sha), second.Commits.Select(commit => commit.Sha));
+        Assert.Equal(1, CountGitLogs(trace));
+        Assert.Equal(2, CountGitStatuses(trace));
+
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "next commit\n");
+        await repo.Git("commit", "-am", "second feature commit");
+        var third = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(third.IsStale, third.Error);
+        Assert.Equal(2, third.Commits.Count);
+        Assert.Equal(2, CountGitLogs(trace));
+
+        await repo.Git("branch", "-f", "trunk", "HEAD");
+        var fourth = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(fourth.IsStale, fourth.Error);
+        Assert.Empty(fourth.Commits);
+        Assert.Equal(3, CountGitLogs(trace));
+        var fifth = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(fifth.IsStale, fifth.Error);
+        Assert.Empty(fifth.Commits);
+        Assert.Equal(3, CountGitLogs(trace)); // An empty successful page is reusable.
+        Assert.Equal(5, CountGitStatuses(trace));
+    }
+
+    [Fact]
+    public async Task Cached_history_is_scoped_by_comparison_branch_and_selected_worktree()
+    {
+        using var firstRepo = new ReviewRepository();
+        using var secondRepo = new ReviewRepository();
+        foreach (var repo in new[] { firstRepo, secondRepo })
+        {
+            await repo.Git("init", "-b", "trunk");
+            await repo.Git("config", "user.name", "Test");
+            await repo.Git("config", "user.email", "test@example.invalid");
+            await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "base\n");
+            await repo.Git("add", "tracked.txt");
+            await repo.Git("commit", "-m", "base");
+            await repo.Git("switch", "-c", "feature/test");
+            await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "feature\n");
+            await repo.Git("commit", "-am", "feature");
+            await repo.Git("branch", "alternate", "trunk");
+        }
+        var (executable, trace) = await GitProbeAsync(firstRepo.Path);
+        var service = new WorktreeChangeReviewService(executable);
+        Assert.False((await service.GetSnapshotAsync(firstRepo.Path, "trunk")).IsStale);
+        Assert.False((await service.GetSnapshotAsync(firstRepo.Path, "alternate")).IsStale);
+        Assert.False((await service.GetSnapshotAsync(secondRepo.Path, "trunk")).IsStale);
+        Assert.False((await service.GetSnapshotAsync(firstRepo.Path, "trunk")).IsStale);
+        Assert.Equal(3, CountGitLogs(trace)); // Returning to an unchanged scope can reuse its page.
+    }
+
+    [Fact]
+    public async Task Failed_history_query_does_not_seed_cache_for_next_successful_read()
+    {
+        using var repo = new ReviewRepository();
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.name", "Test");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "base\n");
+        await repo.Git("add", "tracked.txt");
+        await repo.Git("commit", "-m", "base");
+        await repo.Git("switch", "-c", "feature/test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "feature\n");
+        await repo.Git("commit", "-am", "feature");
+        var (executable, trace) = await GitProbeAsync(repo.Path);
+        var marker = Path.Combine(repo.Path, "fail-log.txt");
+        await File.WriteAllTextAsync(marker, "fail once");
+        var service = new WorktreeChangeReviewService(executable);
+        var failed = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.True(failed.IsStale);
+        Assert.Empty(failed.Commits);
+        File.Delete(marker);
+        var success = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(success.IsStale, success.Error);
+        Assert.Equal("feature", Assert.Single(success.Commits).Subject);
+        Assert.False((await service.GetSnapshotAsync(repo.Path, "trunk")).IsStale);
+        Assert.Equal(2, CountGitLogs(trace));
+    }
+
+    [Fact]
+    public async Task Cancelled_history_read_cannot_seed_cache_and_cleanup_allows_next_read()
+    {
+        using var repo = new ReviewRepository();
+        await InitializeHistoryRepoAsync(repo);
+        var (executable, trace) = await GitProbeAsync(repo.Path);
+        var block = Path.Combine(repo.Path, "block-log.txt");
+        var entered = Path.Combine(repo.Path, "log-entered.txt");
+        await File.WriteAllTextAsync(block, "block");
+        var service = new WorktreeChangeReviewService(executable);
+        using var cancellation = new CancellationTokenSource();
+        var pending = service.GetSnapshotAsync(repo.Path, "trunk", cancellation.Token);
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (!File.Exists(entered))
+            {
+                Assert.False(pending.IsCompleted, "Read ended before the controlled log command started.");
+                await Task.Delay(10, deadline.Token);
+            }
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try { await pending; } catch (OperationCanceledException) { }
+        }
+        File.Delete(block);
+        var success = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(success.IsStale, success.Error);
+        Assert.Single(success.Commits);
+        Assert.False((await service.GetSnapshotAsync(repo.Path, "trunk")).IsStale);
+        Assert.Equal(2, CountGitLogs(trace));
+    }
+
+    [Fact]
+    public async Task History_cache_is_bounded_and_eviction_reloads_instead_of_pausing()
+    {
+        using var repo = new ReviewRepository();
+        await InitializeHistoryRepoAsync(repo);
+        var (executable, trace) = await GitProbeAsync(repo.Path);
+        var service = new WorktreeChangeReviewService(executable);
+        for (var index = 0; index < 9; index++)
+        {
+            await repo.Git("branch", $"base-{index}", "trunk");
+            var result = await service.GetSnapshotAsync(repo.Path, $"base-{index}");
+            Assert.False(result.IsStale, result.Error);
+            Assert.Single(result.Commits);
+        }
+        Assert.Equal(9, CountGitLogs(trace));
+        var oldest = await service.GetSnapshotAsync(repo.Path, "base-0");
+        Assert.False(oldest.IsStale, oldest.Error);
+        Assert.Single(oldest.Commits);
+        Assert.Equal(10, CountGitLogs(trace));
+        Assert.False((await service.GetSnapshotAsync(repo.Path, "base-0")).IsStale);
+        Assert.Equal(10, CountGitLogs(trace));
+    }
+
+    [Fact]
+    public async Task Cache_does_not_hide_missing_main_and_ref_rewrites_reload_correct_history()
+    {
+        using var repo = new ReviewRepository();
+        await InitializeHistoryRepoAsync(repo);
+        var (executable, trace) = await GitProbeAsync(repo.Path);
+        var service = new WorktreeChangeReviewService(executable);
+        var first = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(first.IsStale, first.Error);
+        var baseId = first.MainHead!;
+        await repo.Git("branch", "-D", "trunk");
+        var missing = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.True(missing.IsStale);
+        Assert.Empty(missing.Commits);
+        await repo.Git("branch", "trunk", "HEAD");
+        var advanced = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(advanced.IsStale, advanced.Error);
+        Assert.Empty(advanced.Commits);
+        await repo.Git("commit", "--amend", "-m", "rewritten feature");
+        var rewritten = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(rewritten.IsStale, rewritten.Error);
+        Assert.Equal("rewritten feature", Assert.Single(rewritten.Commits).Subject);
+        await repo.Git("branch", "-f", "trunk", baseId);
+        var mainMovedBack = await service.GetSnapshotAsync(repo.Path, "trunk");
+        Assert.False(mainMovedBack.IsStale, mainMovedBack.Error);
+        Assert.Equal(baseId, mainMovedBack.MainHead);
+        Assert.Equal("rewritten feature", Assert.Single(mainMovedBack.Commits).Subject);
+        Assert.Equal(4, CountGitLogs(trace));
+        // Alternate spelling of the same Windows worktree must not create another cache entry.
+        Assert.False((await service.GetSnapshotAsync(repo.Path + Path.DirectorySeparatorChar, "trunk")).IsStale);
+        Assert.Equal(4, CountGitLogs(trace));
+    }
+
+    private static async Task InitializeHistoryRepoAsync(ReviewRepository repo)
+    {
+        await repo.Git("init", "-b", "trunk");
+        await repo.Git("config", "user.name", "Test");
+        await repo.Git("config", "user.email", "test@example.invalid");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "base\n");
+        await repo.Git("add", "tracked.txt");
+        await repo.Git("commit", "-m", "base");
+        await repo.Git("switch", "-c", "feature/test");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "tracked.txt"), "feature\n");
+        await repo.Git("commit", "-am", "feature");
+    }
+
+    private static async Task<(string Executable, string Trace)> GitProbeAsync(string root)
+    {
+        var trace = Path.Combine(root, "git-commands.txt");
+        var script = Path.Combine(root, "git-probe.cmd");
+        await File.WriteAllTextAsync(script, "@echo off\r\nif \"%3\"==\"log\" echo LOG>>\"%~dp0git-commands.txt\"\r\nif \"%3\"==\"status\" echo STATUS>>\"%~dp0git-commands.txt\"\r\nif \"%3\"==\"-c\" echo STATUS>>\"%~dp0git-commands.txt\"\r\nif \"%3\"==\"log\" if exist \"%~dp0fail-log.txt\" exit /b 1\r\nif \"%3\"==\"log\" if exist \"%~dp0block-log.txt\" (\r\n echo entered>\"%~dp0log-entered.txt\"\r\n ping -n 60 127.0.0.1 > nul\r\n)\r\ngit %*\r\n");
+        return (script, trace);
+    }
+
+    private static int CountGitLogs(string trace) => File.ReadAllLines(trace).Count(line => line == "LOG");
+    private static int CountGitStatuses(string trace) => File.ReadAllLines(trace).Count(line => line == "STATUS");
+
+    [Fact]
     public async Task Missing_configured_local_main_is_unavailable_not_an_empty_history()
     {
         using var repo = new ReviewRepository();
