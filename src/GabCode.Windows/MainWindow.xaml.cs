@@ -106,7 +106,7 @@ public partial class MainWindow : Window
         InputBindings.Add(new KeyBinding(RefreshWorktreesCommand, Key.F5, ModifierKeys.None) { CommandTarget = this });
         CommandBindings.Add(new CommandBinding(RefreshWorktreesCommand, RefreshWorktreesCommand_Executed, RefreshWorktreesCommand_CanExecute));
         Closing += MainWindow_Closing;
-        Activated += (_, _) => { reviewSidebar?.RequestRefresh(); TryApplyOpeningFocus(); };
+        Activated += (_, _) => TryApplyOpeningFocus();
         Deactivated += (_, _) => openingFocusTarget = null;
         PreviewGotKeyboardFocus += (_, args) =>
         {

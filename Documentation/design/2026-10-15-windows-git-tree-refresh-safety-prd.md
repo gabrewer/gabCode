@@ -8,7 +8,7 @@
 | Target | Windows native client (C#/WPF) |
 | Scope | Opening-time and subsequent Git tree/review refresh safety |
 
-**Refresh efficiency follow-up (2026-10-24):** [Windows Review Refresh Efficiency](2026-10-24-windows-automatic-review-refresh-recovery-prd.md) avoids unnecessary commit-history reads. It does not change the timeout, Retry, Cancel, or cleanup safeguards below.
+**Periodic review follow-up (2026-10-24):** [Windows Periodic Review Refresh](2026-10-24-windows-automatic-review-refresh-recovery-prd.md) avoids redundant history reads and replaces watcher-driven review updates with periodic Git reconciliation. The sustained-change pause below no longer applies to continuing ordinary edits; timeout, user Cancel/Retry, and unsafe-cleanup safeguards remain.
 
 ## Product Name & One-Liner
 
