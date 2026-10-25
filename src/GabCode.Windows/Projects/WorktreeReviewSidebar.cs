@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Input;
@@ -32,6 +33,8 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
     private readonly Button retryReviewRefresh;
     private readonly StackPanel rows = new();
     private readonly ScrollViewer scroller;
+    // WPF templates are dispatcher-affine; keep this scoped to the sidebar's UI thread.
+    private readonly DataTemplate literalFileLabelTemplate = CreateLiteralFileLabelTemplate();
     private readonly Dictionary<string, Button> fileButtons = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Expander> sections = new(StringComparer.Ordinal);
     private readonly TextBlock status = new() { Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
@@ -757,13 +760,21 @@ internal sealed class WorktreeReviewSidebar : UserControl, IDisposable
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var rail = new Border { Width = 2, HorizontalAlignment = HorizontalAlignment.Center, Background = file.Group == ReviewGroup.Commit ? new SolidColorBrush(Color.FromRgb(96, 165, 250)) : new SolidColorBrush(Color.FromRgb(156, 163, 175)), IsHitTestVisible = false };
             row.Children.Add(rail);
-            var button = new Button { Content = label, Tag = file.Identity, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(3), ToolTip = label };
+            // File paths are data, never access-key markup (for example `_s` must not activate a diff).
+            var button = new Button { Content = label, ContentTemplate = literalFileLabelTemplate, Tag = file.Identity, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(3), ToolTip = label };
             AutomationProperties.SetName(button, $"Read-only diff, {label}, {file.Group}");
             button.Click += (_, _) => { activeFileIdentity = file.Identity; DiffRequested?.Invoke(file, button); };
             Grid.SetColumn(button, 1); row.Children.Add(button);
             target.Children.Add(row);
             fileButtons[file.Identity] = button;
         }
+    }
+
+    private static DataTemplate CreateLiteralFileLabelTemplate()
+    {
+        var literal = new FrameworkElementFactory(typeof(TextBlock));
+        literal.SetBinding(TextBlock.TextProperty, new Binding("."));
+        return new DataTemplate { VisualTree = literal };
     }
 
     private void UpdateRefreshIndicator()
