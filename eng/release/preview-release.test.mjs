@@ -178,8 +178,10 @@ test("prepare creates deterministic checksums and safe public notes without publ
   await prepare({ facts, repositoryRoot: root, execute: tools.execute });
   const notes = await readFile(join(directory, "release-notes.md"), "utf8");
   const sums = await readFile(join(directory, "SHA256SUMS.txt"), "utf8");
-  assert.match(notes, /## Highlights/);
-  assert.match(notes, /## Bug Fixes/);
+  assert.match(notes, /## What's new/);
+  assert.match(notes, /## Improvements and fixes/);
+  assert.match(notes, /## Downloads/);
+  assert.match(notes, /## Preview notice/);
   assert.match(notes, /#31/);
   assert.match(notes, /Changes since `v0\.0\.1-preview\.1`/);
   assert.doesNotMatch(notes, /javascript:|\nforged/);

@@ -266,6 +266,7 @@ Run orchestration through the Pi front-door prompts:
 
 - `/pm-agent <feature-or-prd>` plans the work and prepares the authoritative GitHub sprint record.
 - `/team-lead <sprint-or-feature-id>` executes an approved GitHub-backed plan through the worker skills and canonical quality gates.
+- `/pull-request [issue-or-pr-number]` publishes committed feature-branch HEAD, creates or reuses its PR, and posts a full contextual review. Its template is `.pi/prompts/pull-request.md`, using `.github/pull_request_template.md`. It leaves dirty work untouched and keeps implementation/remediation in `/team-lead`; review workers remain internal phases. Invocation authorizes publication and review comments, not commits, merges, or issue closure. It coordinates `destroyer` and `review-agent` with relevant capability skills and restores the `pull-request` model route between phases. `.pi/skill-models.json` configures this utility as `openai-codex/gpt-6-luna` with `high` thinking.
 
 The Team Lead reads each required `SKILL.md` before adopting that worker role. It returns to the coordinator role between phases and updates the configured GitHub Issues backend. If a project later adds an extension for isolated delegation, that extension must preserve the same worker contracts, tool restrictions, and evidence rules.
 

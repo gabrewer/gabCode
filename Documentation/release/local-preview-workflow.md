@@ -139,7 +139,7 @@ Every failed preflight is non-mutating. The publisher creates no GitHub control 
 The helper deterministically creates:
 
 - `SHA256SUMS.txt`, containing sorted lowercase hashes for the MSI and DMG only;
-- `release-notes.md`, the public GitHub prerelease description. It deterministically identifies the preview version and target commit, summarizes reviewed commit subjects since the previous preview tag in **Highlights**, **Bug Fixes**, and **Other Changes**, links issue/PR references present in that history, and retains the unsigned/ad-hoc and `NOT CHECKED` disclosures. It never derives claims from local session input or evidence sidecars.
+- `release-notes.md`, the public GitHub prerelease description. It deterministically generates a presentation-ready **What's new**, **Improvements and fixes**, **Downloads**, and **Preview notice** format from reviewed commit subjects since the previous preview tag, links issue/PR references present in that history, identifies the reviewed source commit, and retains the unsigned/ad-hoc and `NOT CHECKED` disclosures. It never derives claims from local session input or evidence sidecars.
 
 It displays the version, target commit, filenames, byte lengths, hashes, and release notes. This phase creates no GitHub issue, tag, or release.
 
