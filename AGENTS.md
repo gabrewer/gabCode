@@ -15,6 +15,7 @@ Read the approved sprint record and the task-named files before changing code.
 - Route execution of an approved sprint through `/team-lead`.
 - Do not collapse, imitate, or bypass those front doors from the default session.
 - Testing, building, adversarial review, review, and committing are internal worker phases rather than separate user-facing workflows.
+- `/pull-request [issue-or-pr-number]` is the approved bounded utility for publishing the current committed feature branch and posting a full PR review through internal workers. It preserves uncommitted work, does not implement fixes or commit changes, and leaves remediation with `/team-lead`.
 
 ## Product boundaries
 

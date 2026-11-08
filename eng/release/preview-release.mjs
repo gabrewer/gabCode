@@ -128,31 +128,39 @@ function safeSubject(subject) {
 function linkedSubject(subject, repository) {
   return safeSubject(subject).replace(/(^|\s)#(\d+)\b/g, `$1[#\$2](https://github.com/${repository}/issues/$2)`);
 }
+function presentableSubject(subject, repository) {
+  const linked = linkedSubject(subject, repository).replace(/^[a-z]+(?:\([^)]*\))?:\s*/i, "");
+  return linked.charAt(0).toUpperCase() + linked.slice(1).replace(/[.!?]?$/, ".");
+}
 
 export async function generateReleaseNotes({ facts, repositoryRoot = process.cwd(), execute = defaultExecute }) {
   const previous = await run(execute, "git", ["describe", "--tags", "--abbrev=0", `${facts.sourceCommit}^`], { cwd: repositoryRoot, allowFailure: true });
   const previousTag = previous.code === 0 && /^v\d+\.\d+\.\d+-preview(?:\.\d+)?$/.test(previous.stdout.trim()) ? previous.stdout.trim() : undefined;
   const range = previousTag ? `${previousTag}..${facts.sourceCommit}` : facts.sourceCommit;
   const history = await run(execute, "git", ["log", "--format=%H%x1f%s", range], { cwd: repositoryRoot });
-  const changes = { highlights: [], fixes: [], other: [] };
+  const changes = { features: [], improvements: [] };
   for (const row of history.stdout.split("\n")) {
     if (!row) continue;
     const [sha, subject, ...rest] = row.split("\u001f");
     if (!/^[0-9a-f]{40}$/.test(sha) || rest.length || subject === undefined) continue;
-    const entry = `- ${linkedSubject(subject, facts.repository)} (${sha.slice(0, 7)})`;
-    if (/^feat(?:\([^)]*\))?:/i.test(subject)) changes.highlights.push(entry);
-    else if (/^fix(?:\([^)]*\))?:/i.test(subject)) changes.fixes.push(entry);
-    else changes.other.push(entry);
+    const entry = `- ${presentableSubject(subject, facts.repository)}`;
+    if (/^feat(?:\([^)]*\))?:/i.test(subject)) changes.features.push(entry);
+    else changes.improvements.push(entry);
   }
   const section = (heading, entries, empty) => `## ${heading}\n\n${entries.length ? entries.join("\n") : empty}`;
   return [
-    `# gabCode ${facts.tag} developer preview`, "",
-    `Target commit: \`${facts.sourceCommit}\`${previousTag ? ` · Changes since \`${previousTag}\`` : " · Initial preview history"}`, "",
-    section("Highlights", changes.highlights, "No feature-classified commits were recorded in the reviewed range."), "",
-    section("Bug Fixes", changes.fixes, "No fix-classified commits were recorded in the reviewed range."), "",
-    section("Other Changes", changes.other, "No additional classified commits were recorded in the reviewed range."), "",
-    "## Known Limitations", "", "This is an unsigned/ad-hoc developer preview. Windows SmartScreen/Installer and macOS Gatekeeper may warn or block it. Verify the published SHA-256 before use.", "",
-    "## Validation Still Needed", "", "Downloaded-file trust paths, installation/copy and launch, keyboard/focus/accessibility, terminal startup, and process cleanup remain **NOT CHECKED** pending human target-platform validation. Automated preparation and publication are implementation evidence, not human acceptance.", "",
+    `# gabCode ${facts.version.replace("-preview", "")} Preview`, "",
+    "This preview includes the latest reviewed improvements to gabCode across Windows and macOS.", "",
+    section("What's new", changes.features, "No feature-classified changes were recorded in the reviewed range."), "",
+    section("Improvements and fixes", changes.improvements, "No additional reviewed changes were recorded in the reviewed range."), "",
+    "## Downloads", "",
+    `- **Windows 11 x64:** \`${facts.windows.artifactName}\``,
+    `- **Apple Silicon macOS:** \`${facts.macos.artifactName}\``,
+    "- **Checksums:** `SHA256SUMS.txt`", "",
+    "## Preview notice", "",
+    "This is an unsigned/ad-hoc developer preview. Windows SmartScreen or Installer, and macOS Gatekeeper, may display warnings. Verify the SHA-256 checksum before installing.", "",
+    `Reviewed source commit: \`${facts.sourceCommit}\`${previousTag ? ` · Changes since \`${previousTag}\`` : " · Initial preview history"}`, "",
+    "Downloaded-file trust paths, installation and launch, keyboard/focus/accessibility, terminal startup, and process cleanup remain **not checked** through human target-machine validation.", "",
   ].join("\n");
 }
 

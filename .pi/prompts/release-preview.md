@@ -18,7 +18,7 @@ node eng/release/preview-release.mjs preflight --version "$1"
 node eng/release/preview-release.mjs prepare --version "$1"
 ```
 
-Report the version, source commit, artifact names/sizes/SHA-256 values, generated public release notes, and publication result. Preparation creates no GitHub issue, tag, or release.
+Report the version, source commit, artifact names/sizes/SHA-256 values, generated presentation-ready public release notes, and publication result. The generated notes use **What's new**, **Improvements and fixes**, **Downloads**, and **Preview notice** sections. Preparation creates no GitHub issue, tag, or release.
 
 Then ask the human to enter the exact requested version `${1:-<x.y.z-preview>}` to authorize public publication. A generic yes, a different version, empty response, or decline is not confirmation.
 

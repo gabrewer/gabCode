@@ -71,6 +71,8 @@ Generate the two primary Pi prompts described by the orchestration documents:
 
 Do not create separate user-facing prompts for testing, building, destroying, reviewing, or committing. Those are internal worker phases. Add an optional utility prompt only after its distinct purpose is reviewed.
 
+Approved utility: `/pull-request [issue-or-pr-number]` publishes committed feature-branch HEAD and creates/updates its PR, then coordinates `destroyer` and `review-agent` internally to post a full review and linked sprint findings. It does not commit local changes, implement fixes, merge, or close issues. Planning remains with `/pm-agent`; implementation and remediation remain with `/team-lead`. Its coordinator route is `openai-codex/gpt-6-luna` with `high` thinking; worker routing follows `.pi/skill-models.json`. See `.pi/prompts/pull-request.md` and `.pi/skill-models.json`.
+
 ## Worker skill specialization
 
 Use the canonical worker names from `TEAM-ORCHESTRATION.md` unless a later resource-map review approves a different topology.
