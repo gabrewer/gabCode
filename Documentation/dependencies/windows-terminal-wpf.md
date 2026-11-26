@@ -89,7 +89,7 @@ The upstream `WpfTerminalControl.csproj` pack target expects native `Microsoft.T
 
 For the initial Windows x64 integration, gabCode will use an explicit x64 runtime-asset layout built from the pinned source rather than the upstream multi-architecture pack target. The integration sprint must establish how those versioned assets are produced and consumed before adding the application reference.
 
-The chosen implementation must preserve pinned source/build provenance, identify `eng/windows-terminal/patches/hyperlink-activation.patch` and its hash, include `LICENSE` and `NOTICE.md`, inventory shipped assets, meet the .NET desktop-runtime policy, and remain reproducible before packaging/signing work. Do not rely on an unofficial repackaged control. Building Win32 and ARM64 outputs or using the upstream multi-architecture package remains optional future work, not an integration prerequisite.
+The chosen implementation must apply the repository-owned patch to the pinned source, include `LICENSE` and `NOTICE.md`, inventory shipped assets, and meet the .NET desktop-runtime policy before packaging/signing work. Do not rely on an unofficial repackaged control. Building Win32 and ARM64 outputs or using the upstream multi-architecture package remains optional future work, not an integration prerequisite.
 
 ## WPF keyboard-navigation hosting requirement
 

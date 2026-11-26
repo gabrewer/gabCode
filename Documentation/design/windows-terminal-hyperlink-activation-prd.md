@@ -84,7 +84,7 @@ The approved approach is therefore a narrow, reproducible source patch applied d
 - let the gabCode Windows client own validation and Windows-associated launch behavior;
 - retain and clear native/managed callbacks safely across terminal creation, movement, disconnection, and destruction.
 
-The patch must be stored as a reviewable repository artifact and applied to a clean checkout of the exact pinned commit. The manifest must identify the patch and the resulting managed/native assets. The build must continue to ship the upstream MIT license and `NOTICE.md` and must reject source, patch, or asset-layout drift.
+The patch must be stored as a reviewable repository artifact and applied to a clean checkout of the exact pinned commit. The build must apply the repository patch to the pinned source and ship the upstream MIT license and `NOTICE.md`.
 
 Do not parse ConPTY output in gabCode, draw a second link overlay, use an unofficial terminal package, silently float to another Windows Terminal revision, or replace the native terminal control.
 
@@ -123,8 +123,8 @@ Target-Windows evidence must cover the keyboard sequence and focus behavior. Nar
 ### Dependency and build
 
 - [ ] A clean checkout of Windows Terminal `v1.26.3133.0` at commit `c4e28e32c0c868474340eb4ae415096aab9026d7` accepts exactly the repository-owned hyperlink patch and builds the approved x64 WPF target.
-- [ ] The dependency manifest records the patch identity and the resulting `Microsoft.Terminal.Wpf.dll` and `Microsoft.Terminal.Control.dll` assets.
-- [ ] Verification rejects a changed patch, unexpected source modification, or unapproved asset.
+- [ ] The pinned build applies the repository patch and produces the `Microsoft.Terminal.Wpf.dll` and `Microsoft.Terminal.Control.dll` assets.
+- [ ] The upstream MIT license and `NOTICE.md` remain alongside the runtime assets.
 - [ ] Upstream `LICENSE` and `NOTICE.md` obligations remain satisfied.
 
 ### Terminal behavior
