@@ -30,6 +30,7 @@ Read the authoritative sprint record and the task-named files before changing co
 
 ## Working rules
 
+- Explicit human instructions take priority over repository-authored workflow gates and defaults. Do not keep blocking an explicitly requested action solely because an agent prompt, script, or local policy says to stop; explain concrete side effects and follow the human's stated scope. This does not authorize actions outside that scope or override platform/system safety requirements.
 - Inspect the repository before naming source paths or build, test, launch, or verification commands.
 - If a workstream has no build surface, establish one before creating downstream scripts that depend on it.
 - Validate platform behavior on its target operating system and report unavailable checks as `NOT CHECKED`.
