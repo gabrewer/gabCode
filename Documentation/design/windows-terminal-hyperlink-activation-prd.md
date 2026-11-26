@@ -71,9 +71,9 @@ A rejected target does not launch a process or show a modal dialog over the term
 
 ## Windows Terminal Dependency Direction
 
-The approved dependency remains Microsoft Windows Terminal tag `v1.24.11911.0`, commit `5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc`, built for Windows x64 through the repository-owned process.
+The approved dependency is Microsoft Windows Terminal tag `v1.26.3133.0`, commit `c4e28e32c0c868474340eb4ae415096aab9026d7`, built for Windows x64 through the repository-owned process.
 
-Upstream investigation found that both the pinned release and the latest inspected `v1.25.1912.0` release contain hyperlink behavior in the full terminal control but do not expose it through `WpfTerminalControl` or its C ABI. An upstream version upgrade alone does not provide the required WPF behavior.
+Upstream investigation found that the pinned `v1.26.3133.0` release contains hyperlink behavior in the full terminal control but do not expose it through `WpfTerminalControl` or its C ABI. An upstream version upgrade alone does not provide the required WPF behavior.
 
 The approved approach is therefore a narrow, reproducible source patch applied during the existing pinned build:
 
@@ -122,7 +122,7 @@ Target-Windows evidence must cover the keyboard sequence and focus behavior. Nar
 
 ### Dependency and build
 
-- [ ] A clean checkout of Windows Terminal `v1.24.11911.0` at commit `5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc` accepts exactly the repository-owned hyperlink patch and builds the approved x64 WPF target.
+- [ ] A clean checkout of Windows Terminal `v1.26.3133.0` at commit `c4e28e32c0c868474340eb4ae415096aab9026d7` accepts exactly the repository-owned hyperlink patch and builds the approved x64 WPF target.
 - [ ] The dependency manifest records the patch identity and exact hashes/sizes of the resulting `Microsoft.Terminal.Wpf.dll` and `Microsoft.Terminal.Control.dll`.
 - [ ] Verification rejects a changed patch, unexpected source modification, mismatched binary pair, or unapproved asset.
 - [ ] Upstream `LICENSE` and `NOTICE.md` obligations remain satisfied.
