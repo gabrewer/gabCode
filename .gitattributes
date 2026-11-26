@@ -1,0 +1,2 @@
+# Preserve upstream hunk line endings and the pinned patch SHA-256.
+/eng/windows-terminal/patches/hyperlink-activation.patch -text whitespace=cr-at-eol,-blank-at-eol

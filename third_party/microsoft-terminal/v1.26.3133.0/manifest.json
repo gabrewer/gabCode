@@ -4,6 +4,7 @@
   "commit": "c4e28e32c0c868474340eb4ae415096aab9026d7",
   "license": "MIT",
   "configuration": "Release",
+  "patch": { "path": "eng/windows-terminal/patches/hyperlink-activation.patch", "sha256": "14BF7F6A5A4E6B6A0E5944AE8727731458CCF769934F74B9FA7F3BAD90A573A4" },
   "platform": "x64",
   "windowsSdk": "10.0.26100.0",
   "platformToolset": "v145",
