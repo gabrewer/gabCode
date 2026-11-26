@@ -79,29 +79,51 @@ final class GitWorktreeDiscoveryTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let marker = root.appendingPathComponent("started.pid")
         let executable = root.appendingPathComponent("repeated git")
-        try "#!/bin/sh\necho $$ > '\(marker.path)'\nexec /bin/sleep 5\n".write(to: executable, atomically: true, encoding: .utf8)
+        // Publish the PID atomically: existence alone does not mean the write finished.
+        try "#!/bin/sh\nprintf '%s\\n' \"$$\" > '\(marker.path).tmp'\n/bin/mv '\(marker.path).tmp' '\(marker.path)'\nexec /bin/sleep 30\n".write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
-        let baseline = try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count
-        for iteration in 0..<10 {
-            try? FileManager.default.removeItem(at: marker)
+
+        func pipeCount() throws -> Int {
+            // The app-hosted XCTest process also opens unrelated files and sockets.
+            try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").compactMap(Int32.init).filter { fd in
+                var info = stat()
+                return fstat(fd, &info) == 0 && (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFIFO)
+            }.count
+        }
+
+        func cancelOnce(_ iteration: Int) async throws {
+            if FileManager.default.fileExists(atPath: marker.path) { try FileManager.default.removeItem(at: marker) }
             let task = Task {
                 try await GitDiscoveryProcess(executable: executable, arguments: [], root: root)
-                    .run(budget: .seconds(2), accepted: [0])
+                    .run(budget: .seconds(5), accepted: [0])
             }
-            let pid = try await Task.detached(priority: .utility) { () throws -> Int32 in
-                let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+            let outcome: Result<Int32, Error>
+            do {
+                let deadline = ContinuousClock.now.advanced(by: .seconds(3))
                 while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < deadline {
                     try await Task.sleep(for: .milliseconds(10))
                 }
-                return try XCTUnwrap(Int32(String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
-            }.value
+                let text = try String(contentsOf: marker, encoding: .utf8)
+                outcome = .success(try XCTUnwrap(Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))))
+            } catch { outcome = .failure(error) }
             task.cancel()
-            _ = try? await task.value
-            if kill(pid, 0) == 0 { _ = kill(pid, SIGKILL) }
-            XCTAssertEqual(kill(pid, 0), -1, "Cycle \(iteration) left an owned leader")
+            do {
+                _ = try await task.value
+                XCTFail("Cycle \(iteration) returned output after cancellation")
+            } catch is CancellationError {
+                // Expected: cancellation returns only after the owned process is reaped.
+            }
+            let pid = try outcome.get()
+            let probe = kill(pid, 0)
+            let probeError = errno
+            XCTAssertEqual(probe, -1, "Cycle \(iteration) left an owned leader")
+            XCTAssertEqual(probeError, ESRCH)
         }
-        let after = try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count
-        XCTAssertLessThanOrEqual(after, baseline + 4, "Cancellation cannot accumulate pipe descriptors")
+
+        try await cancelOnce(0) // Warm the runtime before measuring repeated operations.
+        let baseline = try pipeCount()
+        for iteration in 1...10 { try await cancelOnce(iteration) }
+        XCTAssertLessThanOrEqual(try pipeCount(), baseline, "Cancellation cannot accumulate pipe descriptors")
     }
 
     func testSuccessfulLeaderCannotLeaveAnOwnedRedirectedChildRunning() async throws {

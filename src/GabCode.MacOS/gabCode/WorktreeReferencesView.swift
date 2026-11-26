@@ -73,22 +73,15 @@ struct WorktreeReferencesBar: View {
                     Button("Replace") { onReplaceIssue() }
                     Button("Remove", role: .destructive) { onRemoveIssue() }
                 } label: {
-                    referenceLabel(text: issue.displayIdentity, icon: "link", status: nil)
+                    Text(issue.displayIdentity)
                 }
-                .menuStyle(.borderlessButton)
-                .accessibilityLabel("GitHub issue reference")
-                .accessibilityValue(issue.displayIdentity)
             } else {
-                Menu {
+                Menu("GitHub issue reference") {
                     Button("Add issue…") { onAddIssue() }
-                } label: {
-                    referenceLabel(text: "GitHub issue", icon: "link", status: "Not assigned")
                 }
-                .menuStyle(.borderlessButton)
-                .accessibilityLabel("GitHub issue reference")
-                .accessibilityValue("Not assigned")
             }
         }
+        .menuStyle(.borderlessButton)
         .accessibilityIdentifier("issue-reference")
     }
 

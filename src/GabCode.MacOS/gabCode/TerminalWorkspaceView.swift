@@ -166,6 +166,7 @@ struct TerminalWorkspaceView: View {
                     .lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 8).padding(.top, 5)
+                    .accessibilityIdentifier("review-diff-title")
                 HStack(spacing: 6) {
                     Picker("Review mode", selection: $reviewMode) {
                         Text("Side by side").tag("side-by-side")
