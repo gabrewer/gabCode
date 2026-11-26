@@ -2,7 +2,7 @@
   "prompts": {
     "pm-agent": {
       "provider": "openai-codex",
-      "model": "gpt-6-astra",
+      "model": "gpt-6.2-astra",
       "thinking": "high"
     },
     "pull-request": {
@@ -12,7 +12,7 @@
     },
     "team-lead": {
       "provider": "openai-codex",
-      "model": "gpt-6.1-sol",
+      "model": "gpt-6.2-sol",
       "thinking": "high"
     },
     "build-preview-dmg": {
@@ -34,12 +34,12 @@
   "skills": {
     "brainstorm": {
       "provider": "openai-codex",
-      "model": "gpt-6-astra",
+      "model": "gpt-6.2-astra",
       "thinking": "high"
     },
     "inspire": {
       "provider": "openai-codex",
-      "model": "gpt-6-astra",
+      "model": "gpt-6.2-astra",
       "thinking": "high"
     },
     "product-designer": {
@@ -49,7 +49,7 @@
     },
     "pm": {
       "provider": "openai-codex",
-      "model": "gpt-6-astra",
+      "model": "gpt-6.2-astra",
       "thinking": "high"
     },
     "domain-modeler": {
@@ -79,12 +79,12 @@
     },
     "destroyer": {
       "provider": "openai-codex",
-      "model": "gpt-6.1-sol",
+      "model": "gpt-6.2-sol",
       "thinking": "high"
     },
     "review-agent": {
       "provider": "openai-codex",
-      "model": "gpt-6.1-sol",
+      "model": "gpt-6.2-sol",
       "thinking": "high"
     },
     "git-committer": {
