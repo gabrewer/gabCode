@@ -185,7 +185,7 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertTrue(terminalPath.waitForExistence(timeout: 8))
         let issueMenu = app.menuButtons["issue-reference"]
         XCTAssertTrue(issueMenu.waitForExistence(timeout: 5))
-        XCTAssertEqual(issueMenu.label, "GitHub issue reference")
+        XCTAssertEqual(issueMenu.title, "GitHub issue reference")
         issueMenu.click()
         XCTAssertTrue(app.menuItems["Add issue…"].waitForExistence(timeout: 3))
         app.menuItems["Add issue…"].click()
@@ -195,7 +195,7 @@ final class gabCodeUITests: XCTestCase {
         app.buttons["Add"].click()
 
         let canonicalIssue = expectation(
-            for: NSPredicate(format: "value == %@", "gabrewer/gabCode#92"),
+            for: NSPredicate(format: "title == %@", "gabrewer/gabCode#92"),
             evaluatedWith: issueMenu
         )
         XCTAssertEqual(XCTWaiter.wait(for: [canonicalIssue], timeout: 5), .completed)
@@ -285,20 +285,11 @@ final class gabCodeUITests: XCTestCase {
         try run(git, ["-C", secondary.path, "add", "history.txt"])
         try run(git, ["-C", secondary.path, "-c", "user.name=UI", "-c", "user.email=ui@example.invalid", "commit", "-m", "Review at minimum width"])
         app.launchArguments.append(fixture.descriptor.path)
+        app.launchEnvironment["GABCODE_UI_TEST_WINDOW_WIDTH"] = "default"
         app.launch()
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 12))
-        if window.frame.width <= 1_161 {
-            let growCorner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
-            growCorner.press(forDuration: 0.2, thenDragTo: growCorner.withOffset(CGVector(dx: 160, dy: 0)))
-        }
-        let initialWidth = window.frame.width
-        XCTAssertGreaterThan(initialWidth, 1_161, "Resize fixture must start wider than the native minimum")
-        checkControls()
-        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
-        corner.press(forDuration: 0.2, thenDragTo: corner.withOffset(CGVector(dx: -350, dy: 0)))
-        XCTAssertLessThan(window.frame.width, initialWidth, "Resize fixture must exercise native minimum sizing")
-        XCTAssertEqual(window.frame.width, 1_161, accuracy: 1, "Exercise the actual native minimum, not merely a wider passing size")
+        XCTAssertGreaterThan(window.frame.width, 1_161, "The initial fixture must be wider than the native minimum")
         func checkControls() {
             let bounds = app.windows.firstMatch.frame
             let secondaryRow = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "secondary")).firstMatch
@@ -311,17 +302,26 @@ final class gabCodeUITests: XCTestCase {
             XCTAssertTrue(refresh.waitForExistence(timeout: 12))
             XCTAssertLessThanOrEqual(refresh.frame.maxX, bounds.maxX, "Refresh must not clip past the window")
             XCTAssertTrue(refresh.isHittable, "Refresh must remain clickable")
-            refresh.click()
             let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch
-            XCTAssertTrue(commit.waitForExistence(timeout: 12))
+            XCTAssertTrue(commit.waitForExistence(timeout: 12), "Selected worktree history must load before requesting a refresh")
+            refresh.click()
+            XCTAssertTrue(commit.waitForExistence(timeout: 12), "History must remain reachable after refresh")
             XCTAssertLessThanOrEqual(commit.frame.maxX, bounds.maxX)
             XCTAssertTrue(commit.isHittable)
         }
         checkControls()
-        app.terminate()
+        app.typeKey("q", modifierFlags: .command)
+        let stop = app.sheets.buttons["Close and Stop Terminals"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.click()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 8))
+
+        // Exercise minimum-width layout independently of WindowServer edge gestures
+        // and system window restoration. The AppKit minimum is covered by unit tests.
+        app.launchEnvironment["GABCODE_UI_TEST_WINDOW_WIDTH"] = "minimum"
         app.launch()
-        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 12))
-        XCTAssertEqual(app.windows.firstMatch.frame.width, 1_161, accuracy: 1, "Reopen must exercise the persisted minimum-width window")
+        XCTAssertTrue(window.waitForExistence(timeout: 12))
+        XCTAssertEqual(window.frame.width, 1_161, accuracy: 1, "Reopen must exercise the actual native minimum")
         checkControls()
     }
 
@@ -462,9 +462,13 @@ final class gabCodeUITests: XCTestCase {
         branchFile.click()
         XCTAssertEqual(branchFile.value as? String, "Selected diff")
         XCTAssertTrue(app.descendants(matching: .any)["native-diff-viewer"].waitForExistence(timeout: 8))
-        let document = app.descendants(matching: .any)["review-diff-document"]
+        // Use the first visible header row rather than the synthetic AX group's frame.
+        let title = app.staticTexts["review-diff-title"]
+        XCTAssertTrue(title.exists)
         let viewer = app.descendants(matching: .any)["native-diff-viewer"]
-        XCTAssertLessThan(viewer.frame.minY - document.frame.minY, 75,
+        let headerHeight = viewer.frame.minY - title.frame.minY
+        XCTAssertGreaterThanOrEqual(headerHeight, title.frame.height)
+        XCTAssertLessThan(headerHeight, 75,
                           "The native header should leave most of the document height for Monaco")
         app.buttons["close-review-diff"].click()
         let commit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-commit-")).firstMatch

@@ -69,6 +69,17 @@ struct WindowMinimumSizeBridge: NSViewRepresentable {
             guard let window = view.window, coordinator.configuredWindow !== window else { return }
             coordinator.configuredWindow = window
             WorkspaceWindowLayout.applyMinimumSize(to: window)
+            #if DEBUG
+            let environment = ProcessInfo.processInfo.environment
+            if let suite = environment["GABCODE_UI_TEST_PREFERENCE_SUITE"], !suite.isEmpty,
+               let fixture = environment["GABCODE_UI_TEST_WINDOW_WIDTH"],
+               fixture == "default" || fixture == "minimum" {
+                // Use content size rather than a scene default, which restoration can override.
+                var size = window.contentRect(forFrameRect: window.frame).size
+                size.width = fixture == "minimum" ? window.contentMinSize.width : WorkspaceWindowLayout.defaultWidth
+                window.setContentSize(size)
+            }
+            #endif
         }
     }
 }
