@@ -15,7 +15,7 @@ From the gabCode repository root on Windows:
 pwsh -NoProfile -File eng/windows-terminal/Build-WpfControl.ps1 -Verify
 ```
 
-Verification checks the upstream tag/commit metadata, patch identity, asset layout, required notices and their integrity, and rejects extra files in the versioned asset directory. Runtime DLL hashes are not pinned.
+Verification checks the pinned upstream metadata, required notices, and runtime asset presence. Runtime DLL hashes and patch identity are not pinned.
 
 ## Regenerate from pinned source
 
