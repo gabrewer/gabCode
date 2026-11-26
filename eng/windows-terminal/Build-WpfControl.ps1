@@ -14,6 +14,7 @@ $repository = 'https://github.com/microsoft/terminal.git'
 $manifestUpstream = 'https://github.com/microsoft/terminal'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $assetRoot = Join-Path $repoRoot "third_party\microsoft-terminal\$tag"
+$patchPath = Join-Path $repoRoot 'eng\windows-terminal\patches\hyperlink-activation.patch'
 $expectedProvenanceFiles = @(
     [pscustomobject]@{
         File = 'LICENSE'
@@ -73,6 +74,8 @@ function Assert-AssetLayout {
         $manifest.commit -ne $commit -or
         $manifest.license -ne 'MIT' -or
         $manifest.configuration -ne 'Release' -or
+        $manifest.patch.path -ne 'eng/windows-terminal/patches/hyperlink-activation.patch' -or
+        $manifest.patch.sha256 -ne (Get-FileHash -LiteralPath $patchPath -Algorithm SHA256).Hash -or
         $manifest.platform -ne 'x64' -or
         $manifest.windowsSdk -ne '10.0.26100.0' -or
         $manifest.platformToolset -ne 'v145') {
@@ -169,6 +172,9 @@ try {
         throw 'Pinned checkout contains tracked modifications before the build.'
     }
 
+    Invoke-CheckedNative -FilePath 'git' -ArgumentList @('-C', $checkout, 'apply', '--check', $patchPath)
+    Invoke-CheckedNative -FilePath 'git' -ArgumentList @('-C', $checkout, 'apply', $patchPath)
+
     Push-Location $checkout
     try {
         Invoke-CheckedNative -FilePath 'dotnet' -ArgumentList @('restore', '.\src\cascadia\WpfTerminalControl\WpfTerminalControl.csproj', '-p:Platform=AnyCPU')
@@ -212,10 +218,6 @@ try {
     Copy-Item -LiteralPath (Join-Path $checkout 'NOTICE.md') -Destination (Join-Path $assetRoot 'NOTICE.md') -Force
     foreach ($expected in $expectedAssets) {
         Copy-Item -LiteralPath (Join-Path $outputRoot $expected.File) -Destination (Join-Path $assetRoot $expected.RelativePath) -Force
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace((& git -C $checkout status --short --untracked-files=no))) {
-        throw 'Pinned checkout contains tracked modifications after the build.'
     }
 
     Assert-AssetLayout

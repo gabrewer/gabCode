@@ -1,5 +1,5 @@
 diff --git a/src/cascadia/TerminalControl/HwndTerminal.cpp b/src/cascadia/TerminalControl/HwndTerminal.cpp
-index 59cadc9a5..d66413473 100644
+index 2b32d77..9e961f4 100644
 --- a/src/cascadia/TerminalControl/HwndTerminal.cpp
 +++ b/src/cascadia/TerminalControl/HwndTerminal.cpp
 @@ -127,6 +127,20 @@ try
@@ -43,7 +43,7 @@ index 59cadc9a5..d66413473 100644
              if (WI_IsFlagSet(wParam, MK_LBUTTON))
              {
                  LOG_IF_FAILED(publicTerminal->_MoveSelection(lParam));
-@@ -302,6 +329,7 @@ HRESULT HwndTerminal::Initialize()
+@@ -304,6 +331,7 @@ HRESULT HwndTerminal::Initialize()
      _renderEngine = std::move(engine);
  
      _terminal->Create({ 80, 25 }, 9001, *_renderer);
@@ -51,7 +51,7 @@ index 59cadc9a5..d66413473 100644
      _terminal->SetWriteInputCallback([=](std::wstring_view input) noexcept { _WriteTextToConnection(input); });
      _terminal->SetCopyToClipboardCallback([=](wil::zwstring_view text) noexcept { _CopyTextToSystemClipboard(text, {}, {}); });
      _renderer->EnablePainting();
-@@ -325,6 +353,7 @@ try
+@@ -327,6 +355,7 @@ try
      // These two callbacks have a dangling reference to `this`; let's just clear them
      _terminal->SetWriteInputCallback(nullptr);
      _terminal->SetCopyToClipboardCallback(nullptr);
@@ -59,7 +59,7 @@ index 59cadc9a5..d66413473 100644
  
      if (auto localHwnd{ _hwnd.release() })
      {
-@@ -360,6 +389,11 @@ void HwndTerminal::_WriteTextToConnection(const std::wstring_view input) noexcep
+@@ -362,6 +391,11 @@ void HwndTerminal::_WriteTextToConnection(const std::wstring_view input) noexcep
      CATCH_LOG();
  }
  
@@ -71,7 +71,7 @@ index 59cadc9a5..d66413473 100644
  void HwndTerminal::RegisterWriteCallback(const void _stdcall callback(wchar_t*))
  {
      _pfnWriteCallback = callback;
-@@ -487,6 +521,13 @@ try
+@@ -489,6 +523,13 @@ try
  }
  CATCH_LOG()
  
@@ -85,7 +85,7 @@ index 59cadc9a5..d66413473 100644
  void _stdcall TerminalRegisterWriteCallback(void* terminal, const void __stdcall callback(wchar_t*))
  try
  {
-@@ -868,6 +909,53 @@ try
+@@ -861,6 +902,53 @@ try
          _uiaProvider->RecordKeyEvent(vkey);
      }
  
@@ -139,7 +139,7 @@ index 59cadc9a5..d66413473 100644
      TerminalInput::OutputType out;
      {
          const auto lock = _terminal->LockForReading();
-@@ -888,6 +976,12 @@ try
+@@ -881,6 +969,12 @@ try
          return;
      }
  
@@ -153,7 +153,7 @@ index 59cadc9a5..d66413473 100644
      {
          const auto lock = _terminal->LockForWriting();
 diff --git a/src/cascadia/TerminalControl/HwndTerminal.hpp b/src/cascadia/TerminalControl/HwndTerminal.hpp
-index 90eddcb9d..e83abb0ef 100644
+index 68ffc73..8f8021f 100644
 --- a/src/cascadia/TerminalControl/HwndTerminal.hpp
 +++ b/src/cascadia/TerminalControl/HwndTerminal.hpp
 @@ -45,6 +45,7 @@ __declspec(dllexport) void _stdcall AvoidBuggyTSFConsoleFlags();
@@ -164,7 +164,7 @@ index 90eddcb9d..e83abb0ef 100644
  __declspec(dllexport) HRESULT _stdcall TerminalTriggerResize(_In_ void* terminal, _In_ til::CoordType width, _In_ til::CoordType height, _Out_ til::size* dimensions);
  __declspec(dllexport) HRESULT _stdcall TerminalTriggerResizeWithDimension(_In_ void* terminal, _In_ til::size dimensions, _Out_ til::size* dimensionsInPixels);
  __declspec(dllexport) HRESULT _stdcall TerminalCalculateResize(_In_ void* terminal, _In_ til::CoordType width, _In_ til::CoordType height, _Out_ til::size* dimensions);
-@@ -80,6 +81,7 @@ public:
+@@ -76,6 +77,7 @@ public:
      void SendOutput(std::wstring_view data);
      HRESULT Refresh(const til::size windowSize, _Out_ til::size* dimensions);
      void RegisterScrollCallback(std::function<void(int, int, int)> callback);
@@ -172,7 +172,7 @@ index 90eddcb9d..e83abb0ef 100644
      void RegisterWriteCallback(const void _stdcall callback(wchar_t*));
      ::Microsoft::Console::Render::IRenderData* GetRenderData() const noexcept;
      HWND GetHwnd() const noexcept;
-@@ -106,7 +108,10 @@ private:
+@@ -102,7 +104,10 @@ private:
      FontInfoDesired _desiredFont;
      FontInfo _actualFont;
      int _currentDpi;
@@ -184,22 +184,22 @@ index 90eddcb9d..e83abb0ef 100644
  
      std::unique_ptr<::Microsoft::Terminal::Core::Terminal> _terminal;
 diff --git a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
-index cc769cb56..466bc49bf 100644
+index 60ce76f..7a6b480 100644
 --- a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
 +++ b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
-@@ -15,6 +15,7 @@ EXPORTS
+@@ -12,6 +12,7 @@ EXPORTS
+   TerminalGetSelection
    TerminalIsSelectionActive
-   TerminalKillFocus
    TerminalRegisterScrollCallback
 +  TerminalRegisterHyperlinkCallback
    TerminalRegisterWriteCallback
    TerminalSendCharEvent
    TerminalSendKeyEvent
 diff --git a/src/cascadia/TerminalCore/Terminal.cpp b/src/cascadia/TerminalCore/Terminal.cpp
-index 95aa43a12..ebdc663da 100644
+index e105402..4c3af47 100644
 --- a/src/cascadia/TerminalCore/Terminal.cpp
 +++ b/src/cascadia/TerminalCore/Terminal.cpp
-@@ -1388,6 +1388,12 @@ TextBuffer& Terminal::_activeBuffer() const noexcept
+@@ -1339,6 +1339,12 @@ TextBuffer& Terminal::_activeBuffer() const noexcept
      return _inAltBuffer() ? *_altBuffer : *_mainBuffer;
  }
  
@@ -213,7 +213,7 @@ index 95aa43a12..ebdc663da 100644
  {
      if (_detectURLs)
 diff --git a/src/cascadia/TerminalCore/Terminal.hpp b/src/cascadia/TerminalCore/Terminal.hpp
-index b1c27ed3f..a31c2327b 100644
+index 8f4ca62..9e42ab8 100644
 --- a/src/cascadia/TerminalCore/Terminal.hpp
 +++ b/src/cascadia/TerminalCore/Terminal.hpp
 @@ -97,6 +97,7 @@ public:
@@ -225,7 +225,7 @@ index b1c27ed3f..a31c2327b 100644
      std::wstring_view GetWorkingDirectory() noexcept;
  
 diff --git a/src/cascadia/WpfTerminalControl/NativeMethods.cs b/src/cascadia/WpfTerminalControl/NativeMethods.cs
-index 96678f718..d847daf7c 100644
+index d5839ac..d2e1e4c 100644
 --- a/src/cascadia/WpfTerminalControl/NativeMethods.cs
 +++ b/src/cascadia/WpfTerminalControl/NativeMethods.cs
 @@ -19,6 +19,9 @@ namespace Microsoft.Terminal.Wpf
@@ -238,7 +238,7 @@ index 96678f718..d847daf7c 100644
          public enum WindowMessage : int
          {
              /// <summary>
-@@ -206,6 +209,9 @@ namespace Microsoft.Terminal.Wpf
+@@ -198,6 +201,9 @@ namespace Microsoft.Terminal.Wpf
          [DllImport("Microsoft.Terminal.Control.dll", CharSet = CharSet.Unicode, CallingConvention = CallingConvention.StdCall, PreserveSig = true)]
          public static extern void TerminalRegisterWriteCallback(IntPtr terminal, [MarshalAs(UnmanagedType.FunctionPtr)] WriteCallback callback);
  
@@ -249,18 +249,18 @@ index 96678f718..d847daf7c 100644
          public static extern void TerminalUserScroll(IntPtr terminal, int viewTop);
  
 diff --git a/src/cascadia/WpfTerminalControl/TerminalContainer.cs b/src/cascadia/WpfTerminalControl/TerminalContainer.cs
-index 348c006ca..4b1128278 100644
+index 13a458d..bb203d8 100644
 --- a/src/cascadia/WpfTerminalControl/TerminalContainer.cs
 +++ b/src/cascadia/WpfTerminalControl/TerminalContainer.cs
-@@ -27,6 +27,7 @@ namespace Microsoft.Terminal.Wpf
-         private DispatcherTimer blinkTimer;
+@@ -25,6 +25,7 @@ namespace Microsoft.Terminal.Wpf
+         private IntPtr terminal;
          private NativeMethods.ScrollCallback scrollCallback;
          private NativeMethods.WriteCallback writeCallback;
 +        private NativeMethods.HyperlinkCallback hyperlinkCallback;
  
          /// <summary>
          /// Initializes a new instance of the <see cref="TerminalContainer"/> class.
-@@ -70,6 +71,8 @@ namespace Microsoft.Terminal.Wpf
+@@ -51,6 +52,8 @@ namespace Microsoft.Terminal.Wpf
          /// </summary>
          internal event EventHandler<int> UserScrolled;
  
@@ -269,7 +269,7 @@ index 348c006ca..4b1128278 100644
          /// <summary>
          /// Gets or sets a value indicating whether if the renderer should automatically resize to fill the control
          /// on user action.
-@@ -309,9 +312,11 @@ namespace Microsoft.Terminal.Wpf
+@@ -290,9 +293,11 @@ namespace Microsoft.Terminal.Wpf
  
              this.scrollCallback = this.OnScroll;
              this.writeCallback = this.OnWrite;
@@ -281,7 +281,7 @@ index 348c006ca..4b1128278 100644
  
              // If the saved DPI scale isn't the default scale, we push it to the terminal.
              if (dpiScale.PixelsPerInchX != NativeMethods.USER_DEFAULT_SCREEN_DPI)
-@@ -463,6 +468,11 @@ namespace Microsoft.Terminal.Wpf
+@@ -428,6 +433,11 @@ namespace Microsoft.Terminal.Wpf
              this.TerminalScrolled?.Invoke(this, (viewTop, viewHeight, bufferSize));
          }
  
@@ -294,7 +294,7 @@ index 348c006ca..4b1128278 100644
          {
              this.Connection?.WriteInput(data);
 diff --git a/src/cascadia/WpfTerminalControl/TerminalControl.xaml.cs b/src/cascadia/WpfTerminalControl/TerminalControl.xaml.cs
-index 611cde52a..1f4fd8adb 100644
+index 611cde5..1f4fd8a 100644
 --- a/src/cascadia/WpfTerminalControl/TerminalControl.xaml.cs
 +++ b/src/cascadia/WpfTerminalControl/TerminalControl.xaml.cs
 @@ -58,6 +58,12 @@ namespace Microsoft.Terminal.Wpf
