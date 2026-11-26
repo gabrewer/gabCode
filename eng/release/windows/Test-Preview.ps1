@@ -271,12 +271,6 @@ $installedByVerification = $false
 $report = [ordered]@{}
 try {
     $preexistingProducts = @(Get-RelatedProducts $upgradeCode)
-    if ($preexistingProducts.Count -ne 0) {
-        throw "Refusing to replace an existing gabCode installation: $($preexistingProducts -join ', ')"
-    }
-    if (Test-Path -LiteralPath $installDirectory) {
-        throw "Refusing to remove an unregistered pre-existing install directory: $installDirectory"
-    }
 
     $propertyRows = @(Get-MsiRows $resolvedPackagePath 'SELECT `Property`, `Value` FROM `Property`' 2)
     $properties = @{}
