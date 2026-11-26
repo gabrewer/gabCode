@@ -15,14 +15,14 @@ No gabCode product code, tests, upstream source, generated package, or binary wa
 | Item | Evidence |
 | --- | --- |
 | Upstream | <https://github.com/microsoft/terminal> |
-| Tag | `v1.24.11911.0` |
-| Resolved commit | `5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc` |
-| Release | [Windows Terminal v1.24.11911.0](https://github.com/microsoft/terminal/releases/tag/v1.24.11911.0), published 2026-07-16; non-draft, non-prerelease |
+| Tag | `v1.26.3133.0` |
+| Resolved commit | `c4e28e32c0c868474340eb4ae415096aab9026d7` |
+| Release | [Windows Terminal v1.26.3133.0](https://github.com/microsoft/terminal/releases/tag/v1.26.3133.0); pinned preview release |
 | Primary license | MIT (`LICENSE`) |
 | Notice obligation | Ship the upstream `NOTICE.md` with any redistribution and review its third-party notices; it contains MIT, BSD-style, Apache-style, public-domain, CC-BY-SA test-spec, and other notices. |
 | Upgrade boundary | Any update is a new pinned tag/commit or patch revision and must repeat acquisition, clean build, output/dependency inventory, licensing, core runtime/input, hyperlink, and live-view movement checks. Accepted focus, search, and dedicated accessibility limitations remain non-blocking unless a later human decision changes requirements. No floating branch, unofficial NuGet package, or silent source retarget is approved. |
 
-The WPF wrapper build has `Microsoft.Terminal.Wpf` product version `0.1+5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc`; it is an unsigned local development output, not a signed Microsoft redistribution artifact.
+The WPF wrapper build has `Microsoft.Terminal.Wpf` product version `0.1+c4e28e32c0c868474340eb4ae415096aab9026d7`; it is an unsigned local development output, not a signed Microsoft redistribution artifact.
 
 ## Reproducible x64 Release build
 
@@ -52,8 +52,8 @@ Use a short external or ignored checkout path; the legacy bundled NuGet restore 
 
 ```powershell
 $checkout = 'X:\wtf-<short-random-suffix>'
-git clone --branch v1.24.11911.0 --depth 1 https://github.com/microsoft/terminal.git $checkout
-git -C $checkout rev-parse HEAD # must be 5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc
+git clone --branch v1.26.3133.0 --depth 1 https://github.com/microsoft/terminal.git $checkout
+git -C $checkout rev-parse HEAD # must be c4e28e32c0c868474340eb4ae415096aab9026d7
 Set-Location $checkout
 git submodule update --init --recursive
 
@@ -147,7 +147,6 @@ The human product owner approved this dependency after reviewing the gate eviden
 
 - no required keyboard-only focus escape from terminal content;
 - no terminal search;
-- no terminal hyperlink activation;
 - no dedicated Narrator, IME, high-contrast, text-scaling, or reduced-motion qualification of the upstream terminal content surface;
 - no expectation that the upstream wrapper automatically closes gabCode's connection or child processes.
 

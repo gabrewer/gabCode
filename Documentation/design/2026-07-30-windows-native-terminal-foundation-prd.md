@@ -51,7 +51,7 @@ The developer can swap which retained terminal occupies the main and lower regio
 ## Required Windows Technology Direction
 
 - **Host UI:** WPF with C# on the existing `net10.0-windows` application surface.
-- **Terminal engine/control:** a gabCode-pinned build of Microsoft Windows Terminal’s WPF control from upstream tag `v1.24.11911.0`.
+- **Terminal engine/control:** a gabCode-pinned build of Microsoft Windows Terminal’s WPF control from upstream tag `v1.26.3133.0`.
 - **PTY/process transport:** ConPTY.
 - **Windows SDK:** `10.0.22621.0`.
 - **Native toolchain:** supported Visual Studio C++/UWP tooling needed to reproduce the pinned terminal-control build.
@@ -145,7 +145,7 @@ No terminal output, commands, environment secrets, or Pi conversation data may b
 
 ### Dependency and build foundation
 
-- [ ] The exact Windows Terminal upstream tag is pinned to `v1.24.11911.0`, its license is recorded, and reproducible acquisition/build instructions exist in repository-owned documentation or build configuration.
+- [ ] The exact Windows Terminal upstream tag is pinned to `v1.26.3133.0`, its license is recorded, and reproducible acquisition/build instructions exist in repository-owned documentation or build configuration.
 - [ ] The implementation uses a gabCode-owned abstraction around the Windows Terminal WPF control and ConPTY lifecycle.
 - [ ] The existing Windows application and test projects continue to build and test with the repository-pinned .NET SDK.
 - [ ] No unofficial terminal-control package, browser runtime, web framework, HTTP service, database, or shared terminal abstraction is introduced.
@@ -199,10 +199,10 @@ macOS validation is **NOT CHECKED** for this Windows-specific increment.
 ## Decision Log
 
 - Use WPF and Windows Terminal’s WPF control rather than a browser-hosted terminal or a custom C# terminal renderer.
-- Pin Windows Terminal to `v1.24.11911.0` and target Windows SDK `10.0.22621.0` for this foundation.
+- Pin Windows Terminal to `v1.26.3133.0` and target Windows SDK `10.0.26100.0` for this foundation.
 - Treat both terminals as ordinary independent generic shells; gabCode does not assign either one a Pi, Commands, or other purpose.
 - Require process retention during terminal-view movement; restarting a terminal is not an acceptable substitute.
 - Require explicit user confirmation before stopping active terminal processes.
-- Approve Windows Terminal WPF tag `v1.24.11911.0` for Windows x64 integration with the limitations recorded in `Documentation/dependencies/windows-terminal-wpf.md`.
-- Do not require keyboard focus escape, terminal search, hyperlink activation, or dedicated accessibility-mode qualification of the upstream terminal content surface.
+- Approve Windows Terminal WPF tag `v1.26.3133.0` for Windows x64 integration with the limitations recorded in `Documentation/dependencies/windows-terminal-wpf.md`.
+- Do not require keyboard focus escape, terminal search, or dedicated accessibility-mode qualification of the upstream terminal content surface.
 - Treat `ITerminalConnection` and child-process lifetime as gabCode-owned responsibilities; the upstream wrapper is not required to call `Close()` automatically.
