@@ -361,6 +361,17 @@ public sealed class WorktreeChangeReviewBoundaryTests
     }
 
     [Fact]
+    public async Task Cancelled_machine_slot_wait_reports_cancellation_not_a_sharing_violation()
+    {
+        using var held = await WorktreeChangeReviewService.AcquireMachineSlotAsync(CancellationToken.None);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            using var unexpected = await WorktreeChangeReviewService.AcquireMachineSlotAsync(cancellation.Token);
+        });
+    }
+
+    [Fact]
     public async Task Discovery_rejects_oversized_output_before_a_hung_child_exits()
     {
         var repo = new Repo(); await repo.Initialize();

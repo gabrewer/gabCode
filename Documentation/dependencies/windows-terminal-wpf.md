@@ -1,5 +1,7 @@
 # Windows Terminal WPF dependency gate
 
+> **Preview upgrade in progress (sprint #134):** The application now references unmodified Windows Terminal Preview `v1.26.3133.0`, commit `c4e28e32c0c868474340eb4ae415096aab9026d7`. The original 1.24 gate evidence below is historical and does not establish 1.26 runtime, accessibility, input, packaging, or lifecycle behavior. Hyperlink activation remains unavailable through the WPF wrapper. Requalification is pending.
+
 ## Verdict: **GO — approved for Windows x64 integration with accepted limitations**
 
 The exact Microsoft Windows Terminal WPF control source can be acquired and built on the target Windows machine, and its host renders and retains a live terminal HWND. The dependency is approved for gabCode's Windows terminal foundation.

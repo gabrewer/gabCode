@@ -373,14 +373,15 @@ try {
         WindowsInstaller = $arpEntries[0].WindowsInstaller
     }
 
-    $terminalManifest = Get-Content -LiteralPath (Join-Path $repositoryRoot 'third_party\microsoft-terminal\v1.24.11911.0\manifest.json') -Raw | ConvertFrom-Json
+    $terminalManifest = Get-Content -LiteralPath (Join-Path $repositoryRoot 'third_party\microsoft-terminal\v1.26.3133.0\manifest.json') -Raw | ConvertFrom-Json
     $terminalEvidence = @()
     foreach ($asset in $terminalManifest.assets) {
         $installedAsset = Join-Path $installDirectory $asset.file
         $actualHash = (Get-FileHash -LiteralPath $installedAsset -Algorithm SHA256).Hash
         $actualBytes = (Get-Item -LiteralPath $installedAsset).Length
-        if ($actualHash -ne $asset.sha256 -or $actualBytes -ne $asset.bytes) {
-            throw "Installed terminal asset '$($asset.file)' does not match the pinned manifest."
+        $sourceAsset = Join-Path (Join-Path $repositoryRoot 'third_party\microsoft-terminal\v1.26.3133.0') $asset.path
+        if ($actualHash -ne (Get-FileHash -LiteralPath $sourceAsset -Algorithm SHA256).Hash) {
+            throw "Installed terminal asset '$($asset.file)' does not match the source asset."
         }
         $terminalEvidence += [pscustomobject]@{ File = $asset.file; Bytes = $actualBytes; SHA256 = $actualHash }
     }

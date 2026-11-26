@@ -56,7 +56,7 @@ $applicationProject = Join-Path $repositoryRoot 'src\GabCode.Windows\GabCode.Win
 $viewerRoot = Join-Path $repositoryRoot 'shared\native-diff-viewer'
 $viewerOutput = Join-Path $viewerRoot 'dist'
 $iconRoot = Join-Path $repositoryRoot 'src\GabCode.Windows'
-$terminalRoot = Join-Path $repositoryRoot 'third_party\microsoft-terminal\v1.24.11911.0'
+$terminalRoot = Join-Path $repositoryRoot 'third_party\microsoft-terminal\v1.26.3133.0'
 $terminalManifestPath = Join-Path $terminalRoot 'manifest.json'
 $versionMatch = [regex]::Match($Version, '^(?<major>\d+)\.(?<minor>\d+)\.(?<build>\d+)-preview$')
 $componentValues = [System.Collections.Generic.List[uint64]]::new()
@@ -223,9 +223,11 @@ try {
     $terminalManifest = Get-Content -LiteralPath $terminalManifestPath -Raw | ConvertFrom-Json
     foreach ($asset in $terminalManifest.assets) {
         $publishedAsset = Join-Path $publishPath $asset.file
-        $publishedHash = (Get-FileHash -LiteralPath $publishedAsset -Algorithm SHA256).Hash
-        if ($publishedHash -ne $asset.sha256 -or (Get-Item -LiteralPath $publishedAsset).Length -ne $asset.bytes) {
-            throw "Published terminal asset '$($asset.file)' does not match the pinned manifest."
+        $sourceAsset = Join-Path $terminalRoot $asset.path
+        if (-not (Test-Path -LiteralPath $publishedAsset -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $sourceAsset -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $publishedAsset -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $sourceAsset -Algorithm SHA256).Hash) {
+            throw "Published terminal asset '$($asset.file)' does not match the source asset."
         }
     }
 

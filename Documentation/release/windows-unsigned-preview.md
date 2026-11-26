@@ -79,7 +79,7 @@ The installed payload contains:
 - `licenses\microsoft-terminal\NOTICE.md` — Microsoft Terminal third-party notices;
 - `NativeDiffViewer\MONACO-LICENSE.txt` and `NativeDiffViewer\MONACO-THIRD-PARTY-NOTICES.txt` — the bundled pinned Monaco 0.57.0 viewer's license and upstream notices, alongside its HTML, stylesheet, JavaScript, workers and `manifest.json` asset hashes.
 
-The approved Terminal DLLs come from tag `v1.24.11911.0`; installed hashes must match `third_party/microsoft-terminal/v1.24.11911.0/manifest.json`.
+The Terminal DLLs are built from preview tag `v1.26.3133.0`; installation verification compares them with the locally built assets. Preview upgrade validation is tracked in issue #134.
 
 ## Prepare a release input
 

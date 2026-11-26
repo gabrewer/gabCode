@@ -680,8 +680,11 @@ internal sealed class WorktreeChangeReviewService
         {
             token.ThrowIfCancellationRequested();
             try { return new FileStream(MachineSlotPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-            catch (IOException) when (!token.IsCancellationRequested)
-            { await Task.Delay(50, token).ConfigureAwait(false); }
+            catch (IOException)
+            {
+                token.ThrowIfCancellationRequested();
+                await Task.Delay(50, token).ConfigureAwait(false);
+            }
         }
     }
 
