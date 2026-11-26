@@ -67,7 +67,7 @@ Generate the two primary Pi prompts described by the orchestration documents:
 | Prompt | gabCode specialization |
 | --- | --- |
 | `/pm-agent` | Reads the initial PRD and this profile, identifies the target workstream/platform, and creates a buildable plan using the repository-configured `github-issues` state backend |
-| `/team-lead` | Executes an approved plan using the canonical quality gates and loads only the worker skills relevant to its workstream |
+| `/team-lead` | Its invocation approves and executes the identified plan using the canonical quality gates; it loads only the worker skills relevant to its workstream and does not request a second approval confirmation |
 
 Do not create separate user-facing prompts for testing, building, destroying, reviewing, or committing. Those are internal worker phases. Add an optional utility prompt only after its distinct purpose is reviewed.
 

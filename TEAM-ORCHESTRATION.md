@@ -2,7 +2,7 @@
 
 This project uses a team of specialized AI roles as a structured planning and build workflow. The active AI session is the coordinator: it loads or delegates to the appropriate worker instructions, enforces quality gates, and records progress in the configured GitHub Issues backend.
 
-> **Trigger phrase**: Say "execute the plan" (or similar) to start the tool's team-lead workflow.
+> **Trigger phrase**: Say "execute the plan" (or similar) to start the tool's team-lead workflow. Explicitly invoking `team-lead` for a sprint constitutes human approval of that sprint record and starts execution; never require a separate approval comment, status, label, or confirmation first.
 
 > **AI Tool Setup**: Agent definition format, directory paths, model names, and delegation capabilities vary by AI tool. See the relevant `TOOL-*.md` file in this `instructions/` directory for your tool's specific configuration.
 
@@ -443,7 +443,7 @@ PLANNING LOOP (interactive, daytime):
   product-designer → pm → questions? → human answers → re-run
   Output: GitHub epic/task issues + optional docs/sprints/<sprint>.json machine plan when it is a durable deliverable
 
-  ↓ human reviews plans ↓
+  ↓ human invokes team-lead, approving the recorded plan ↓
 
 BUILD LOOP (autonomous, overnight):
   [per sprint]: domain-model → api-contract → [per task]: test → build → build-gate → destroy → review → commit → smoke-test → pm summary
@@ -477,7 +477,7 @@ Each step is either **agentic** (the Team Lead performs it under a worker role o
 Enter through the active AI tool's `team-lead` prompt or agent. The Team Lead:
 
 1. Reads the approved GitHub sprint issue.
-2. Builds a dependency graph and proposes the execution order for human approval when required.
+2. Builds a dependency graph and begins the recorded execution order without a second approval prompt. It asks only when the record is materially ambiguous or a later canonical safety boundary requires a human decision.
 3. Executes sprints in sequence and may delegate independent tasks concurrently only when the tool supports safe isolation.
 4. Runs `domain-modeler` → `api-developer` → the per-task pipeline for each sprint.
 5. Runs `test-writer` → builder → build gate → `destroyer` → `review-agent` (up to 6 attempts) → `git-committer` for each task.
@@ -493,7 +493,7 @@ The tool adapter may implement a role as a native subagent, a loaded skill, or a
 
 This phase is **interactive** — the user and the AI work together. Use the `/brainstorming` skill.
 
-Once the user approves the plan, the skill runs a **preflight check** before creating any artifacts:
+Once the plan has converged, the skill runs a **preflight check** before creating its planning artifacts:
 
 - A local git repo exists — if not, offer to `git init`
 - The current branch is not `main` or `master` — if it is, create the feature branch now (the name is known at this point)
@@ -511,9 +511,9 @@ Once the user approves the plan, the skill runs a **preflight check** before cre
    - Web app: `dotnet build` exits 0, frontend `bun run build` exits 0, Playwright snapshot confirms a key element is present on the page
    - API: curl returning expected status code and response shape
 
-### After approval
+### After planning converges
 
-Once the user approves the plan:
+Once the plan is ready to record:
 
 - Create a **feature branch** locally
 - Confirm the repository-configured **state backend** is recorded as `github-issues`; if an existing record declares another backend, stop and ask the user to resolve the conflict.
@@ -534,7 +534,7 @@ Once the user approves the plan:
 
 ## Phase 2: Team-Lead Execution
 
-This phase starts when the user says "execute the plan" or invokes the tool's team-lead entry point. The active AI session reads the approved plan, coordinates the worker roles, runs deterministic gates, and records progress.
+This phase starts when the user says "execute the plan" or invokes the tool's team-lead entry point. That invocation is the human approval of the identified sprint record. The active AI session must begin execution without requesting a second approval marker or confirmation, then coordinate worker roles, run deterministic gates, and record progress. It may still stop for a missing or materially ambiguous record or another canonical safety boundary.
 
 ### Real-time status updates
 

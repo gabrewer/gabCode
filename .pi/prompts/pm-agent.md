@@ -50,4 +50,4 @@ Only raise review items that materially affect the implementation.
 - Create one GitHub sprint/control issue per PRD by default. For a genuinely cross-platform PRD, make it the parent control sprint and create linked Windows and macOS implementation sprints; the parent owns combined acceptance/parity and each child owns only its platform implementation/evidence. Do not create empty triads for platform-only, documentation-only, or insufficiently shaped work. Record every split's reason/link and apply canonical review-size checkpoints.
 - Do not create implementation artifacts or begin `/team-lead` execution.
 
-Finish by showing the authoritative sprint record, unresolved questions, dependencies, verification expectations, and the exact decision needed from the user before execution.
+Finish by showing the authoritative sprint record, unresolved questions, dependencies, verification expectations, and the exact `/team-lead <sprint>` invocation that will both approve and start execution. Do not request a separate approval message, status change, or confirmation before that invocation.
