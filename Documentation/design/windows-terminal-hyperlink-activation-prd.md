@@ -29,15 +29,13 @@ The terminal recognizes:
 - OSC 8 hyperlinks whose targets pass the activation policy below;
 - plain `http://` and `https://` URLs;
 - `file://` URIs for existing local filesystem targets;
-- existing absolute Windows paths;
-- existing paths relative to the terminal's launch directory;
-- optional `:line` or `:line:column` suffixes on local file references.
+- optional `:line` or `:line:column` suffixes on OSC 8 local-file targets.
 
 For this increment, a relative path is resolved against the directory in which that terminal session was launched. If the shell or a child process later changes directory, gabCode does not track that live directory. Cross-platform current-working-directory tracking is separate future work.
 
 When opening through a Windows-associated application, gabCode removes a recognized line/column suffix. Passing line and column to a configured editor is deferred.
 
-Plain local-path detection must be limited to unambiguous rendered path forms and must not cause broad parsing, persistence, logging, or interpretation of terminal output. OSC 8 remains the reliable mechanism for paths containing ambiguous separators or display text.
+Plain-text local paths are not hyperlink targets in this increment. gabCode does not parse arbitrary terminal output to infer filesystem references. CLI tools should emit OSC 8 metadata when they need a local file link.
 
 ### Pointer interaction
 
@@ -63,7 +61,7 @@ Only these target classes may launch:
 
 - `http` and `https` URLs through the user's default browser;
 - `file://` URIs that resolve to an existing local filesystem target;
-- existing absolute or launch-directory-relative local filesystem targets through their Windows-associated application.
+- OSC 8 local-file targets through their Windows-associated application.
 
 The client must normalize and validate the complete target before invoking Windows shell association. It must reject malformed targets, nonexistent local targets, unsupported URI schemes, executable command text, and ambiguous targets that cannot be classified safely. In particular, OSC 8 targets such as `ftp:`, `mailto:`, `shell:`, `javascript:`, custom application schemes, and command lines must not be passed to Windows shell activation.
 
@@ -110,6 +108,7 @@ Target-Windows evidence must cover the keyboard sequence and focus behavior. Nar
 
 - macOS implementation or requalification;
 - live shell current-working-directory tracking;
+- plain-text local-path detection;
 - configurable editor selection or line/column-aware editor launch;
 - arbitrary URI scheme activation;
 - remote, WSL, SSH, or container path translation;
@@ -131,8 +130,8 @@ Target-Windows evidence must cover the keyboard sequence and focus behavior. Nar
 
 - [ ] A target-Windows terminal renders and activates an OSC 8 `https` link with `Ctrl+Click`.
 - [ ] A plain detected `http` or `https` URL can be activated.
-- [ ] A supported OSC 8 or detected local reference resolves an existing absolute, `file://`, or launch-directory-relative target.
-- [ ] Optional `:line` and `:line:column` suffixes are removed before associated-application launch.
+- [ ] A supported OSC 8 `file://` or launch-directory-relative target resolves an existing local filesystem target.
+- [ ] Optional `:line` and `:line:column` suffixes on OSC 8 local-file targets are removed before associated-application launch.
 - [ ] Hover provides native link affordance, while ordinary click preserves terminal selection/input behavior.
 - [ ] `Ctrl+Shift+M`, `Tab`/`Shift+Tab`, `Ctrl+Enter`, and `Esc` provide keyboard hyperlink navigation and activation without changing ordinary input outside Mark Mode.
 - [ ] Both retained terminal controls preserve hyperlink behavior after exchanging main and lower regions.
@@ -155,7 +154,7 @@ Target-Windows evidence must cover the keyboard sequence and focus behavior. Nar
 
 ## Risks and Deferred Decisions
 
-- Plain local paths are syntactically ambiguous in terminal text. Detection must remain conservative; CLI harnesses should use OSC 8 when the display form cannot be classified safely.
+- Plain-text local paths are intentionally unsupported because terminal text is syntactically ambiguous; CLI harnesses should use OSC 8 for reliable local-file activation.
 - The patch touches a native/managed callback boundary and terminal input handling. Teardown races and unintended key interception require target-Windows adversarial evidence.
 - The patch becomes part of the Windows Terminal dependency maintenance burden and must be rebased and requalified for every future upstream pin.
 - Live working-directory tracking and editor-aware line/column launch should be designed as later cross-platform behavior rather than hidden in this Windows-only increment.
@@ -163,7 +162,7 @@ Target-Windows evidence must cover the keyboard sequence and focus behavior. Nar
 ## Decision Log
 
 - 2026-08-02 — Make terminal hyperlinks required on Windows because agentic CLI harnesses use them as an ordinary navigation surface.
-- 2026-08-02 — Support OSC 8, web URLs, existing absolute/relative/file-URI targets, and optional line/column suffixes.
+- 2026-08-02 — Support OSC 8, web URLs, OSC 8 local-file targets, and optional line/column suffixes; plain-text local paths are out of scope.
 - 2026-08-02 — Resolve relative paths against the terminal launch directory; defer live current-directory tracking.
 - 2026-08-02 — Permit only `http`, `https`, and existing local filesystem targets; reject every other scheme.
 - 2026-08-02 — Use `Ctrl+Click` and Windows Terminal's Mark Mode keyboard sequence.
