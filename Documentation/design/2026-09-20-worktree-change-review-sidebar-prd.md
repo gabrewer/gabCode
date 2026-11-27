@@ -9,7 +9,7 @@
 
 ## Product Name & One-Liner
 
-**gabCode Worktree Change Review Sidebar** — a right-side, read-only review surface that shows the selected worktree's uncommitted changes and branch-unique commits, down to each changed file and its diff.
+**gabCode Worktree Change Review Sidebar** — a right-side review surface with read-only diffs that shows the selected worktree's uncommitted changes and branch-unique commits, down to each changed file and its diff.
 
 ## Problem & Audience
 
@@ -21,7 +21,7 @@ The initial audience is the individual gabCode developer who uses Git worktrees 
 
 ### 1. Selected-worktree review sidebar — Must-have
 
-gabCode provides a fixed, read-only sidebar on the right for the currently selected worktree. It is distinct from the worktree-navigation sidebar on the left and from the main content area between them. It is a focused review surface, replacing its contents when the selected worktree changes; it does not present a combined repository-wide history.
+gabCode provides a fixed review sidebar on the right for the currently selected worktree. Diffs and history remain read-only; narrowly scoped working-change context actions are specified in `Documentation/design/2026-11-27-git-sidebar-actions-prd.md`. It is distinct from the worktree-navigation sidebar on the left and from the main content area between them. It is a focused review surface, replacing its contents when the selected worktree changes; it does not present a combined repository-wide history.
 
 The sidebar contains, in order:
 
@@ -34,7 +34,7 @@ An empty section communicates its empty state explicitly. The sidebar is keyboar
 
 **Working changes** expands to separate **Staged** and **Unstaged** flat file lists. Staged contains index changes; Unstaged contains tracked worktree changes and untracked files. Each list shows a compact, one-character status badge followed by the repository-relative path. Use **U** for untracked, **A** for Git-added, **M** for modified, **D** for deleted, and **R** for renamed. A conflict uses a distinct, clearly distinguishable marker (for example **!**) and an accessible name that says “Conflicted”; it must not be conveyed by color alone. Do not abbreviate untracked as A: untracked and staged-added are distinct Git states. A file with both index and worktree changes appears in both relevant lists, with the status for that specific group. Ignored files are not shown.
 
-Renamed files show their old and new paths. The visible row does not repeat the status word (for example “Added” or “Modified”) in the comparison/detail text; show the concise comparison basis only when it adds distinct information. The badge's native accessible name/value exposes the full status word and group (for example “Untracked, Unstaged” or “Added, Staged”), and tooltip/help text may provide the same detail without consuming permanent row width. Selecting a staged file opens its index-to-`HEAD` diff; selecting an unstaged tracked file opens its worktree-to-index diff; selecting an untracked file compares its working content to an empty file. Added and deleted files remain readable as one-sided diffs where Git supports them. A conflicted file is visibly identified and opens a read-only conflict-state presentation rather than being silently represented as an ordinary diff. No action in this surface stages, unstages, discards, resolves, or otherwise changes Git state.
+Renamed files show their old and new paths. The visible row does not repeat the status word (for example “Added” or “Modified”) in the comparison/detail text; show the concise comparison basis only when it adds distinct information. The badge's native accessible name/value exposes the full status word and group (for example “Untracked, Unstaged” or “Added, Staged”), and tooltip/help text may provide the same detail without consuming permanent row width. Selecting a staged file opens its index-to-`HEAD` diff; selecting an unstaged tracked file opens its worktree-to-index diff; selecting an untracked file compares its working content to an empty file. Added and deleted files remain readable as one-sided diffs where Git supports them. A conflicted file is visibly identified and opens a read-only conflict-state presentation rather than being silently represented as an ordinary diff. The later `Documentation/design/2026-11-27-git-sidebar-actions-prd.md` adds narrowly scoped, explicitly invoked working-change actions; conflict resolution and general editing remain out of scope.
 
 ### 3. Branch-unique commit review — Must-have
 
@@ -83,13 +83,13 @@ This increment will not:
 - Show commits inherited from the configured main branch as branch work.
 - Infer whether a particular change was made by an LLM, Pi, a terminal command, an IDE, or a person.
 - Inspect, manage, start, resume, or interpret CLI coding-tool sessions or terminal content.
-- Stage, unstage, discard, commit, amend, rebase, merge, push, pull, or otherwise mutate Git history or working state.
+- Commit, amend, rebase, merge, push, pull, resolve conflicts, or otherwise mutate Git history. The later Git sidebar actions PRD defines the only permitted explicit index and working-state operations.
 - Replace gabCode's existing main-area diff experience, file explorer, terminal behavior, or worktree-navigation model.
 - Introduce a shared client/core runtime, companion service, internal protocol, database, or web application.
 
 ## Technical Considerations
 
-- Git and the filesystem remain authoritative. Each client invokes installed Git with structured, read-only output; it must not parse the human-oriented layout emitted by `git log --graph`.
+- Git and the filesystem remain authoritative. Each client invokes installed Git with structured output for review queries; it must not parse the human-oriented layout emitted by `git log --graph`.
 - Resolve branch-unique commits using the selected `HEAD` and the workspace's configured local `project.mainBranch`, excluding commits reachable from that main branch. If either reference is unavailable, preserve prior data only as stale presentation and state the recovery failure visibly.
 - Use porcelain status data capable of distinguishing index and worktree changes, including rename paths. Compute staged and unstaged diffs from the corresponding Git comparison, and commit-file diffs from the selected commit.
 - Treat watcher events for the selected worktree's Git metadata and the repository's shared references as hints, coalesce them, cancel superseded refreshes, and apply a completed result only if it still belongs to the selected worktree and current refresh generation. Reconciliation on selection/focus, bounded periodic reconciliation, and explicit refresh are required safety nets for missed or coalesced filesystem events.
@@ -97,7 +97,7 @@ This increment will not:
 - **Windows:** C#/WPF owns Git process execution, watcher/reconciliation, cancellation, UI-thread application, sidebar controls, native keyboard behavior, and UI Automation accessibility.
 - **macOS:** Swift/SwiftUI/AppKit owns the equivalent process execution, filesystem observation, async coordination, UI update, native controls, keyboard behavior, and accessibility.
 - Cross-platform artifacts may describe fixtures and expected outcomes, but production implementation remains independent native code.
-- The Windows presentation is the reference for compact commit-tree information hierarchy, not a mandate to replace native macOS controls with WPF-like controls. Retain each platform's existing reviewed visual refinements unless they conflict with this shared hierarchy. Keep the clipboard action explicit and scoped to copying the selected commit SHA; do not add Git or terminal mutations.
+- The Windows presentation is the reference for compact commit-tree information hierarchy, not a mandate to replace native macOS controls with WPF-like controls. Retain each platform's existing reviewed visual refinements unless they conflict with this shared hierarchy. Keep the clipboard action explicit and scoped to copying the selected commit SHA. Git mutations are limited to the explicitly requested actions in the later Git sidebar actions PRD; terminal mutations remain out of scope.
 
 ## Milestones
 
