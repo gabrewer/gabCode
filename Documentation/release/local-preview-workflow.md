@@ -45,7 +45,7 @@ A platform build is eligible for release evidence only when all of the following
 4. The required target-platform tools and reviewed package scripts are available.
 5. The requested version satisfies the contract above.
 
-Each preparation command records the full lowercase 40-character source commit that it actually built. The release helper validates each evidence commit's format and reports both commits, but does not require the Windows and macOS builds to use the same commit or compare either commit with current `HEAD`. Publication still requires clean `HEAD == origin/main`; the release tag targets that reviewed mainline commit. Artifact identity, evidence status, byte lengths, and hashes remain mandatory.
+Each preparation command records the full lowercase 40-character source commit that it actually built. The release helper validates each evidence commit's format and reports both commits, but does not require the Windows and macOS builds to use the same commit or require a clean/current-main checkout. The release tag targets the Windows artifact's recorded source commit; the macOS source commit remains independently recorded. Artifact identity, evidence status, byte lengths, and hashes remain mandatory.
 
 ## Prepare the DMG on macOS
 
@@ -127,10 +127,9 @@ The helper verifies, in order:
 2. four regular inputs and no unknown entries;
 3. schema version, platform, version, source commit, and completed `PASS` evidence;
 4. recomputed artifact byte lengths and SHA-256 values;
-5. clean `HEAD == origin/main` for the release target; platform artifact source commits are recorded independently and need not match;
-6. clean tracked source with `HEAD` and current `origin/main` at that commit;
-7. Node, Git, `gh`, GitHub authentication, and repository identity;
-8. no existing tag or GitHub release for the requested version.
+5. Windows evidence source commit as the release target; the macOS source commit is recorded independently and need not match;
+6. Node, Git, `gh`, GitHub authentication, and repository identity;
+7. no existing tag or GitHub release for the requested version.
 
 Every failed preflight is non-mutating. The publisher creates no GitHub control issue; the GitHub release and tag are the publication record.
 
@@ -149,7 +148,7 @@ If matching generated files already exist, regeneration must be byte-identical. 
 
 Public mutation requires a human response naming the exact version requested by the prompt. A generic yes, a different version, empty input, or declined confirmation does not publish. Declining leaves the matching prepared files and open issue resumable.
 
-Immediately before publication, the helper repeats input, Git, tag, and release conflict checks. It then creates a GitHub prerelease targeting the recorded commit, uses the generated `release-notes.md` as its public description, and uploads exactly:
+Immediately before publication, the helper repeats input and release conflict checks; it does not require or inspect a clean Git checkout. It creates a GitHub prerelease targeting the Windows evidence source commit, uses the generated `release-notes.md` as its public description, and uploads exactly:
 
 1. the Windows MSI;
 2. the macOS DMG;

@@ -9,7 +9,7 @@ You are gabCode's explicit `/release-preview <version>` publication operator for
 - Accept exactly one `x.y.z-preview` version. Work from the repository root on Windows or macOS only.
 - This is publish-only: never invoke Xcode, `dotnet`, WiX, `Prepare-Preview.ps1`, `prepare-preview.sh`, or either platform build/test script.
 - Do not edit source, tests, installer inputs, Git state, or evidence. Do not push, transfer artifacts, close issues, store credentials, or create a tag manually. This command does not create or update GitHub issues.
-- Require all four prepared inputs under `artifacts/v$1/`. The helper is authoritative for input, Git, tool, `gh` authentication, and conflict preflight; do not weaken or bypass any rejection. Platform evidence records each build's source commit independently; the two commits need not match. The release tag still targets clean `HEAD == origin/main`.
+- Require all four prepared inputs under `artifacts/v$1/`. The helper validates the prepared inputs, `gh` authentication, repository identity, and release conflicts. It does not require a clean checkout or current `origin/main`; the release tag targets the Windows evidence source commit. Platform evidence records each build's source commit independently; the two commits need not match.
 
 First run only the non-public stages:
 

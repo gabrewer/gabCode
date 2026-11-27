@@ -94,14 +94,14 @@ test("preflight rejects partial, extra, and tampered inputs before any gh mutati
   await assert.rejects(() => preflight({ version, artifactsRoot, repositoryRoot: root, execute: fakeTools().execute }), /unknown|unexpected/i);
 });
 
-test("preflight recomputes evidence facts and requires clean current origin/main", async (t) => {
-  const { root, artifactsRoot, directory } = await fixture();
+test("preflight accepts prepared inputs without requiring a clean current-main checkout", async (t) => {
+  const { root, artifactsRoot } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
-  await writeFile(join(directory, `gabCode-${version}-windows-x64.msi`), "tampered");
   const { preflight } = await load();
   const tools = fakeTools();
-  await assert.rejects(() => preflight({ version, artifactsRoot, repositoryRoot: root, execute: tools.execute }), /sha256|hash|bytes/i);
-  assert.equal(tools.calls.some(([command]) => command === "gh"), false);
+  const facts = await preflight({ version, artifactsRoot, repositoryRoot: root, execute: tools.execute });
+  assert.equal(facts.sourceCommit, facts.windows.sourceCommit);
+  assert.equal(tools.calls.some(([command, action]) => command === "git" && ["fetch", "status", "rev-parse"].includes(action)), false);
 });
 
 test.skip("legacy control-issue workflow removed: valid preflight creates no issue, rerun resumes it, and closed or ambiguous issue state rejects", async (t) => {
@@ -280,20 +280,24 @@ test("publish rejects evidence whose recorded source commit changes after prefli
   assert.equal(tools.calls.some((call) => call[0] === "gh" && call[1] === "release" && call[2] === "create"), false, "changed evidence must block release creation");
 });
 
-test("publish repeats clean-source and control-issue checks before release creation", async (t) => {
+test("publish does not require a clean source checkout", async (t) => {
   const { root, artifactsRoot } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const { preflight, prepare, publish } = await load();
   const base = fakeTools();
   const facts = await preflight({ version, artifactsRoot, repositoryRoot: root, execute: base.execute });
   await prepare({ facts, repositoryRoot: root, execute: base.execute });
+  const checkoutChecks = [];
   const dirtyExecute = async (command, args, options) => {
-    if (command === "git" && args[0] === "status") return { stdout: " M changed-after-prepare\n", stderr: "", code: 0 };
+    if (command === "git" && ["fetch", "status", "rev-parse"].includes(args[0])) {
+      checkoutChecks.push(args[0]);
+      return { stdout: " M changed-after-prepare\\n", stderr: "", code: 0 };
+    }
     return base.execute(command, args, options);
   };
-  await assert.rejects(() => publish({ facts, repositoryRoot: root, execute: dirtyExecute, confirmation: version }), /clean|working tree/i);
-  assert.equal(base.calls.some((call) => call[0] === "gh" && call[1] === "release" && call[2] === "create"), false);
-
+  await assert.rejects(() => publish({ facts, repositoryRoot: root, execute: dirtyExecute, confirmation: version }));
+  assert.deepEqual(checkoutChecks, []);
+  assert.equal(base.calls.some((call) => call[0] === "gh" && call[1] === "release" && call[2] === "create"), true, "publication must reach GitHub without a checkout cleanliness gate");
 });
 
 test("publish requires exact version confirmation and rejects changed inputs or existing release state", async (t) => {

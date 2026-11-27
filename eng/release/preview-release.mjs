@@ -100,19 +100,8 @@ export async function validateInputs({ version, artifactsRoot }) {
 
 async function run(execute, command, args, options) { return execute(command, args, options); }
 
-async function getReleaseTarget({ repositoryRoot, execute }) {
-  const head = (await run(execute, "git", ["rev-parse", "HEAD"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
-  const main = (await run(execute, "git", ["rev-parse", "origin/main"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
-  expect(head === main, "HEAD must equal current origin/main before preview publication.");
-  return head;
-}
-
 export async function preflight({ version, artifactsRoot = "artifacts", repositoryRoot = process.cwd(), execute = defaultExecute }) {
   const facts = await validateInputs({ version, artifactsRoot });
-  await run(execute, "git", ["fetch", "origin", "main"], { cwd: repositoryRoot });
-  const status = await run(execute, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot });
-  expect(status.stdout.trim() === "", "Tracked working tree must be clean before preview publication.");
-  facts.sourceCommit = await getReleaseTarget({ repositoryRoot, execute });
   await run(execute, "gh", ["auth", "status"], { cwd: repositoryRoot });
   const repo = (await run(execute, "gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { cwd: repositoryRoot })).stdout.trim();
   expect(/^[\w.-]+\/[\w.-]+$/.test(repo), "gh repository identity is invalid.");
@@ -185,11 +174,6 @@ export async function publish({ facts, repositoryRoot = process.cwd(), execute =
   expect(confirmation === facts.version, `Publication requires exact version confirmation: ${facts.version}`);
   const current = await validateInputs({ version: facts.version, artifactsRoot: resolve(facts.directory, "..") });
   for (const platform of ["windows", "macos"]) expect(current[platform].sha256 === facts[platform].sha256 && current[platform].bytes === facts[platform].bytes && current[platform].sourceCommit === facts[platform].sourceCommit, `Prepared ${platform} input changed after preflight.`);
-  await run(execute, "git", ["fetch", "origin", "main"], { cwd: repositoryRoot });
-  const releaseTarget = await getReleaseTarget({ repositoryRoot, execute });
-  expect(releaseTarget === facts.sourceCommit, "Release target changed after preflight.");
-  const status = await run(execute, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot });
-  expect(status.stdout.trim() === "", "Tracked working tree must be clean immediately before preview publication.");
   const release = await run(execute, "gh", ["api", `repos/${facts.repository}/releases/tags/${facts.tag}`], { cwd: repositoryRoot, allowFailure: true });
   expect(release.code !== 0 || release.stdout.trim() === "" || release.stdout.trim() === "[]", `A GitHub release already exists for ${facts.tag}.`);
   await run(execute, "gh", ["release", "create", facts.tag, "--repo", facts.repository, "--target", facts.sourceCommit, "--prerelease", "--title", `gabCode ${facts.tag} developer preview`, "--notes-file", join(facts.directory, "release-notes.md"), facts.windows.path, facts.macos.path, join(facts.directory, "SHA256SUMS.txt")], { cwd: repositoryRoot });
