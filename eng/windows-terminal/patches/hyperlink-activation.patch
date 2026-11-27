@@ -1,8 +1,16 @@
 diff --git a/src/cascadia/TerminalControl/HwndTerminal.cpp b/src/cascadia/TerminalControl/HwndTerminal.cpp
-index 2b32d77..9e961f4 100644
+index 2b32d77..d64e6ea 100644
 --- a/src/cascadia/TerminalControl/HwndTerminal.cpp
 +++ b/src/cascadia/TerminalControl/HwndTerminal.cpp
-@@ -127,6 +127,20 @@ try
+@@ -18,6 +18,7 @@ using namespace ::Microsoft::Console::VirtualTerminal;
+ using namespace ::Microsoft::Terminal::Core;
+ 
+ static LPCWSTR term_window_class = L"HwndTerminalClass";
++static constexpr UINT_PTR patternRefreshTimer = 1;
+ 
+ STDMETHODIMP HwndTerminal::TsfDataProvider::QueryInterface(REFIID, void**) noexcept
+ {
+@@ -127,6 +128,30 @@ try
  
      if (publicTerminal)
      {
@@ -12,6 +20,16 @@ index 2b32d77..9e961f4 100644
 +            const auto font = publicTerminal->_actualFont.GetSize();
 +            const til::point cell{ GET_X_LPARAM(lParam) / font.width, GET_Y_LPARAM(lParam) / font.height };
 +            const auto lock = publicTerminal->_terminal->LockForWriting();
++            if (publicTerminal->_patternsDirty)
++            {
++                publicTerminal->_terminal->UpdatePatternsUnderLock();
++                publicTerminal->_patternsDirty = false;
++            }
++            const auto viewport = publicTerminal->_terminal->GetViewport();
++            if (cell.x < 0 || cell.y < 0 || cell.x >= viewport.Width() || cell.y >= viewport.Height())
++            {
++                return 0;
++            }
 +            const auto uri = publicTerminal->_terminal->GetHyperlinkAtViewportPosition(cell);
 +            if (!uri.empty() && publicTerminal->_pfnHyperlinkCallback)
 +            {
@@ -23,7 +41,27 @@ index 2b32d77..9e961f4 100644
          if (_IsMouseMessage(uMsg))
          {
              if (publicTerminal->_CanSendVTMouseInput() && publicTerminal->_SendMouseEvent(uMsg, wParam, lParam))
-@@ -175,6 +189,19 @@ try
+@@ -158,6 +183,19 @@ try
+ 
+         switch (uMsg)
+         {
++        case WM_TIMER:
++            if (wParam == patternRefreshTimer && publicTerminal->_terminal && publicTerminal->_renderer)
++            {
++                const auto lock = publicTerminal->_terminal->LockForWriting();
++                if (publicTerminal->_patternsDirty)
++                {
++                    publicTerminal->_terminal->UpdatePatternsUnderLock();
++                    publicTerminal->_patternsDirty = false;
++                    publicTerminal->_UpdateHoveredLink();
++                }
++                return 0;
++            }
++            break;
+         case WM_GETOBJECT:
+             if (lParam == UiaRootObjectId)
+             {
+@@ -175,12 +213,31 @@ try
              ReleaseCapture();
              break;
          case WM_MOUSEMOVE:
@@ -32,26 +70,77 @@ index 2b32d77..9e961f4 100644
 +                const auto font = publicTerminal->_actualFont.GetSize();
 +                const til::point cell{ GET_X_LPARAM(lParam) / font.width, GET_Y_LPARAM(lParam) / font.height };
 +                const auto lock = publicTerminal->_terminal->LockForReading();
-+                const auto hyperlinkId = publicTerminal->_terminal->GetHyperlinkIdAtViewportPosition(cell);
-+                if (hyperlinkId != publicTerminal->_lastHyperlinkId)
-+                {
-+                    publicTerminal->_lastHyperlinkId = hyperlinkId;
-+                    publicTerminal->_renderer->UpdateHyperlinkHoveredId(hyperlinkId);
-+                    publicTerminal->_renderer->TriggerRedrawAll();
-+                }
++                const auto viewport = publicTerminal->_terminal->GetViewport();
++                publicTerminal->_hoveredCell = cell.x >= 0 && cell.y >= 0 && cell.x < viewport.Width() && cell.y < viewport.Height() ? std::optional{ cell } : std::nullopt;
++                TRACKMOUSEEVENT track{ sizeof(track), TME_LEAVE, hwnd, 0 };
++                TrackMouseEvent(&track);
++                publicTerminal->_UpdateHoveredLink();
 +            }
              if (WI_IsFlagSet(wParam, MK_LBUTTON))
              {
                  LOG_IF_FAILED(publicTerminal->_MoveSelection(lParam));
-@@ -304,6 +331,7 @@ HRESULT HwndTerminal::Initialize()
+                 return 0;
+             }
+             break;
++        case WM_MOUSELEAVE:
++            if (publicTerminal->_terminal && publicTerminal->_renderer)
++            {
++                const auto lock = publicTerminal->_terminal->LockForReading();
++                publicTerminal->_hoveredCell.reset();
++                publicTerminal->_UpdateHoveredLink();
++            }
++            break;
+         case WM_RBUTTONDOWN:
+             try
+             {
+@@ -271,6 +328,26 @@ HwndTerminal::HwndTerminal(HWND parentHwnd) noexcept :
+     }
+ }
+ 
++void HwndTerminal::_UpdateHoveredLink()
++{
++    uint16_t id = 0;
++    decltype(_hoveredInterval) interval;
++    const auto viewport = _terminal->GetViewport();
++    if (_hoveredCell && _hoveredCell->x >= 0 && _hoveredCell->y >= 0 && _hoveredCell->x < viewport.Width() && _hoveredCell->y < viewport.Height())
++    {
++        id = _terminal->GetHyperlinkIdAtViewportPosition(*_hoveredCell);
++        interval = _terminal->GetHyperlinkIntervalFromViewportPosition(*_hoveredCell);
++    }
++    if (id != _lastHyperlinkId || interval != _hoveredInterval)
++    {
++        _lastHyperlinkId = id;
++        _hoveredInterval = interval;
++        _renderer->UpdateHyperlinkHoveredId(id);
++        _renderer->UpdateLastHoveredInterval(interval);
++        _renderer->TriggerRedrawAll();
++    }
++}
++
+ HwndTerminal::~HwndTerminal()
+ {
+     Teardown();
+@@ -304,6 +381,8 @@ HRESULT HwndTerminal::Initialize()
      _renderEngine = std::move(engine);
  
      _terminal->Create({ 80, 25 }, 9001, *_renderer);
 +    _terminal->EnableUrlDetection();
++    RETURN_LAST_ERROR_IF(!SetTimer(_hwnd.get(), patternRefreshTimer, 100, nullptr));
      _terminal->SetWriteInputCallback([=](std::wstring_view input) noexcept { _WriteTextToConnection(input); });
      _terminal->SetCopyToClipboardCallback([=](wil::zwstring_view text) noexcept { _CopyTextToSystemClipboard(text, {}, {}); });
      _renderer->EnablePainting();
-@@ -327,6 +355,7 @@ try
+@@ -319,6 +398,10 @@ try
+     // As a rule, detach resources from the Terminal before shutting them down.
+     // This ensures that teardown is reentrant.
+     _tsfHandle = {};
++    if (_hwnd)
++    {
++        KillTimer(_hwnd.get(), patternRefreshTimer);
++    }
+ 
+     // Shut down the renderer (and therefore the thread) before we implode
+     _renderer.reset();
+@@ -327,6 +410,7 @@ try
      // These two callbacks have a dangling reference to `this`; let's just clear them
      _terminal->SetWriteInputCallback(nullptr);
      _terminal->SetCopyToClipboardCallback(nullptr);
@@ -59,7 +148,7 @@ index 2b32d77..9e961f4 100644
  
      if (auto localHwnd{ _hwnd.release() })
      {
-@@ -362,6 +391,11 @@ void HwndTerminal::_WriteTextToConnection(const std::wstring_view input) noexcep
+@@ -362,6 +446,11 @@ void HwndTerminal::_WriteTextToConnection(const std::wstring_view input) noexcep
      CATCH_LOG();
  }
  
@@ -71,7 +160,23 @@ index 2b32d77..9e961f4 100644
  void HwndTerminal::RegisterWriteCallback(const void _stdcall callback(wchar_t*))
  {
      _pfnWriteCallback = callback;
-@@ -489,6 +523,13 @@ try
+@@ -448,6 +537,7 @@ HRESULT HwndTerminal::Refresh(const til::size windowSize, _Out_ til::size* dimen
+     // I believe we'll need support for CSI 2J, and additionally I think
+     //      we're resetting the viewport to the top
+     RETURN_IF_FAILED(_terminal->UserResize(size));
++    _patternsDirty = true;
+     dimensions->width = size.width;
+     dimensions->height = size.height;
+ 
+@@ -462,6 +552,7 @@ void HwndTerminal::SendOutput(std::wstring_view data)
+     }
+     const auto lock = _terminal->LockForWriting();
+     _terminal->Write(data);
++    _patternsDirty = true;
+ }
+ 
+ void _stdcall AvoidBuggyTSFConsoleFlags()
+@@ -489,6 +580,13 @@ try
  }
  CATCH_LOG()
  
@@ -85,7 +190,20 @@ index 2b32d77..9e961f4 100644
  void _stdcall TerminalRegisterWriteCallback(void* terminal, const void __stdcall callback(wchar_t*))
  try
  {
-@@ -861,6 +902,53 @@ try
+@@ -596,10 +694,11 @@ CATCH_LOG()
+ void _stdcall TerminalUserScroll(void* terminal, int viewTop)
+ try
+ {
+-    if (const auto publicTerminal = static_cast<const HwndTerminal*>(terminal); publicTerminal && publicTerminal->_terminal)
++    if (const auto publicTerminal = static_cast<HwndTerminal*>(terminal); publicTerminal && publicTerminal->_terminal)
+     {
+         const auto lock = publicTerminal->_terminal->LockForWriting();
+         publicTerminal->_terminal->UserScrollViewport(viewTop);
++        publicTerminal->_patternsDirty = true;
+     }
+ }
+ CATCH_LOG()
+@@ -861,6 +960,58 @@ try
          _uiaProvider->RecordKeyEvent(vkey);
      }
  
@@ -120,6 +238,11 @@ index 2b32d77..9e961f4 100644
 +                }
 +                if (vkey == VK_RETURN && modifiers.IsCtrlPressed() && !modifiers.IsAltPressed() && !modifiers.IsShiftPressed())
 +                {
++                    if (_patternsDirty)
++                    {
++                        _terminal->UpdatePatternsUnderLock();
++                        _patternsDirty = false;
++                    }
 +                    hyperlink = _terminal->GetHyperlinkAtBufferPosition(_terminal->GetSelectionAnchor());
 +                    activationRequested = true;
 +                    _suppressNextCharacter = true;
@@ -139,7 +262,7 @@ index 2b32d77..9e961f4 100644
      TerminalInput::OutputType out;
      {
          const auto lock = _terminal->LockForReading();
-@@ -881,6 +969,12 @@ try
+@@ -881,6 +1032,12 @@ try
          return;
      }
  
@@ -152,8 +275,16 @@ index 2b32d77..9e961f4 100644
      TerminalInput::OutputType out;
      {
          const auto lock = _terminal->LockForWriting();
+@@ -1176,6 +1333,7 @@ void HwndTerminal::ChangeViewport(const til::inclusive_rect& NewWindow)
+     }
+     const auto lock = _terminal->LockForWriting();
+     _terminal->UserScrollViewport(NewWindow.top);
++    _patternsDirty = true;
+ }
+ 
+ HRESULT HwndTerminal::GetHostUiaProvider(IRawElementProviderSimple** provider) noexcept
 diff --git a/src/cascadia/TerminalControl/HwndTerminal.hpp b/src/cascadia/TerminalControl/HwndTerminal.hpp
-index 68ffc73..8f8021f 100644
+index 68ffc73..03a900a 100644
 --- a/src/cascadia/TerminalControl/HwndTerminal.hpp
 +++ b/src/cascadia/TerminalControl/HwndTerminal.hpp
 @@ -45,6 +45,7 @@ __declspec(dllexport) void _stdcall AvoidBuggyTSFConsoleFlags();
@@ -172,17 +303,29 @@ index 68ffc73..8f8021f 100644
      void RegisterWriteCallback(const void _stdcall callback(wchar_t*));
      ::Microsoft::Console::Render::IRenderData* GetRenderData() const noexcept;
      HWND GetHwnd() const noexcept;
-@@ -102,7 +104,10 @@ private:
+@@ -102,7 +104,14 @@ private:
      FontInfoDesired _desiredFont;
      FontInfo _actualFont;
      int _currentDpi;
 +    bool _suppressNextCharacter = false;
++    // Accessed only while holding the terminal write lock.
++    bool _patternsDirty = true;
 +    uint16_t _lastHyperlinkId = 0;
++    std::optional<til::point> _hoveredCell;
++    std::optional<interval_tree::IntervalTree<til::point, size_t>::interval> _hoveredInterval;
      std::function<void(wchar_t*)> _pfnWriteCallback;
 +    std::function<void(const wchar_t*)> _pfnHyperlinkCallback;
      ::Microsoft::WRL::ComPtr<HwndTerminalAutomationPeer> _uiaProvider;
  
      std::unique_ptr<::Microsoft::Terminal::Core::Terminal> _terminal;
+@@ -136,6 +145,7 @@ private:
+     friend void _stdcall TerminalSetTheme(void* terminal, TerminalTheme theme, LPCWSTR fontFamily, til::CoordType fontSize, int newDpi);
+     friend void _stdcall TerminalSetFocused(void* terminal, bool focused);
+ 
++    void _UpdateHoveredLink(); // caller holds terminal lock
+     void _UpdateFont(int newDpi);
+     void _WriteTextToConnection(const std::wstring_view text) noexcept;
+     HRESULT _CopyTextToSystemClipboard(wil::zwstring_view text, wil::zstring_view htmlData, wil::zstring_view rtfData) const;
 diff --git a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
 index 60ce76f..7a6b480 100644
 --- a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
