@@ -26,7 +26,7 @@ Read the authoritative sprint record and the task-named files before changing co
 - Windows and macOS share requirements, vocabulary, language-neutral fixtures, and expected outcomes. The sole scoped production-code exception is the bundled, read-only Monaco diff-viewer HTML/CSS/JavaScript/assets in `Documentation/design/2026-10-18-native-diff-review-prd.md`, independently hosted by each native app. No shared Git/filesystem core, companion sidecar, service, or general internal client/core protocol.
 - Plan and validate Windows and macOS implementation as separate target-platform increments; one platform's evidence does not prove the other.
 - Git, the filesystem, and read-only `gh` queries remain authoritative. Do not turn local metadata into a competing source of truth.
-- gabCode observes source, PRDs, issues, commits, and diffs. It does not edit them or interpret/manage Pi sessions.
+- gabCode observes source, PRDs, issues, commits, and diffs; it does not offer general editing or interpret/manage Pi sessions. The explicitly invoked, guarded Git sidebar actions in `Documentation/design/2026-11-27-git-sidebar-actions-prd.md` are a narrow exception: discard and stash/pop may change working files, and Add to .gitignore may edit the root `.gitignore`. They do not authorize general source editing or other Git mutations.
 
 ## Working rules
 

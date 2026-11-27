@@ -116,7 +116,7 @@ For the selected worktree, gabCode shows:
 
 For worktrees created by gabCode, the creation point may be recorded as additional local context. Git remains authoritative when history is amended, rebased, or otherwise rewritten.
 
-gabCode does not stage, commit, amend, rebase, merge, push, or otherwise mutate repository history through this interface.
+The focused `Documentation/design/2026-11-27-git-sidebar-actions-prd.md` adds explicitly invoked, guarded stage, unstage, discard, ignore, stash and pop actions to this interface. These do not authorize commit, amend, rebase, merge, push, or other history mutations.
 
 ### 6. User-Selected Worktree References — Must-have
 
@@ -173,14 +173,14 @@ Single-line clipboard text is pasted immediately. Multiline clipboard text requi
 
 gabCode will not:
 
-- Edit source files through the general file explorer or edit unassociated files. The explicitly associated Markdown file may be edited only through the focused Markdown Review and Editing feature.
+- Edit source files through the general file explorer or offer general editing of unassociated files. Guarded Git discard and stash/pop may change working files, and Add to .gitignore may edit the root `.gitignore`, only as specified in `Documentation/design/2026-11-27-git-sidebar-actions-prd.md`. The explicitly associated Markdown file may be edited through the focused Markdown Review and Editing feature.
 - Interpret CLI coding-harness output, prompts, skills, or session history.
 - Start or resume CLI coding-harness sessions automatically.
 - Understand or enforce product-design, sprint, review, or release workflows.
 - Infer which Markdown file or GitHub issue belongs to a worktree.
 - Create, update, close, or comment on GitHub issues.
 - Create, review, merge, or otherwise mutate pull requests.
-- Stage, commit, amend, rebase, merge, or push.
+- Commit, amend, rebase, merge, or push. Stage and the other explicitly scoped working-change actions are defined only by `Documentation/design/2026-11-27-git-sidebar-actions-prd.md`.
 - Delete branches implicitly or as part of normal worktree removal. An explicit guarded worktree-removal action may offer local-branch deletion after confirmation; remote branches are never deleted.
 - Force-remove dirty worktrees silently or without an explicit recovery confirmation.
 - Archive worktrees after Git removes them.
