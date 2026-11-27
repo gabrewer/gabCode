@@ -17,6 +17,8 @@ A developer working across Git worktrees and terminal sessions wants to arrange 
 
 ## Core Features
 
+Sections 1–6 describe the target experience. The platform acceptance rule in section 7 distinguishes core outcomes from details that may differ or be deferred on one platform.
+
 ### 1. Independently movable panels — Must-have
 
 The worktree navigation and change review panels can each be moved independently by dragging their title bar. Each can dock on the left, right, or bottom of its owning workspace window, or float in a native window, including on another monitor. The terminal remains in the main workspace; docking a panel must not stop, restart, or replace terminal processes or lose their output.
@@ -43,9 +45,17 @@ Remember each panel's location, size, floating state, and pinned or auto-hidden 
 
 Every docking destination, floating action, resizing operation, and reset is reachable without dragging or using a mouse, through discoverable native controls or menus. Expose panel names, current placement, and available actions to native accessibility APIs; make focus visible and predictable when panels move between windows. Preview and state must not depend on color alone. Respect platform text scaling, contrast, and reduced-motion settings.
 
-### 7. Native platform parity — Must-have
+### 7. Platform acceptance — useful docking, not feature parity
 
-Windows and macOS provide the same destinations, pin and auto-hide behavior, recovery, keyboard alternatives, and panel/terminal continuity, using their respective native controls and conventions. Interaction details can differ where appropriate to the platform. Validate each platform independently, including keyboard use and Narrator on Windows or VoiceOver on macOS.
+On each platform, a developer can independently reposition, dock and float either panel, keep it open or collapse and reveal it, and restore or recover a usable layout. Moving panels must preserve terminal sessions and review context. Supported workflows must work with the keyboard and native screen reader. Verify these outcomes on each target OS.
+
+The libraries need not support identical features. For example, one platform may use explicit activation rather than focus to reveal a collapsed panel, or arrange panels sharing an edge differently. If a library covers most of the target experience and meets the core outcomes, prefer it to custom work solely for parity. Record any missing detail, the user-visible alternative or limitation, and target-machine evidence; do not report an omitted or untested feature as passing.
+
+### Release decision — a useful subset can ship
+
+The feature list describes finished docking, not the minimum for every release. Judge the build by what users can actually do. For example, if docking and floating work well but temporary auto-hide does not, offer the working controls, omit the unfinished one, and list auto-hide as deferred. The other client may retain its current layout. Neither an unchecked feature nor an open sibling sprint is itself a reason to hold a release.
+
+For each release candidate, report what is enabled on each platform, what was tested, and what is deferred or NOT CHECKED. Identify a blocker by its concrete impact on the shipped build (for example, moving a panel kills a terminal or leaves the panel unreachable), not by counting unchecked boxes. Fix or exclude the affected path and verify what remains. The release decision belongs to the human; shipping a subset does not mark the whole PRD complete or waive packaging checks.
 
 ## Non-Goals
 
@@ -69,7 +79,7 @@ Windows and macOS provide the same destinations, pin and auto-hide behavior, rec
 1. **Shared behavior and conformance:** define common scenarios and expected outcomes for both panels, including same-edge placement and floating-window close behavior.
 2. **Windows increment:** implement and validate native docking, floating, persistence, recovery, and accessibility on Windows.
 3. **macOS increment:** independently implement and validate the same outcomes on macOS.
-4. **Parity review:** compare target-machine evidence, including multi-monitor recovery and uninterrupted terminals, and document any intentional native differences.
+4. **Platform acceptance review:** verify core outcomes independently, including multi-monitor recovery and uninterrupted terminals. Record supported behavior, alternatives and limitations; identical feature coverage is not a release gate.
 
 The two platform increments may proceed independently once shared prerequisites are available; their ordering above does not imply one platform proves or blocks the other.
 
