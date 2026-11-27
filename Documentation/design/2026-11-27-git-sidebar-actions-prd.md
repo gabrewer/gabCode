@@ -35,9 +35,11 @@ The worktree context menu offers **Stash All Changes…** for the selected workt
 
 ### 5. Pop a stash — Must-have
 
-The worktree context menu offers two commands. **Pop Latest…** identifies the newest repository stash and asks for confirmation without opening a picker. **Pop…** opens a keyboard-accessible list of that same repository's stashes, newest first; the developer selects one, including an older entry. In both flows, show the entry and destination worktree before confirmation. Cancel changes nothing. If there are no stashes, neither command can run.
+The worktree context menu offers two commands. **Pop Latest…** identifies the newest repository stash and asks for confirmation without opening a picker. **Pop Stash…** opens a keyboard-accessible list of that same repository's stashes, newest first; the developer selects one, including an older entry. In both flows, show the entry and destination worktree before confirmation. Cancel changes nothing. If there are no stashes, neither command can run.
 
-A successful pop restores the stash's changes **unstaged**, without disturbing unrelated files or existing staged changes, and removes only the applied entry. A previously staged new file returns as untracked. Do not silently switch entries if the stash list changes after confirmation. On conflict or uncertain identity, retain the stash, report Git's actual state, refresh, and do not retry or discard changes automatically.
+A successful pop restores the stash's changes **unstaged**, without disturbing unrelated files or existing staged changes. A previously staged new file returns as untracked. After confirmation, revalidate the target worktree and the selected stash against the current list. If that check detects a different or ambiguous entry, refuse before invoking Git; do not silently switch entries.
+
+For a validated selection, gabCode delegates consumption to one ordinary native `git stash pop` of the verified selector. With no concurrent external stash changes, Git consumes the selected entry on success and keeps it if applying fails or conflicts. Once the command is dispatched, external Git changes have ordinary Git semantics: Git does not atomically bind the applied stash identity to removal if another process changes the stack mid-command. Another entry can be removed in that race. gabCode does not add a separate drop, rewrite the reflog, retry automatically, or fall back to Apply. Refresh worktree status and the stash list and report the observed result, including partial or uncertain outcomes.
 
 ### 6. Identity and refusal rules — Must-have
 
@@ -50,10 +52,10 @@ The selected registered worktree's resolved root identifies the operation target
 | Staged only | Unstage; retain current working content. |
 | Untracked | Stage or add that exact path to `.gitignore`; no discard. |
 | Conflict, unsafe rename, unsafe symlink, inaccessible worktree, or unavailable required HEAD | Refuse affected action with an explanation; never broaden its scope. |
-| Stale file/worktree state, stash reordered or identity ambiguous | Abort the unsafe operation, explain and refresh; do not use a stale ordinal. |
-| Pop fails or conflicts | Keep the entry, report actual partial Git state, refresh, and leave recovery to the user. |
+| Stale file/worktree state, or changed or ambiguous stash selection detected before dispatch | Abort the unsafe operation, explain and refresh; do not invoke Git with a selector known to be stale. |
+| Pop fails or conflicts | Report observed worktree and stash state, refresh, and leave recovery to the user; do not remove the stash separately. |
 
-An in-app gate must coordinate overlapping worktree/index operations and repository-wide stash operations; it cannot lock out external Git. Revalidation does not eliminate all external races. If preserving the confirmed entry and unrelated data cannot be ensured, refuse or retain the entry and report the partial outcome rather than guessing or removing another stash.
+An in-app gate must coordinate overlapping worktree/index operations and repository-wide stash operations; it cannot lock out external Git. Pop has the native Git concurrency limit described above, not an app-level compare-and-remove guarantee. This limit does not relax safeguards for unrelated index entries, worktree contents, or other actions.
 
 ### 7. Native interaction and recovery — Must-have
 
@@ -85,7 +87,7 @@ Make menus accessible by pointer and keyboard, with native accessible names and 
 
 ## Open Questions
 
-- Platform implementations must determine which rename and concurrent external-Git cases can be supported safely; unsupported or ambiguous cases must refuse without widening the operation.
+- Platform implementations must determine which rename cases can be supported safely; unsupported or ambiguous cases must refuse without widening the operation. The external stash-stack race after Pop dispatch follows native Git semantics as specified above.
 
 ## Approval Boundary
 
