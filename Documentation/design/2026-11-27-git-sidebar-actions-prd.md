@@ -27,7 +27,7 @@ A tracked file with unstaged changes and **no staged changes for that file** off
 
 ### 3. Ignore a new file — Must-have
 
-An untracked file offers **Add to .gitignore**. Add a rule for only the selected repository-relative path to the selected worktree's root `.gitignore`, creating the file if needed. Leave the selected file on disk and leave the `.gitignore` change unstaged. Do not offer this action for tracked files, or add folder-wide or extension-wide rules. Escape special characters correctly so the rule matches the intended literal path; do not silently overwrite existing content. Refresh status so the ignored file disappears from the untracked list.
+An untracked file offers **Add to .gitignore**. Add a rule for only the selected repository-relative path to the selected worktree's root `.gitignore`, creating the file if needed. Leave the selected file on disk and leave the `.gitignore` change unstaged. Do not offer this action for tracked files, or add folder-wide or extension-wide rules. Escape special characters correctly so the rule matches the intended literal path; do not silently overwrite existing content. Refresh the untracked list from Git. The action adds the rule; it does not guarantee that the file becomes ignored. If a higher-precedence rule (for example, a nested `.gitignore` negation) keeps the file untracked, leave the new root rule in place and keep showing the file. Do not change other ignore files or rules to force it to disappear.
 
 ### 4. Stash all changes — Must-have
 
