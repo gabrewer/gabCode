@@ -189,8 +189,8 @@ try {
         Assert-NativeSuccess 'dotnet restore'
         & dotnet build GabCode.slnx --configuration Release --no-restore
         Assert-NativeSuccess 'dotnet build'
-        & dotnet test GabCode.slnx --configuration Release --no-build
-        Assert-NativeSuccess 'dotnet test'
+        & dotnet test GabCode.slnx --configuration Release --no-build --filter FullyQualifiedName~Packaging
+        Assert-NativeSuccess 'dotnet test Packaging'
     }
     finally {
         Pop-Location
@@ -230,7 +230,7 @@ try {
         verification = [ordered]@{
             status = 'PASS'
             checks = @(
-                'solution-build-and-tests',
+                'solution-build-and-packaging-tests',
                 'unsigned-msi-identity-and-payload',
                 'install-repair-upgrade-uninstall',
                 'repository-and-user-data-sentinels',

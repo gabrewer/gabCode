@@ -68,7 +68,7 @@ $uninstall = Start-Process "$env:SystemRoot\System32\msiexec.exe" `
 $uninstall.ExitCode
 ```
 
-Install, repair, upgrade, and uninstall must not modify repositories/worktrees or delete user data outside the application install directory. Verification refuses to replace an installation it did not create.
+Install, repair, upgrade, and uninstall must not modify repositories/worktrees or delete user data outside the application install directory. The automated preview verifier runs install, repair, later-patch upgrade, and uninstall against the current user's gabCode product. A pre-existing product may therefore be upgraded and removed by verification cleanup. Save work and close gabCode before running preparation; do not rely on the existing installation remaining afterward.
 
 ## Shipped licenses and notices
 
@@ -98,7 +98,7 @@ pwsh -NoProfile -File eng/release/windows/Prepare-Preview.ps1 `
   -Version x.y.z-preview
 ```
 
-Preparation requires a clean working tree with no non-ignored changes and `HEAD == origin/main`. It uses `npm ci --no-audit --no-fund` with the viewer lockfile, builds/tests the offline viewer, runs repository restore/build/tests, rebuilds and verifies the same viewer resources in `Build-Preview.ps1`, and runs the bounded package/install/repair/later-patch upgrade/uninstall verification through `Test-Preview.ps1`. Build/publish and installed asset hashes are checked against the pinned manifest; generated npm packages, a CDN and a local HTTP server never ship.
+Preparation requires a clean working tree with no non-ignored changes and `HEAD == origin/main`. It uses `npm ci --no-audit --no-fund` with the viewer lockfile, builds/tests the offline viewer, runs solution restore/build and the focused packaging tests, rebuilds and verifies the same viewer resources in `Build-Preview.ps1`, and runs the bounded package/install/repair/later-patch upgrade/uninstall verification through `Test-Preview.ps1`. Build/publish and installed asset hashes are checked against the pinned manifest; generated npm packages, a CDN and a local HTTP server never ship.
 
 Successful preparation writes exactly this Windows pair while preserving a matching Mac pair already present:
 
@@ -128,7 +128,7 @@ pwsh -NoProfile -File eng/release/windows/Test-Preview.ps1 `
 - **Hash mismatch:** stop and obtain the asset/checksum again.
 - **MSI or gabCode/Terminal file reports `NotSigned`:** expected for this preview; vendor runtime signatures do not change that status.
 - **Installer exit code other than `0`:** preserve the bounded verbose log; do not retry with elevation.
-- **Existing installation blocks verification:** use Installed apps to remove it only after the user chooses to do so. The verifier intentionally refuses to remove it.
+- **Preparation lifecycle changes an existing installation:** expected with the current verifier. It performs an upgrade probe and removes the test product at cleanup; reinstall afterward from the MSI if needed.
 - **Partial/unknown artifact output:** preserve the files and resolve ownership; preparation never broadly cleans the artifact directory.
 
 ## Native accessibility assessment

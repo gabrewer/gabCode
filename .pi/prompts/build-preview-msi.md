@@ -14,7 +14,7 @@ This is the `/build-preview-msi <version>` workflow. It prepares one already-rev
 - Read `AGENTS.md`, `Documentation/release/local-preview-workflow.md`, `Documentation/release/windows-unsigned-preview.md`, `eng/release/windows/Prepare-Preview.ps1`, `eng/release/windows/Build-Preview.ps1`, and `eng/release/windows/Test-Preview.ps1` before execution.
 - Do not edit source, tests, documentation, prompts, Git state, or existing installer files.
 - This command must not create or update a GitHub issue, tag, release, or release asset. It must not publish, push, sign, transfer, or invoke `/release-preview`.
-- Preserve the verifier's refusal to replace an existing gabCode installation. Never uninstall or terminate user-owned state as a workaround.
+- The verifier performs install, repair, later-patch upgrade, and uninstall. If gabCode is already installed, this can upgrade and then remove that installation. Warn the operator before execution; do not terminate gabCode processes automatically.
 - Git, `origin/main`, the filesystem, and the reviewed scripts remain authoritative. Do not weaken a failed preflight.
 
 ## Execute
