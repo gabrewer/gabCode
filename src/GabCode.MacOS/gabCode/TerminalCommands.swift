@@ -53,7 +53,19 @@ final class TerminalCommandRouter: ObservableObject {
     func focusTerminal2() { targetPresentation?.focus(.terminal2) }
 }
 
+private enum WorkspacePickerKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var showWorkspacePicker: (() -> Void)? {
+        get { self[WorkspacePickerKey.self] }
+        set { self[WorkspacePickerKey.self] = newValue }
+    }
+}
+
 struct TerminalWorkspaceCommands: Commands {
+    @FocusedValue(\.showWorkspacePicker) private var showWorkspacePicker
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var router = TerminalCommandRouter.shared
 
@@ -65,7 +77,12 @@ struct TerminalWorkspaceCommands: Commands {
 
         CommandGroup(after: .newItem) {
             Button("Open Workspace…") {
-                route(.open)
+                if let showWorkspacePicker {
+                    showWorkspacePicker()
+                } else {
+                    WorkspaceWindowIntentStore.shared.enqueue(.open)
+                    openWindow(id: "main")
+                }
             }
             .keyboardShortcut("o", modifiers: .command)
             Button("Create Workspace from Project Folder…") {

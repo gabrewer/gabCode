@@ -64,6 +64,26 @@ final class gabCodeUITests: XCTestCase {
     }
 
     @MainActor
+    func testWorkspaceChooserOpensSelectedDescriptorAndShowsValidationError() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = directory.appendingPathComponent("Chosen workspace.gabcode-workspace")
+        try Data("not json".utf8).write(to: workspace)
+        app.launch()
+        XCTAssertTrue(app.buttons["open-workspace"].waitForExistence(timeout: 5))
+        app.buttons["open-workspace"].click()
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 5))
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        app.typeText(workspace.path)
+        app.typeKey(.return, modifierFlags: [])
+        let open = app.sheets.firstMatch.buttons["Open Workspace"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        open.click()
+        XCTAssertTrue(app.staticTexts["Invalid workspace file"].waitForExistence(timeout: 10))
+        XCTAssertTrue((app.staticTexts["workspace-recovery-message"].value as? String)?.contains(workspace.path) == true)
+    }
+
+    @MainActor
     func testExplicitDirectoryDoesNotBypassWorkspaceValidation() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -108,6 +128,23 @@ final class gabCodeUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(app.windows.count, 2)
         XCTAssertEqual(app.buttons.matching(identifier: "open-workspace").count, 2)
         XCTAssertEqual(app.buttons.matching(identifier: "create-workspace").count, 2)
+    }
+
+    @MainActor
+    func testOpenWorkspaceFromOccupiedWindowPresentsCancellableSheet() throws {
+        let fixture = try makeWorkspaceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        app.launchArguments.append(fixture.descriptor.path)
+        app.launch()
+        XCTAssertTrue(app.buttons["refresh-change-review"].waitForExistence(timeout: 12))
+        let count = app.windows.count
+        app.typeKey("o", modifierFlags: .command)
+        let sheet = app.sheets.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+        sheet.buttons["Cancel"].click()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(app.windows.count, count)
+        XCTAssertTrue(app.buttons["refresh-change-review"].exists)
     }
 
     @MainActor
