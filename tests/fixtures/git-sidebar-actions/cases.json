@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {"id":"stage-untracked-literal","given":"HEAD has a.txt=base; index matches HEAD; untracked [a] é.txt=new; a.txt=other","action":"stage [a] é.txt","expected":"index adds only [a] é.txt=new; a.txt and working bytes unchanged"},
+    {"id":"stage-mixed","given":"HEAD f=base; index f=staged; worktree f=more","action":"stage f","expected":"index f=more; worktree f=more"},
+    {"id":"unstage-mixed","given":"HEAD f=base; index f=staged; worktree f=more","action":"unstage f","expected":"index f=base; worktree f=more"},
+    {"id":"unstage-added","given":"HEAD has no f; index f=new; worktree f=new","action":"unstage f","expected":"index has no f; worktree f=new and untracked"},
+    {"id":"discard-tracked-deletion","given":"HEAD and index f=base; worktree f absent","action":"confirm discard f","expected":"index f=base; worktree f=base; other paths unchanged"},
+    {"id":"discard-mixed-refused","given":"HEAD f=base; index f=staged; worktree f=more","action":"discard f","expected":"unavailable; index and worktree unchanged"},
+    {"id":"discard-stale-confirmation","given":"HEAD and index f=base; worktree f=dirty; after confirmation opens index f becomes staged","action":"confirm discard f","expected":"refuse; preserve index f=staged and worktree f=dirty"},
+    {"id":"discard-cancel","given":"HEAD and index f=base; worktree f=dirty","action":"cancel discard f","expected":"no file, index, or ref changes"},
+    {"id":"ignore-exact","given":"untracked dir/[a] #.txt and dir/a #.txt; existing root .gitignore has staged and unstaged edits","action":"ignore dir/[a] #.txt","expected":"append literal anchored rule; only selected path ignored; preserve prior bytes and staged index; files remain on disk"},
+    {"id":"ignore-concurrent-edit","given":"existing root .gitignore changed externally after its contents were read; f is still untracked","action":"ignore f","expected":"preserve the external edit; append safely against fresh content or refuse without overwriting it"},
+    {"id":"ignore-symlink-refused","given":"root .gitignore is a symbolic link outside worktree; f is untracked","action":"ignore f","expected":"refuse; link target, index and f unchanged"},
+    {"id":"unborn-discard-refused","given":"repository has unborn HEAD; untracked f=new","action":"discard f","expected":"unavailable; f and index unchanged"},
+    {"id":"conflict-refused","given":"f has unmerged index entries","action":"stage or discard f using ordinary file action","expected":"refuse; unmerged entries and worktree bytes unchanged"},
+    {"id":"stash-all-isolation","given":"linked worktrees A and B; A has staged f, unstaged g, untracked h and ignored i; B has dirty j","action":"confirm stash all in A","expected":"new shared stash contains A f,g,h; A i stays; B j unchanged; A tracked changes clean and h absent"},
+    {"id":"pop-older-unstaged","given":"stash list newest N then older O; O contains staged-added new and changed f; destination has unrelated staged g","action":"select O and confirm pop","expected":"new returns untracked; f restored unstaged; g index preserved; remove O only; N remains"},
+    {"id":"pop-latest","given":"shared stash list newest N then older O; N changes tracked f; target is a clean linked worktree","action":"open Pop Latest… and confirm N and the destination without a picker","expected":"f restored unstaged in destination only; remove N only; O and sibling working files unchanged"},
+    {"id":"pop-cancel","given":"shared stash list newest N then older O; destination has an unrelated staged file","action":"select older O with Pop… and cancel confirmation","expected":"index, working files and both stash entries unchanged"},
+    {"id":"pop-empty","given":"shared stash list empty","action":"pop latest or pop","expected":"unavailable; no writes"},
+    {"id":"pop-reordered","given":"confirmation identifies stash O; external operation changes stack before execution","action":"confirm pop O","expected":"do not use stale ordinal; refuse if exact entry cannot be safely identified; no other entry removed"},
+    {"id":"pop-duplicate-identity","given":"two stash entries have identical object IDs","action":"pop selected entry","expected":"if entry identity cannot be distinguished safely, refuse and retain both"},
+    {"id":"pop-conflict","given":"stash O modifies f; destination has overlapping incompatible f change","action":"confirm pop O","expected":"report actual Git state; retain O; preserve unrelated index and files; no automatic retry"},
+    {"id":"pop-stale-drop","given":"O was applied; external process changes stack before removal","action":"finish pop O","expected":"never drop by stale ordinal; if safe removal cannot be established retain entry and report partial result"},
+    {"id":"git-lock","given":"index lock exists; f is dirty","action":"stage f","expected":"report failure; preserve f, existing index and lock; refresh status"},
+    {"id":"worktree-switch","given":"confirmation captures worktree A and f; user selects worktree B before accepting","action":"confirm discard","expected":"never act on B; revalidate A or refuse; B unchanged"},
+    {"id":"rename-ambiguous","given":"rename status has old and new path and safe single-file meaning cannot be established","action":"discard or unstage rename","expected":"refuse; preserve both paths and index"}
+  ]
+}
