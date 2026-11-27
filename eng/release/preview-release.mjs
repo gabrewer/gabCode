@@ -13,14 +13,6 @@ const platforms = Object.freeze({
   windows: { artifactSuffix: "windows-x64.msi", evidenceSuffix: "windows-x64.evidence.json" },
   macos: { artifactSuffix: "macos-arm64.dmg", evidenceSuffix: "macos-arm64.evidence.json" },
 });
-const postBuildCoordinationPaths = new Set([
-  ".pi/prompts/release-preview.md",
-  "AGENTS.md",
-  "Documentation/release/local-preview-workflow.md",
-  "eng/release/preview-release.mjs",
-  "eng/release/preview-release.test.mjs",
-]);
-
 function fail(message) { throw new Error(message); }
 function expect(condition, message) { if (!condition) fail(message); }
 function exactKeys(value, keys, name) {
@@ -108,17 +100,10 @@ export async function validateInputs({ version, artifactsRoot }) {
 
 async function run(execute, command, args, options) { return execute(command, args, options); }
 
-async function assertSourceAuthority({ facts, repositoryRoot, execute }) {
+async function getReleaseTarget({ repositoryRoot, execute }) {
   const head = (await run(execute, "git", ["rev-parse", "HEAD"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
   const main = (await run(execute, "git", ["rev-parse", "origin/main"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
   expect(head === main, "HEAD must equal current origin/main before preview publication.");
-  const macAncestor = await run(execute, "git", ["merge-base", "--is-ancestor", facts.macos.sourceCommit, facts.windows.sourceCommit], { cwd: repositoryRoot, allowFailure: true });
-  expect(macAncestor.code === 0, "macOS artifact source commit must be an ancestor of the Windows artifact source commit.");
-  const windowsAncestor = await run(execute, "git", ["merge-base", "--is-ancestor", facts.windows.sourceCommit, head], { cwd: repositoryRoot, allowFailure: true });
-  expect(windowsAncestor.code === 0, "Windows artifact source commit must be an ancestor of current origin/main.");
-  const laterChanges = await run(execute, "git", ["diff", "--name-only", `${facts.windows.sourceCommit}..${head}`], { cwd: repositoryRoot });
-  const unsupported = laterChanges.stdout.split(/\r?\n/).filter(Boolean).filter((path) => !postBuildCoordinationPaths.has(path));
-  expect(unsupported.length === 0, `Files affecting prepared platform artifacts changed after the Windows build: ${unsupported.join(", ")}`);
   return head;
 }
 
@@ -127,7 +112,7 @@ export async function preflight({ version, artifactsRoot = "artifacts", reposito
   await run(execute, "git", ["fetch", "origin", "main"], { cwd: repositoryRoot });
   const status = await run(execute, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot });
   expect(status.stdout.trim() === "", "Tracked working tree must be clean before preview publication.");
-  facts.sourceCommit = await assertSourceAuthority({ facts, repositoryRoot, execute });
+  facts.sourceCommit = await getReleaseTarget({ repositoryRoot, execute });
   await run(execute, "gh", ["auth", "status"], { cwd: repositoryRoot });
   const repo = (await run(execute, "gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { cwd: repositoryRoot })).stdout.trim();
   expect(/^[\w.-]+\/[\w.-]+$/.test(repo), "gh repository identity is invalid.");
@@ -201,7 +186,7 @@ export async function publish({ facts, repositoryRoot = process.cwd(), execute =
   const current = await validateInputs({ version: facts.version, artifactsRoot: resolve(facts.directory, "..") });
   for (const platform of ["windows", "macos"]) expect(current[platform].sha256 === facts[platform].sha256 && current[platform].bytes === facts[platform].bytes && current[platform].sourceCommit === facts[platform].sourceCommit, `Prepared ${platform} input changed after preflight.`);
   await run(execute, "git", ["fetch", "origin", "main"], { cwd: repositoryRoot });
-  const releaseTarget = await assertSourceAuthority({ facts, repositoryRoot, execute });
+  const releaseTarget = await getReleaseTarget({ repositoryRoot, execute });
   expect(releaseTarget === facts.sourceCommit, "Release target changed after preflight.");
   const status = await run(execute, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot });
   expect(status.stdout.trim() === "", "Tracked working tree must be clean immediately before preview publication.");

@@ -45,7 +45,7 @@ A platform build is eligible for release evidence only when all of the following
 4. The required target-platform tools and reviewed package scripts are available.
 5. The requested version satisfies the contract above.
 
-A preparation command records the full lowercase 40-character source commit that it actually built. It cannot use a local evidence file, issue, tag, or release to override Git. Rehearsal from an unmerged feature commit can test rejection and pure contract behavior, but it is not releasable `origin/main` evidence. At publication, both platform evidence commits must be ancestors of clean `HEAD == origin/main`; the macOS evidence commit must be an ancestor of the Windows evidence commit. Any commits after the Windows build must be limited to the release-coordination helper, its tests, and the corresponding release instructions/docs; changes to platform payload or packaging inputs require rebuilding the affected artifact. This permits reviewed Windows-only changes after the Mac build without requiring an unchanged Mac artifact to be rebuilt, while preventing artifacts from unrelated or unreviewed histories.
+Each preparation command records the full lowercase 40-character source commit that it actually built. The release helper validates each evidence commit's format and reports both commits, but does not require the Windows and macOS builds to use the same commit or compare either commit with current `HEAD`. Publication still requires clean `HEAD == origin/main`; the release tag targets that reviewed mainline commit. Artifact identity, evidence status, byte lengths, and hashes remain mandatory.
 
 ## Prepare the DMG on macOS
 
@@ -127,7 +127,7 @@ The helper verifies, in order:
 2. four regular inputs and no unknown entries;
 3. schema version, platform, version, source commit, and completed `PASS` evidence;
 4. recomputed artifact byte lengths and SHA-256 values;
-5. Both platform evidence commits are ancestors of current `HEAD == origin/main`, the macOS commit is an ancestor of the Windows commit, and later commits only touch approved release-coordination files;
+5. clean `HEAD == origin/main` for the release target; platform artifact source commits are recorded independently and need not match;
 6. clean tracked source with `HEAD` and current `origin/main` at that commit;
 7. Node, Git, `gh`, GitHub authentication, and repository identity;
 8. no existing tag or GitHub release for the requested version.
