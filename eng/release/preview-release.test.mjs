@@ -39,13 +39,15 @@ async function fixture() {
   return { root, artifactsRoot, directory };
 }
 
-function fakeTools({ issueState = "none", history = [] } = {}) {
+function fakeTools({ issueState = "none", history = [], macAncestor = true, laterChanges = [] } = {}) {
   const calls = [];
   const execute = async (command, args) => {
     calls.push([command, ...args]);
     if (command === "git") {
       if (args[0] === "status") return { stdout: "", stderr: "", code: 0 };
       if (args[0] === "rev-parse") return { stdout: `${sourceCommit}\n`, stderr: "", code: 0 };
+      if (args[0] === "merge-base" && args[1] === "--is-ancestor") return { stdout: "", stderr: "", code: macAncestor ? 0 : 1 };
+      if (args[0] === "diff" && args[1] === "--name-only") return { stdout: laterChanges.join("\n"), stderr: "", code: 0 };
       if (args[0] === "describe") return { stdout: "v0.0.1-preview.1\n", stderr: "", code: 0 };
       if (args[0] === "log") return { stdout: history.map(({ sha = sourceCommit, subject }) => `${sha}\u001f${subject}`).join("\n"), stderr: "", code: 0 };
       return { stdout: "", stderr: "", code: 0 };
@@ -163,6 +165,37 @@ test.skip("legacy control-issue workflow removed: ambiguous issue handling", asy
     return tools.execute(command, args, options);
   };
   await assert.rejects(() => ensureControlIssue({ facts, repositoryRoot: root, execute: ambiguousExecute }), /multiple/i);
+});
+
+test("preflight accepts a macOS artifact from an ancestor commit and reports both platform commits", async (t) => {
+  const { root, artifactsRoot, directory } = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const macCommit = "fedcba9876543210fedcba9876543210fedcba98";
+  const evidencePath = join(directory, `gabCode-${version}-macos-arm64.evidence.json`);
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+  evidence.sourceCommit = macCommit;
+  await writeFile(evidencePath, JSON.stringify(evidence));
+  const { preflight, prepare } = await load();
+  const tools = fakeTools({
+    history: [{ subject: "fix: windows-only packaging update" }],
+    laterChanges: ["eng/release/preview-release.mjs"],
+  });
+  const facts = await preflight({ version, artifactsRoot, repositoryRoot: root, execute: tools.execute });
+  assert.equal(facts.windows.sourceCommit, sourceCommit);
+  assert.equal(facts.macos.sourceCommit, macCommit);
+  assert.equal(facts.sourceCommit, sourceCommit);
+  await prepare({ facts, repositoryRoot: root, execute: tools.execute });
+  const notes = await readFile(join(directory, "release-notes.md"), "utf8");
+  assert.ok(notes.includes("Windows `" + sourceCommit + "`; macOS `" + macCommit + "`"));
+
+  await assert.rejects(
+    () => preflight({ version, artifactsRoot, repositoryRoot: root, execute: fakeTools({ macAncestor: false }).execute }),
+    /macOS artifact source commit must be an ancestor/i,
+  );
+  await assert.rejects(
+    () => preflight({ version, artifactsRoot, repositoryRoot: root, execute: fakeTools({ laterChanges: ["src/GabCode.Windows/App.xaml"] }).execute }),
+    /Files affecting prepared platform artifacts changed/i,
+  );
 });
 
 test("prepare creates deterministic checksums and safe public notes without publishing", async (t) => {
