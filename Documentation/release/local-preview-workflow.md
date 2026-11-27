@@ -72,7 +72,7 @@ On the declared Windows 11 x64 target, from a non-elevated session, run:
 /build-preview-msi x.y.z-preview
 ```
 
-The prompt validates the host, version, source authority, and owned output, then invokes `eng/release/windows/Prepare-Preview.ps1`. The preparation command runs the reviewed restore/build/test/package and bounded MSI verification gates. Existing installations and processes remain protected by `Test-Preview.ps1`; the workflow never removes an installation it did not create. It atomically writes only:
+The prompt validates the host, version, source authority, and owned output, then invokes `eng/release/windows/Prepare-Preview.ps1`. The preparation command runs the reviewed restore/build, focused packaging tests, package checks, and bounded MSI verification gates. The MSI verifier exercises install, repair, a later-patch upgrade, and uninstall; if a gabCode product is already registered, the test may upgrade and then remove that installation. Save work and close gabCode before preparation; the verifier does not preserve pre-existing installs. It atomically writes only:
 
 ```text
 artifacts/vx.y.z-preview/gabCode-x.y.z-preview-windows-x64.msi

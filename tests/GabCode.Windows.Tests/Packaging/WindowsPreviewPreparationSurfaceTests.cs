@@ -23,7 +23,10 @@ public sealed class WindowsPreviewPreparationSurfaceTests
         Assert.Contains("origin/main", preparation, StringComparison.Ordinal);
         Assert.Contains("Get-FileHash", preparation, StringComparison.Ordinal);
         Assert.Contains("Move-Item", preparation, StringComparison.Ordinal);
-        Assert.Contains("Refusing to replace an existing gabCode installation", File.ReadAllText(Path.Combine(root, "eng", "release", "windows", "Test-Preview.ps1")), StringComparison.Ordinal);
+        var verifier = File.ReadAllText(Path.Combine(root, "eng", "release", "windows", "Test-Preview.ps1"));
+        Assert.Contains("Get-RelatedProducts $upgradeCode", verifier, StringComparison.Ordinal);
+        Assert.Contains("Invoke-MsiExec 'install'", verifier, StringComparison.Ordinal);
+        Assert.Contains("Invoke-MsiExec 'uninstall'", verifier, StringComparison.Ordinal);
     }
 
     [Fact]
