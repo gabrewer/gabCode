@@ -37,6 +37,7 @@ struct WorkspaceProjectView: View {
     @ObservedObject var controller: WorkspaceProjectController
     @EnvironmentObject private var fontPreference: TerminalFontPreferenceStore
     @Environment(\.openWindow) private var openWindow
+    @State private var hasExplicitOpen = false
     @State private var isPresentingPanel = false
     @State private var windowNumber: Int?
     @State private var selectedWorktreePath: URL?
@@ -184,6 +185,11 @@ struct WorkspaceProjectView: View {
         .background(WindowIdentityReader { number in
             windowNumber = number
         })
+        .focusedSceneValue(\.showWorkspacePicker, chooseWorkspace)
+        .onOpenURL { url in
+            guard url.isFileURL, url.pathExtension.caseInsensitiveCompare("gabcode-workspace") == .orderedSame else { return }
+            routeExternalWorkspace(url)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .gabCodeOpenWorkspace)) { notification in
             guard handles(notification) else { return }
             if let url = notification.userInfo?["workspaceURL"] as? URL {
@@ -209,7 +215,8 @@ struct WorkspaceProjectView: View {
             guard handles(notification), !hasConflictingWorkspaceOperation else { return }
             Task { await refreshWorktreesAndCleanupReferences() }
         }
-        .onAppear {
+        .onChange(of: windowNumber, initial: true) { previous, number in
+            guard previous == nil, number != nil else { return }
             let isFirstWindow = ProcessWindowStartupClaims.shared.claimFirstWindow()
             if let intent = WorkspaceWindowIntentStore.shared.take() {
                 switch intent {
@@ -226,7 +233,10 @@ struct WorkspaceProjectView: View {
                 ownsPresence: presence.ownsPresence,
                 isFirstWindow: isFirstWindow
             ) == .restoreRemembered:
-                Task { _ = await controller.reopenRememberedWorkspace() }
+                Task {
+                    guard !hasExplicitOpen else { return }
+                    _ = await controller.reopenRememberedWorkspace()
+                }
             case let .failure(error):
                 controller.showStartupRecovery(.instancePresenceUnavailable(error.localizedDescription))
             default:
@@ -786,6 +796,7 @@ struct WorkspaceProjectView: View {
     }
 
     private func route(_ action: WorkspaceWindowIntentStore.Action) {
+        if action == .open { chooseWorkspace(); return }
         if WorkspaceWindowRouting.opensSeparateWindow(hasActiveProject: controller.activeDescriptor != nil) {
             WorkspaceWindowIntentStore.shared.enqueue(action)
             openWindow(id: "main")
@@ -798,6 +809,7 @@ struct WorkspaceProjectView: View {
     }
 
     private func routeExternalWorkspace(_ url: URL) {
+        hasExplicitOpen = true
         if WorkspaceWindowRouting.opensSeparateWindow(hasActiveProject: controller.activeDescriptor != nil) {
             WorkspaceWindowIntentStore.shared.enqueueOpen(url)
             openWindow(id: "main")
@@ -823,10 +835,14 @@ struct WorkspaceProjectView: View {
         panel.allowsMultipleSelection = false
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        present(panel) { url in
+        guard let owner = windowNumber.flatMap({ NSApp.window(withWindowNumber: $0) }) ?? NSApp.keyWindow else {
             isPresentingPanel = false
-            guard let url else { return }
-            Task { await openAfterReplacement { await controller.openWorkspace(at: url) } }
+            return
+        }
+        panel.beginSheetModal(for: owner) { response in
+            isPresentingPanel = false
+            guard response == .OK, let url = panel.url else { return }
+            routeExternalWorkspace(url)
         }
     }
 
@@ -891,37 +907,6 @@ struct WorkspaceProjectView: View {
                 }
             }
         }
-    }
-
-    private func openAfterReplacement(_ action: @escaping () async -> Bool) async {
-        guard let presentation = WindowWorkspaceRegistry.shared.currentFocusedPresentation(),
-              presentation.activeTerminalCount > 0,
-              let window = NSApp.keyWindow ?? NSApp.windows.first
-        else {
-            _ = await action()
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "Replace the current workspace?"
-        alert.informativeText = "Running shell work in this window will be interrupted."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Replace Workspace")
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
-
-        WindowWorkspaceRegistry.shared.setMutationLocked(true)
-        let results = await presentation.workspace.stopResults(gracePeriod: .milliseconds(500))
-        WindowWorkspaceRegistry.shared.setMutationLocked(false)
-        guard results.allSatisfy({ $0 != .failed }) else {
-            let failure = NSAlert()
-            failure.messageText = "Terminal cleanup did not complete"
-            failure.informativeText = "The current workspace remains open because owned terminals could not be verified as stopped."
-            failure.alertStyle = .critical
-            _ = failure.runModal()
-            return
-        }
-        _ = await action()
     }
 
     private func requestBranch(_ branches: [String], completion: @escaping (String?) -> Void) {
