@@ -165,6 +165,27 @@ test.skip("legacy control-issue workflow removed: ambiguous issue handling", asy
   await assert.rejects(() => ensureControlIssue({ facts, repositoryRoot: root, execute: ambiguousExecute }), /multiple/i);
 });
 
+test("preflight accepts prepared platform artifacts from different commits and reports both", async (t) => {
+  const { root, artifactsRoot, directory } = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const macCommit = "fedcba9876543210fedcba9876543210fedcba98";
+  const evidencePath = join(directory, `gabCode-${version}-macos-arm64.evidence.json`);
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+  evidence.sourceCommit = macCommit;
+  await writeFile(evidencePath, JSON.stringify(evidence));
+  const { preflight, prepare } = await load();
+  const tools = fakeTools({ history: [{ subject: "fix: windows-only packaging update" }] });
+  const facts = await preflight({ version, artifactsRoot, repositoryRoot: root, execute: tools.execute });
+  assert.equal(facts.windows.sourceCommit, sourceCommit);
+  assert.equal(facts.macos.sourceCommit, macCommit);
+  assert.equal(facts.sourceCommit, sourceCommit);
+  await prepare({ facts, repositoryRoot: root, execute: tools.execute });
+  const notes = await readFile(join(directory, "release-notes.md"), "utf8");
+  assert.ok(notes.includes("Windows `" + sourceCommit + "`; macOS `" + macCommit + "`"));
+
+  assert.equal(tools.calls.some((call) => call[1] === "merge-base" || call[1] === "diff"), false, "preflight must not require platform commit ancestry or diff checks");
+});
+
 test("prepare creates deterministic checksums and safe public notes without publishing", async (t) => {
   const { root, artifactsRoot, directory } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));

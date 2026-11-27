@@ -45,7 +45,7 @@ A platform build is eligible for release evidence only when all of the following
 4. The required target-platform tools and reviewed package scripts are available.
 5. The requested version satisfies the contract above.
 
-A preparation command records the full lowercase 40-character source commit that it actually built. It cannot use a local evidence file, issue, tag, or release to override Git. Rehearsal from an unmerged feature commit can test rejection and pure contract behavior, but it is not releasable `origin/main` evidence.
+Each preparation command records the full lowercase 40-character source commit that it actually built. The release helper validates each evidence commit's format and reports both commits, but does not require the Windows and macOS builds to use the same commit or compare either commit with current `HEAD`. Publication still requires clean `HEAD == origin/main`; the release tag targets that reviewed mainline commit. Artifact identity, evidence status, byte lengths, and hashes remain mandatory.
 
 ## Prepare the DMG on macOS
 
@@ -127,7 +127,7 @@ The helper verifies, in order:
 2. four regular inputs and no unknown entries;
 3. schema version, platform, version, source commit, and completed `PASS` evidence;
 4. recomputed artifact byte lengths and SHA-256 values;
-5. the same source commit in both sidecars;
+5. clean `HEAD == origin/main` for the release target; platform artifact source commits are recorded independently and need not match;
 6. clean tracked source with `HEAD` and current `origin/main` at that commit;
 7. Node, Git, `gh`, GitHub authentication, and repository identity;
 8. no existing tag or GitHub release for the requested version.
@@ -139,7 +139,7 @@ Every failed preflight is non-mutating. The publisher creates no GitHub control 
 The helper deterministically creates:
 
 - `SHA256SUMS.txt`, containing sorted lowercase hashes for the MSI and DMG only;
-- `release-notes.md`, the public GitHub prerelease description. It deterministically generates a presentation-ready **What's new**, **Improvements and fixes**, **Downloads**, and **Preview notice** format from reviewed commit subjects since the previous preview tag, links issue/PR references present in that history, identifies the reviewed source commit, and retains the unsigned/ad-hoc and `NOT CHECKED` disclosures. It never derives claims from local session input or evidence sidecars.
+- `release-notes.md`, the public GitHub prerelease description. It deterministically generates a presentation-ready **What's new**, **Improvements and fixes**, **Downloads**, and **Preview notice** format from reviewed commit subjects since the previous preview tag, links issue/PR references present in that history, identifies the separate Windows and macOS source commits and the release target, and retains the unsigned/ad-hoc and `NOT CHECKED` disclosures. It never derives claims from local session input or evidence sidecars.
 
 It displays the version, target commit, filenames, byte lengths, hashes, and release notes. This phase creates no GitHub issue, tag, or release.
 

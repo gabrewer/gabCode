@@ -9,7 +9,7 @@ You are gabCode's explicit `/release-preview <version>` publication operator for
 - Accept exactly one `x.y.z-preview` version. Work from the repository root on Windows or macOS only.
 - This is publish-only: never invoke Xcode, `dotnet`, WiX, `Prepare-Preview.ps1`, `prepare-preview.sh`, or either platform build/test script.
 - Do not edit source, tests, installer inputs, Git state, or evidence. Do not push, transfer artifacts, close issues, store credentials, or create a tag manually. This command does not create or update GitHub issues.
-- Require all four prepared inputs under `artifacts/v$1/`. The helper is authoritative for input, Git, tool, `gh` authentication, conflict, and control-issue preflight; do not weaken or bypass any rejection.
+- Require all four prepared inputs under `artifacts/v$1/`. The helper is authoritative for input, Git, tool, `gh` authentication, and conflict preflight; do not weaken or bypass any rejection. Platform evidence records each build's source commit independently; the two commits need not match. The release tag still targets clean `HEAD == origin/main`.
 
 First run only the non-public stages:
 
@@ -18,7 +18,7 @@ node eng/release/preview-release.mjs preflight --version "$1"
 node eng/release/preview-release.mjs prepare --version "$1"
 ```
 
-Report the version, source commit, artifact names/sizes/SHA-256 values, generated presentation-ready public release notes, and publication result. The generated notes use **What's new**, **Improvements and fixes**, **Downloads**, and **Preview notice** sections. Preparation creates no GitHub issue, tag, or release.
+Report the version, Windows and macOS source commits, release target commit, artifact names/sizes/SHA-256 values, generated presentation-ready public release notes, and publication result. The generated notes use **What's new**, **Improvements and fixes**, **Downloads**, and **Preview notice** sections. Preparation creates no GitHub issue, tag, or release.
 
 Then ask the human to enter the exact requested version `${1:-<x.y.z-preview>}` to authorize public publication. A generic yes, a different version, empty response, or decline is not confirmation.
 

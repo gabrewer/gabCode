@@ -13,7 +13,6 @@ const platforms = Object.freeze({
   windows: { artifactSuffix: "windows-x64.msi", evidenceSuffix: "windows-x64.evidence.json" },
   macos: { artifactSuffix: "macos-arm64.dmg", evidenceSuffix: "macos-arm64.evidence.json" },
 });
-
 function fail(message) { throw new Error(message); }
 function expect(condition, message) { if (!condition) fail(message); }
 function exactKeys(value, keys, name) {
@@ -96,20 +95,24 @@ export async function validateInputs({ version, artifactsRoot }) {
     expect(evidence.artifact.bytes === item.size && evidence.artifact.sha256 === hash, `${platform} artifact bytes or SHA-256 does not match evidence.`);
     facts[platform] = { ...names, path: artifactPath, bytes: item.size, sha256: hash, evidencePath, sourceCommit: evidence.sourceCommit };
   }
-  expect(facts.windows.sourceCommit === facts.macos.sourceCommit, "Windows and macOS evidence source commits differ.");
   return { version, tag: `v${version}`, directory, sourceCommit: facts.windows.sourceCommit, ...facts };
 }
 
 async function run(execute, command, args, options) { return execute(command, args, options); }
+
+async function getReleaseTarget({ repositoryRoot, execute }) {
+  const head = (await run(execute, "git", ["rev-parse", "HEAD"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
+  const main = (await run(execute, "git", ["rev-parse", "origin/main"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
+  expect(head === main, "HEAD must equal current origin/main before preview publication.");
+  return head;
+}
 
 export async function preflight({ version, artifactsRoot = "artifacts", repositoryRoot = process.cwd(), execute = defaultExecute }) {
   const facts = await validateInputs({ version, artifactsRoot });
   await run(execute, "git", ["fetch", "origin", "main"], { cwd: repositoryRoot });
   const status = await run(execute, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot });
   expect(status.stdout.trim() === "", "Tracked working tree must be clean before preview publication.");
-  const head = (await run(execute, "git", ["rev-parse", "HEAD"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
-  const main = (await run(execute, "git", ["rev-parse", "origin/main"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
-  expect(head === facts.sourceCommit && main === facts.sourceCommit, `HEAD and origin/main must equal prepared source commit ${facts.sourceCommit}.`);
+  facts.sourceCommit = await getReleaseTarget({ repositoryRoot, execute });
   await run(execute, "gh", ["auth", "status"], { cwd: repositoryRoot });
   const repo = (await run(execute, "gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { cwd: repositoryRoot })).stdout.trim();
   expect(/^[\w.-]+\/[\w.-]+$/.test(repo), "gh repository identity is invalid.");
@@ -159,7 +162,7 @@ export async function generateReleaseNotes({ facts, repositoryRoot = process.cwd
     "- **Checksums:** `SHA256SUMS.txt`", "",
     "## Preview notice", "",
     "This is an unsigned/ad-hoc developer preview. Windows SmartScreen or Installer, and macOS Gatekeeper, may display warnings. Verify the SHA-256 checksum before installing.", "",
-    `Reviewed source commit: \`${facts.sourceCommit}\`${previousTag ? ` · Changes since \`${previousTag}\`` : " · Initial preview history"}`, "",
+    `Reviewed source commits: Windows \`${facts.windows.sourceCommit}\`; macOS \`${facts.macos.sourceCommit}\`. Release target: \`${facts.sourceCommit}\`${previousTag ? ` · Changes since \`${previousTag}\`` : " · Initial preview history"}`, "",
     "Downloaded-file trust paths, installation and launch, keyboard/focus/accessibility, terminal startup, and process cleanup remain **not checked** through human target-machine validation.", "",
   ].join("\n");
 }
@@ -181,11 +184,10 @@ export async function prepare({ facts, repositoryRoot = process.cwd(), execute =
 export async function publish({ facts, repositoryRoot = process.cwd(), execute = defaultExecute, confirmation }) {
   expect(confirmation === facts.version, `Publication requires exact version confirmation: ${facts.version}`);
   const current = await validateInputs({ version: facts.version, artifactsRoot: resolve(facts.directory, "..") });
-  for (const platform of ["windows", "macos"]) expect(current[platform].sha256 === facts[platform].sha256 && current[platform].bytes === facts[platform].bytes && current[platform].sourceCommit === facts.sourceCommit, `Prepared ${platform} input changed after preflight.`);
+  for (const platform of ["windows", "macos"]) expect(current[platform].sha256 === facts[platform].sha256 && current[platform].bytes === facts[platform].bytes && current[platform].sourceCommit === facts[platform].sourceCommit, `Prepared ${platform} input changed after preflight.`);
   await run(execute, "git", ["fetch", "origin", "main"], { cwd: repositoryRoot });
-  const head = (await run(execute, "git", ["rev-parse", "HEAD"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
-  const main = (await run(execute, "git", ["rev-parse", "origin/main"], { cwd: repositoryRoot })).stdout.trim().toLowerCase();
-  expect(head === facts.sourceCommit && main === facts.sourceCommit, "Source authority changed before publication.");
+  const releaseTarget = await getReleaseTarget({ repositoryRoot, execute });
+  expect(releaseTarget === facts.sourceCommit, "Release target changed after preflight.");
   const status = await run(execute, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot });
   expect(status.stdout.trim() === "", "Tracked working tree must be clean immediately before preview publication.");
   const release = await run(execute, "gh", ["api", `repos/${facts.repository}/releases/tags/${facts.tag}`], { cwd: repositoryRoot, allowFailure: true });
